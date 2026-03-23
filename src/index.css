@@ -1,18 +1,19 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-:root {
-  --cloistr-primary: #6366f1;
-  --cloistr-secondary: #8b5cf6;
-  --cloistr-accent: #f59e0b;
-  --cloistr-dark: #1e1e2e;
-  --cloistr-light: #f8fafc;
+@theme {
+  --color-cloistr-primary: #6366f1;
+  --color-cloistr-secondary: #8b5cf6;
+  --color-cloistr-accent: #f59e0b;
+  --color-cloistr-dark: #1e1e2e;
+  --color-cloistr-light: #f8fafc;
 }
 
 body {
-  @apply bg-cloistr-dark text-cloistr-light antialiased;
+  background-color: var(--color-cloistr-dark);
+  color: var(--color-cloistr-light);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Scrollbar styling */
@@ -22,13 +23,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-cloistr-dark;
+  background-color: var(--color-cloistr-dark);
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-cloistr-primary/30 rounded-full;
+  background-color: color-mix(in srgb, var(--color-cloistr-primary) 30%, transparent);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-cloistr-primary/50;
+  background-color: color-mix(in srgb, var(--color-cloistr-primary) 50%, transparent);
 }
