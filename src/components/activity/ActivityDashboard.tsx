@@ -1,9 +1,27 @@
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { ImportContactsCard, ConflictResolutionPanel } from '@/components/contacts';
 import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/activity';
+import { useNdk } from '@/services/nostr';
 import { getFileType } from '@/types/activity';
 import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
+import { FileUploadModal } from './FileUploadModal';
 
 export function ActivityDashboard() {
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  const handleOpenUpload = useCallback(() => {
+    setIsUploadModalOpen(true);
+  }, []);
+
+  const handleCloseUpload = useCallback(() => {
+    setIsUploadModalOpen(false);
+  }, []);
+
+  const handleUploadComplete = useCallback((url: string, filename: string) => {
+    console.log('File uploaded:', { url, filename });
+    // The recent files widget will automatically pick up the new file via NDK subscription
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Contact sync alerts */}
@@ -30,7 +48,7 @@ export function ActivityDashboard() {
             </svg>
           }
           label="Upload File"
-          onClick={() => {}}
+          onClick={handleOpenUpload}
         />
         <QuickAction
           icon={
@@ -74,6 +92,13 @@ export function ActivityDashboard() {
           <CalendarWidget />
         </div>
       </div>
+
+      {/* File upload modal */}
+      <FileUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={handleCloseUpload}
+        onUploadComplete={handleUploadComplete}
+      />
     </div>
   );
 }
@@ -123,23 +148,144 @@ function RecentFilesWidget() {
 function FileRow({ file }: { file: FileMetadata }) {
   const fileType = getFileType(file.mimeType);
   const timeAgo = formatTimeAgo(file.createdAt);
+  const isImage = fileType === 'image';
+  const thumbnailUrl = file.thumbnail || (isImage ? file.url : null);
+
+  const handleOpen = useCallback(() => {
+    window.open(file.url, '_blank', 'noopener,noreferrer');
+  }, [file.url]);
+
+  const handleShare = useCallback(async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: file.name,
+          url: file.url,
+        });
+      } catch {
+        // User cancelled or share failed
+      }
+    } else {
+      // Fallback: copy to clipboard
+      await navigator.clipboard.writeText(file.url);
+    }
+  }, [file.name, file.url]);
+
+  const handleDelete = useCallback(() => {
+    // TODO: Implement file deletion (requires auth)
+    console.log('Delete file:', file.id);
+  }, [file.id]);
 
   return (
     <div className="flex items-center justify-between rounded-lg p-3 hover:bg-cloistr-light/5">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cloistr-primary/10 text-cloistr-primary">
-          <FileIcon type={fileType} />
-        </div>
+        {thumbnailUrl ? (
+          <div className="h-10 w-10 overflow-hidden rounded-lg bg-cloistr-light/10">
+            <img
+              src={thumbnailUrl}
+              alt={file.name}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              onError={(e) => {
+                // Hide image on error, show placeholder
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center', 'text-cloistr-primary', 'bg-cloistr-primary/10');
+              }}
+            />
+          </div>
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cloistr-primary/10 text-cloistr-primary">
+            <FileIcon type={fileType} />
+          </div>
+        )}
         <div>
           <p className="text-sm font-medium text-cloistr-light">{file.name}</p>
           <p className="text-xs text-cloistr-light/40">{timeAgo}</p>
         </div>
       </div>
-      <button className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light">
+      <FileActionsMenu onOpen={handleOpen} onShare={handleShare} onDelete={handleDelete} />
+    </div>
+  );
+}
+
+function FileActionsMenu({
+  onOpen,
+  onShare,
+  onDelete,
+}: {
+  onOpen: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+      >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
         </svg>
       </button>
+
+      {isOpen && (
+        <div className="absolute right-0 z-10 mt-1 w-36 rounded-lg border border-cloistr-light/10 bg-cloistr-dark py-1 shadow-lg">
+          <button
+            onClick={() => {
+              onOpen();
+              setIsOpen(false);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-cloistr-light/80 hover:bg-cloistr-light/5"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            Open
+          </button>
+          <button
+            onClick={() => {
+              onShare();
+              setIsOpen(false);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-cloistr-light/80 hover:bg-cloistr-light/5"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+            </svg>
+            Share
+          </button>
+          <hr className="my-1 border-cloistr-light/10" />
+          <button
+            onClick={() => {
+              onDelete();
+              setIsOpen(false);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-500/10"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -199,6 +345,40 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
 
 function MentionsWidget() {
   const { items: mentions, isLoading, error, markAsRead, unreadCount } = useMentions({ limit: 5 });
+  const { publish, createEvent, isConnected } = useNdk();
+
+  const handleReply = useCallback(async (mention: Mention, content: string) => {
+    if (!publish || !createEvent || !isConnected) {
+      throw new Error('Not connected');
+    }
+
+    const event = createEvent();
+    if (!event) throw new Error('Failed to create event');
+
+    event.kind = 1;
+    event.content = content;
+
+    // Build reply tags per NIP-10
+    const tags: string[][] = [
+      // p-tag for the author we're replying to
+      ['p', mention.pubkey],
+    ];
+
+    // e-tag for the root event (if this mention was part of a thread)
+    if (mention.rootEvent) {
+      tags.push(['e', mention.rootEvent, '', 'root']);
+    } else {
+      // If no root, this mention IS the root
+      tags.push(['e', mention.id, '', 'root']);
+    }
+
+    // e-tag for the direct reply
+    tags.push(['e', mention.id, '', 'reply']);
+
+    event.tags = tags;
+
+    await publish(event);
+  }, [publish, createEvent, isConnected]);
 
   return (
     <WidgetCard
@@ -227,6 +407,7 @@ function MentionsWidget() {
               key={mention.id}
               mention={mention}
               onRead={() => markAsRead(mention.id)}
+              onReply={(content) => handleReply(mention, content)}
             />
           ))}
         </div>
@@ -235,9 +416,34 @@ function MentionsWidget() {
   );
 }
 
-function MentionRow({ mention, onRead }: { mention: Mention; onRead: () => void }) {
+function MentionRow({
+  mention,
+  onRead,
+  onReply,
+}: {
+  mention: Mention;
+  onRead: () => void;
+  onReply: (content: string) => Promise<void>;
+}) {
   const timeAgo = formatTimeAgo(mention.createdAt);
   const displayName = mention.authorProfile?.displayName || mention.authorProfile?.name || formatPubkey(mention.pubkey);
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyContent, setReplyContent] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  const handleReply = useCallback(async () => {
+    if (!replyContent.trim() || isSending) return;
+    setIsSending(true);
+    try {
+      await onReply(replyContent.trim());
+      setReplyContent('');
+      setIsReplying(false);
+    } catch {
+      // Error handling done by parent
+    } finally {
+      setIsSending(false);
+    }
+  }, [replyContent, isSending, onReply]);
 
   return (
     <div
@@ -248,20 +454,64 @@ function MentionRow({ mention, onRead }: { mention: Mention; onRead: () => void 
       }`}
       onClick={onRead}
     >
-      <div className="mb-2 flex items-center gap-2">
-        {mention.authorProfile?.picture ? (
-          <img
-            src={mention.authorProfile.picture}
-            alt=""
-            className="h-6 w-6 rounded-full"
-          />
-        ) : (
-          <div className="h-6 w-6 rounded-full bg-cloistr-primary/20" />
-        )}
-        <span className="text-sm font-medium text-cloistr-light">{displayName}</span>
-        <span className="text-xs text-cloistr-light/40">{timeAgo}</span>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {mention.authorProfile?.picture ? (
+            <img
+              src={mention.authorProfile.picture}
+              alt=""
+              className="h-6 w-6 rounded-full"
+            />
+          ) : (
+            <div className="h-6 w-6 rounded-full bg-cloistr-primary/20" />
+          )}
+          <span className="text-sm font-medium text-cloistr-light">{displayName}</span>
+          <span className="text-xs text-cloistr-light/40">{timeAgo}</span>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsReplying(!isReplying);
+          }}
+          className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+          title="Reply"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+          </svg>
+        </button>
       </div>
       <p className="line-clamp-2 text-sm text-cloistr-light/80">{mention.content}</p>
+
+      {isReplying && (
+        <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            value={replyContent}
+            onChange={(e) => setReplyContent(e.target.value)}
+            placeholder="Write a reply..."
+            className="w-full resize-none rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 px-3 py-2 text-sm text-cloistr-light placeholder:text-cloistr-light/40 focus:border-cloistr-primary/50 focus:outline-none"
+            rows={2}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setIsReplying(false);
+                setReplyContent('');
+              }}
+              className="rounded px-3 py-1 text-xs text-cloistr-light/60 hover:bg-cloistr-light/5"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleReply}
+              disabled={!replyContent.trim() || isSending}
+              className="rounded bg-cloistr-primary px-3 py-1 text-xs font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+            >
+              {isSending ? 'Sending...' : 'Reply'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

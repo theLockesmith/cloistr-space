@@ -66,6 +66,9 @@ function parseTaskEvent(event: NDKEvent): Task | null {
   };
 }
 
+/** Due date filter options */
+export type DueDateFilter = 'all' | 'today' | 'week' | 'overdue' | 'no-date';
+
 interface UseTasksOptions {
   /** Limit number of tasks */
   limit?: number;
@@ -73,6 +76,8 @@ interface UseTasksOptions {
   groupId?: string;
   /** Show completed tasks */
   showCompleted?: boolean;
+  /** Filter by due date */
+  dueDateFilter?: DueDateFilter;
   /** Auto-subscribe on mount */
   autoSubscribe?: boolean;
 }
@@ -88,7 +93,7 @@ interface UseTasksReturn extends WidgetState<Task> {
  * Returns tasks sorted by priority then due date
  */
 export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
-  const { limit = MAX_TASKS, groupId, showCompleted = true, autoSubscribe = true } = options;
+  const { limit = MAX_TASKS, groupId, showCompleted = true, dueDateFilter = 'all', autoSubscribe = true } = options;
   const { subscribe, publish, createEvent, isConnected } = useNdk();
   const { pubkey, isAuthenticated } = useAuthStore();
 
@@ -103,11 +108,36 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
   // Map by d-tag identifier for addressable event deduplication
   const tasksMapRef = useRef<Map<string, Task>>(new Map());
 
+  const filterByDueDate = useCallback((task: Task): boolean => {
+    if (dueDateFilter === 'all') return true;
+
+    const now = Math.floor(Date.now() / 1000);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayStart = Math.floor(startOfToday.getTime() / 1000);
+    const todayEnd = todayStart + 86400; // 24 hours
+    const weekEnd = todayStart + 7 * 86400; // 7 days
+
+    switch (dueDateFilter) {
+      case 'today':
+        return task.dueDate !== undefined && task.dueDate >= todayStart && task.dueDate < todayEnd;
+      case 'week':
+        return task.dueDate !== undefined && task.dueDate >= todayStart && task.dueDate < weekEnd;
+      case 'overdue':
+        return task.dueDate !== undefined && task.dueDate < now && !task.completed;
+      case 'no-date':
+        return task.dueDate === undefined;
+      default:
+        return true;
+    }
+  }, [dueDateFilter]);
+
   const sortTasks = useCallback((tasks: Task[]): Task[] => {
     const priorityOrder = { high: 0, medium: 1, low: 2 };
 
     return tasks
       .filter((t) => showCompleted || !t.completed)
+      .filter(filterByDueDate)
       .sort((a, b) => {
         // Incomplete first
         if (a.completed !== b.completed) {
@@ -124,7 +154,7 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
         return b.createdAt - a.createdAt;
       })
       .slice(0, limit);
-  }, [limit, showCompleted]);
+  }, [limit, showCompleted, filterByDueDate]);
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
