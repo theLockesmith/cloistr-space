@@ -12,6 +12,22 @@
 
 **Company Rules:** See [Coldforge CLAUDE.md](~/claude/coldforge/CLAUDE.md)
 **Cloistr Rules:** See [Cloistr CLAUDE.md](~/claude/coldforge/cloistr/CLAUDE.md)
+**Service Docs:** See [Service CLAUDE.md](~/claude/coldforge/cloistr/services/space/CLAUDE.md)
+**Roadmap:** See [Roadmap](~/claude/coldforge/cloistr/services/space/docs/roadmap.md)
+
+## Current Status
+
+**SCAFFOLDED** - Core structure ready, wiring in progress.
+
+| Component | Status |
+|-----------|--------|
+| Auth (NIP-46/NIP-07) | Done - via cloistr-collab-common |
+| NIP-0A CRDT store | Done - LWW-Element-Set implemented |
+| Three views scaffold | Done - Activity, Projects, Social |
+| TypeScript + ESLint | Passing |
+| Production build | Working |
+| NDK relay connections | Not started |
+| Service integrations | Not started |
 
 ## Vision
 
