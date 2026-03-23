@@ -5,9 +5,11 @@ import { useNdk } from '@/services/nostr';
 import { getFileType } from '@/types/activity';
 import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
 import { FileUploadModal } from './FileUploadModal';
+import { CreateEventModal } from './CreateEventModal';
 
 export function ActivityDashboard() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
 
   const handleOpenUpload = useCallback(() => {
     setIsUploadModalOpen(true);
@@ -20,6 +22,19 @@ export function ActivityDashboard() {
   const handleUploadComplete = useCallback((url: string, filename: string) => {
     console.log('File uploaded:', { url, filename });
     // The recent files widget will automatically pick up the new file via NDK subscription
+  }, []);
+
+  const handleOpenEvent = useCallback(() => {
+    setIsEventModalOpen(true);
+  }, []);
+
+  const handleCloseEvent = useCallback(() => {
+    setIsEventModalOpen(false);
+  }, []);
+
+  const handleEventCreated = useCallback(() => {
+    console.log('Event created');
+    // The calendar widget will automatically pick up the new event via NDK subscription
   }, []);
 
   return (
@@ -57,7 +72,7 @@ export function ActivityDashboard() {
             </svg>
           }
           label="New Event"
-          onClick={() => {}}
+          onClick={handleOpenEvent}
         />
         <QuickAction
           icon={
@@ -98,6 +113,13 @@ export function ActivityDashboard() {
         isOpen={isUploadModalOpen}
         onClose={handleCloseUpload}
         onUploadComplete={handleUploadComplete}
+      />
+
+      {/* Create event modal */}
+      <CreateEventModal
+        isOpen={isEventModalOpen}
+        onClose={handleCloseEvent}
+        onEventCreated={handleEventCreated}
       />
     </div>
   );
@@ -516,22 +538,120 @@ function MentionRow({
   );
 }
 
-function CalendarWidget() {
-  const { todayEvents, upcomingEvents, isLoading, error } = useCalendar({ limit: 5 });
+type CalendarViewMode = 'list' | 'day' | 'week';
 
-  const allEvents = [...todayEvents, ...upcomingEvents];
+function CalendarWidget() {
+  const { todayEvents, upcomingEvents, isLoading, error, getEventsForDate, getEventsForRange } = useCalendar({ limit: 20, daysAhead: 14 });
+  const [viewMode, setViewMode] = useState<CalendarViewMode>('list');
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
+  // Get events based on view mode
+  const getViewEvents = useCallback(() => {
+    if (viewMode === 'day') {
+      return getEventsForDate(selectedDate);
+    }
+    if (viewMode === 'week') {
+      const weekStart = new Date(selectedDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      return getEventsForRange(weekStart, weekEnd);
+    }
+    return [...todayEvents, ...upcomingEvents];
+  }, [viewMode, selectedDate, getEventsForDate, getEventsForRange, todayEvents, upcomingEvents]);
+
+  const displayEvents = getViewEvents();
+
+  // Navigation handlers
+  const navigatePrev = useCallback(() => {
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      if (viewMode === 'day') {
+        next.setDate(next.getDate() - 1);
+      } else {
+        next.setDate(next.getDate() - 7);
+      }
+      return next;
+    });
+  }, [viewMode]);
+
+  const navigateNext = useCallback(() => {
+    setSelectedDate((prev) => {
+      const next = new Date(prev);
+      if (viewMode === 'day') {
+        next.setDate(next.getDate() + 1);
+      } else {
+        next.setDate(next.getDate() + 7);
+      }
+      return next;
+    });
+  }, [viewMode]);
+
+  const navigateToday = useCallback(() => {
+    setSelectedDate(new Date());
+  }, []);
+
+  // Format header based on view mode
+  const getHeaderText = useCallback(() => {
+    if (viewMode === 'list') return 'Upcoming';
+    if (viewMode === 'day') {
+      return selectedDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    // Week view
+    const weekStart = new Date(selectedDate);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return `${weekStart.toLocaleDateString([], { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+  }, [viewMode, selectedDate]);
 
   return (
-    <WidgetCard title="Upcoming" action={{ label: 'Calendar', onClick: () => {} }}>
+    <WidgetCard
+      title={
+        <div className="flex items-center gap-2">
+          {viewMode !== 'list' && (
+            <>
+              <button
+                onClick={navigatePrev}
+                className="rounded p-0.5 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                onClick={navigateToday}
+                className="rounded px-1.5 py-0.5 text-xs text-cloistr-light/60 hover:bg-cloistr-light/10"
+              >
+                Today
+              </button>
+              <button
+                onClick={navigateNext}
+                className="rounded p-0.5 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </>
+          )}
+          <span>{getHeaderText()}</span>
+        </div>
+      }
+      action={{
+        label: viewMode === 'list' ? 'Day' : viewMode === 'day' ? 'Week' : 'List',
+        onClick: () => setViewMode((v) => (v === 'list' ? 'day' : v === 'day' ? 'week' : 'list')),
+      }}
+    >
       {isLoading ? (
         <WidgetSkeleton count={3} />
       ) : error ? (
         <WidgetError message={error} />
-      ) : allEvents.length === 0 ? (
-        <WidgetEmpty message="No upcoming events" />
+      ) : displayEvents.length === 0 ? (
+        <WidgetEmpty message={viewMode === 'list' ? 'No upcoming events' : 'No events'} />
       ) : (
         <div className="space-y-2">
-          {allEvents.map((event) => (
+          {displayEvents.slice(0, 5).map((event) => (
             <CalendarRow key={event.id} event={event} isToday={todayEvents.includes(event)} />
           ))}
         </div>

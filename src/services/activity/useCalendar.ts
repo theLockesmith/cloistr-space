@@ -85,6 +85,9 @@ function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
   };
 }
 
+/** Calendar view modes */
+export type CalendarView = 'list' | 'day' | 'week';
+
 interface UseCalendarOptions {
   /** Limit number of events */
   limit?: number;
@@ -102,6 +105,10 @@ interface UseCalendarReturn extends WidgetState<CalendarEvent> {
   refresh: () => void;
   todayEvents: CalendarEvent[];
   upcomingEvents: CalendarEvent[];
+  /** Get events for a specific date */
+  getEventsForDate: (date: Date) => CalendarEvent[];
+  /** Get events for a date range (week view) */
+  getEventsForRange: (startDate: Date, endDate: Date) => CalendarEvent[];
 }
 
 /**
@@ -263,10 +270,46 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
     );
   });
 
+  // Get events for a specific date
+  const getEventsForDate = useCallback((date: Date): CalendarEvent[] => {
+    const dayStart = new Date(date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const dayStartTs = Math.floor(dayStart.getTime() / 1000);
+    const dayEndTs = Math.floor(dayEnd.getTime() / 1000);
+
+    return state.items.filter((e) => {
+      const eventEnd = e.endTime || e.startTime + 3600;
+      // Event overlaps with this day
+      return e.startTime <= dayEndTs && eventEnd >= dayStartTs;
+    }).sort((a, b) => a.startTime - b.startTime);
+  }, [state.items]);
+
+  // Get events for a date range
+  const getEventsForRange = useCallback((startDate: Date, endDate: Date): CalendarEvent[] => {
+    const rangeStart = new Date(startDate);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = new Date(endDate);
+    rangeEnd.setHours(23, 59, 59, 999);
+
+    const rangeStartTs = Math.floor(rangeStart.getTime() / 1000);
+    const rangeEndTs = Math.floor(rangeEnd.getTime() / 1000);
+
+    return state.items.filter((e) => {
+      const eventEnd = e.endTime || e.startTime + 3600;
+      // Event overlaps with this range
+      return e.startTime <= rangeEndTs && eventEnd >= rangeStartTs;
+    }).sort((a, b) => a.startTime - b.startTime);
+  }, [state.items]);
+
   return {
     ...state,
     refresh: startSubscription,
     todayEvents,
     upcomingEvents,
+    getEventsForDate,
+    getEventsForRange,
   };
 }
