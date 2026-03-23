@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { RelayStatusCompact, RelayStatusDot } from './RelayStatus';
 
 const navItems = [
   {
@@ -81,16 +82,16 @@ export function Sidebar() {
           <div className="rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 p-3">
             <p className="mb-2 text-xs font-medium text-cloistr-light/40">Services</p>
             <div className="space-y-1">
-              <ServiceIndicator name="Relay" connected={true} />
-              <ServiceIndicator name="Drive" connected={true} />
-              <ServiceIndicator name="Blossom" connected={false} />
+              <RelayStatusCompact />
+              <ServiceIndicator name="Drive" status="pending" />
+              <ServiceIndicator name="Blossom" status="pending" />
             </div>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-1">
-            <div className="h-2 w-2 rounded-full bg-green-400" title="Relay" />
-            <div className="h-2 w-2 rounded-full bg-green-400" title="Drive" />
-            <div className="h-2 w-2 rounded-full bg-red-400" title="Blossom" />
+            <RelayStatusDot />
+            <div className="h-2 w-2 rounded-full bg-gray-400" title="Drive (pending)" />
+            <div className="h-2 w-2 rounded-full bg-gray-400" title="Blossom (pending)" />
           </div>
         )}
       </div>
@@ -98,13 +99,22 @@ export function Sidebar() {
   );
 }
 
-function ServiceIndicator({ name, connected }: { name: string; connected: boolean }) {
+function ServiceIndicator({ name, status }: { name: string; status: 'connected' | 'disconnected' | 'pending' }) {
+  const colors = {
+    connected: 'text-green-400',
+    disconnected: 'text-red-400',
+    pending: 'text-gray-400',
+  };
+  const labels = {
+    connected: 'Connected',
+    disconnected: 'Offline',
+    pending: 'Not wired',
+  };
+
   return (
     <div className="flex items-center justify-between text-xs">
       <span className="text-cloistr-light/60">{name}</span>
-      <span className={connected ? 'text-green-400' : 'text-red-400'}>
-        {connected ? 'Connected' : 'Offline'}
-      </span>
+      <span className={colors[status]}>{labels[status]}</span>
     </div>
   );
 }

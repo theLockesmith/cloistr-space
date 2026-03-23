@@ -2,9 +2,16 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useContactsSync } from '@/services/crdt';
 
 export function MainLayout() {
   const { sidebarOpen } = useWorkspaceStore();
+
+  // Initialize contacts sync - auto-syncs on auth + connection
+  useContactsSync({
+    autoSync: true,
+    subscribeToUpdates: true,
+  });
 
   return (
     <div className="flex h-screen bg-cloistr-dark">

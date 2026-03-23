@@ -1,8 +1,15 @@
 import { useState } from 'react';
+import { ImportContactsCard, ConflictResolutionPanel } from '@/components/contacts';
 
 export function ActivityDashboard() {
   return (
     <div className="space-y-6">
+      {/* Contact sync alerts */}
+      <div className="space-y-4">
+        <ImportContactsCard />
+        <ConflictResolutionPanel maxDisplay={3} />
+      </div>
+
       {/* Quick actions */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <QuickAction
