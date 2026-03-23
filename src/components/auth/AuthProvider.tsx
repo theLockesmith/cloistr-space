@@ -5,7 +5,6 @@ import {
   isNip07Supported,
   isValidBunkerUrl,
   type SignerInterface,
-  type AuthState,
   type Nip46Config,
 } from '@cloistr/collab-common/auth';
 import { useAuthStore } from '@/stores/authStore';

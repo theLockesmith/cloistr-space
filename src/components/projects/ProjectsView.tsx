@@ -115,7 +115,8 @@ function GroupsList() {
   );
 }
 
-function GroupDetail({ groupId }: { groupId: string }) {
+function GroupDetail({ groupId: _groupId }: { groupId: string }) {
+  // TODO: Fetch group data using _groupId
   const [activeTab, setActiveTab] = useState<'chat' | 'files' | 'members'>('chat');
 
   return (
