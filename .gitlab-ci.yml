@@ -1,0 +1,59 @@
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  NODE_VERSION: "22"
+
+# Test and type-check
+test:
+  stage: test
+  image: node:${NODE_VERSION}-alpine
+  before_script:
+    - corepack enable && corepack prepare pnpm@latest --activate
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm lint
+    - pnpm typecheck
+    - pnpm test:unit
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+      - .pnpm-store/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "master"
+
+# Build container image
+build:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"username\":\"${CI_REGISTRY_USER}\",\"password\":\"${CI_REGISTRY_PASSWORD}\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor
+      --context=${CI_PROJECT_DIR}
+      --dockerfile=${CI_PROJECT_DIR}/Dockerfile
+      --destination=${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
+      --destination=${CI_REGISTRY_IMAGE}:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+
+# Deploy to production (manual trigger)
+deploy:
+  stage: deploy
+  image: alpine/k8s:1.32.3
+  environment:
+    name: production
+    url: https://space.cloistr.xyz
+  script:
+    - kubectl config use-context atlantis
+    - kubectl set image deployment/cloistr-space cloistr-space=${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA} -n cloistr
+    - kubectl rollout status deployment/cloistr-space -n cloistr
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
