@@ -22,5 +22,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // React core
+          react: ['react', 'react-dom'],
+          // State management
+          zustand: ['zustand'],
+          // Nostr libraries
+          nostr: ['@nostr-dev-kit/ndk', 'nostr-tools'],
+        },
+      },
+    },
   },
 });
