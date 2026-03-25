@@ -18,8 +18,8 @@ RUN echo "//git.coldforge.xyz/api/v4/projects/44/packages/npm/:_authToken=${NPM_
 COPY . .
 RUN pnpm build
 
-# Production image
-FROM nginx:alpine
+# Production image - use unprivileged nginx for OpenShift compatibility
+FROM nginxinc/nginx-unprivileged:alpine
 
 # Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -27,6 +27,4 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080
