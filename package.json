@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cloistr/collab-common": "file:../cloistr-collab-common",
+    "@cloistr/collab-common": "^0.1.1",
     "@nostr-dev-kit/ndk": "^2.18.1",
     "@tanstack/react-query": "^5.90.20",
     "nostr-tools": "^2.22.0",
