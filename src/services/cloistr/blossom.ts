@@ -207,3 +207,73 @@ export function getBlossom(): BlossomClient {
   }
   return blossomClient;
 }
+
+/**
+ * CDN URL utilities for Blossom files
+ */
+export const cdnUrl = {
+  /**
+   * Parse a Blossom URL and extract the SHA256 hash
+   * Handles various formats: blossom://, https://files.cloistr.xyz/, etc.
+   */
+  parseHash(url: string): string | null {
+    // Handle blossom:// protocol
+    if (url.startsWith('blossom://')) {
+      return url.slice(10);
+    }
+
+    // Handle full URLs - extract hash from path
+    try {
+      const parsed = new URL(url);
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      const hash = pathParts[pathParts.length - 1];
+
+      // Validate it looks like a SHA256 hash (64 hex chars)
+      if (/^[a-f0-9]{64}$/i.test(hash)) {
+        return hash.toLowerCase();
+      }
+    } catch {
+      // Not a valid URL
+    }
+
+    // Check if it's already a raw hash
+    if (/^[a-f0-9]{64}$/i.test(url)) {
+      return url.toLowerCase();
+    }
+
+    return null;
+  },
+
+  /**
+   * Convert a hash to a CDN URL
+   */
+  toUrl(hash: string, baseUrl?: string): string {
+    const base = baseUrl ?? config.blossomApiUrl;
+    return `${base.replace(/\/$/, '')}/${hash}`;
+  },
+
+  /**
+   * Convert any Blossom URL format to a CDN URL
+   */
+  normalize(url: string, baseUrl?: string): string | null {
+    const hash = cdnUrl.parseHash(url);
+    if (!hash) return null;
+    return cdnUrl.toUrl(hash, baseUrl);
+  },
+
+  /**
+   * Check if a URL is a Blossom URL (any format)
+   */
+  isBlossom(url: string): boolean {
+    return cdnUrl.parseHash(url) !== null;
+  },
+
+  /**
+   * Get thumbnail URL with size parameters (if supported by CDN)
+   */
+  thumbnail(hash: string, width: number, height?: number, baseUrl?: string): string {
+    const base = baseUrl ?? config.blossomApiUrl;
+    const h = height ?? width;
+    return `${base.replace(/\/$/, '')}/${hash}?w=${width}&h=${h}`;
+  },
+};
