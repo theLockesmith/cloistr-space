@@ -20,5 +20,4 @@ export const defaultRelays = [
   'wss://relay.cloistr.xyz',
   'wss://relay.damus.io',
   'wss://nos.lol',
-  'wss://relay.nostr.band',
 ] as const;

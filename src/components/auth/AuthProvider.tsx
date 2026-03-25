@@ -73,7 +73,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             store.setLoading(false);
           }
         } else if (auth.method === 'nip46' && auth.bunkerUrl) {
-          const nip46Signer = await connectNip46({ bunkerUrl: auth.bunkerUrl });
+          // Add timeout for session restore to prevent infinite hanging
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Session restore timeout')), 15000)
+          );
+          const nip46Signer = await Promise.race([
+            connectNip46({ bunkerUrl: auth.bunkerUrl, timeout: 15000 }),
+            timeoutPromise,
+          ]);
           const pubkey = await nip46Signer.getPublicKey();
           setSigner(nip46Signer);
           store.login(pubkey, 'nip46', auth.bunkerUrl);
