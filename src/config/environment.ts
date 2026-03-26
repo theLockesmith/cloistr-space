@@ -15,9 +15,8 @@ export const config = {
   enableDevTools: import.meta.env.DEV,
 } as const;
 
-// Relay list for outbox model
+// Relay list - cloistr relay only for now
+// External relays can be added later via user preferences
 export const defaultRelays = [
   'wss://relay.cloistr.xyz',
-  'wss://relay.damus.io',
-  'wss://nos.lol',
 ] as const;

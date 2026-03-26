@@ -134,6 +134,9 @@ export class NdkService {
       explicitRelayUrls: relayUrls,
       autoConnectUserRelays: false, // Manual control
       enableOutboxModel: false, // Start simple, enable later
+      // Auto-authenticate with relays when challenged (NIP-42)
+      // Required for HAVEN relays that need auth for outbox writes
+      relayAuthDefaultPolicy: async () => true,
     });
 
     // Initialize relay statuses
@@ -224,7 +227,10 @@ export class NdkService {
    */
   setSigner(signer: SignerInterface | null): void {
     if (signer) {
-      this.ndk.signer = new SignerAdapter(signer);
+      const adapter = new SignerAdapter(signer);
+      this.ndk.signer = adapter;
+      // Emit signer:ready for any pending auth flows
+      this.ndk.emit('signer:ready', adapter);
     } else {
       this.ndk.signer = undefined;
     }

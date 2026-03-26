@@ -29,6 +29,8 @@ const STORAGE_KEY = 'cloistr-space-auth';
 interface PersistedAuth {
   method: 'nip07' | 'nip46';
   bunkerUrl?: string;
+  /** Client secret key (hex) for NIP-46 session persistence */
+  clientSecretKey?: string;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -73,12 +75,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             store.setLoading(false);
           }
         } else if (auth.method === 'nip46' && auth.bunkerUrl) {
+          // Use persisted client secret key for session continuity
+          if (!auth.clientSecretKey) {
+            console.warn('No client secret key found, session cannot be restored');
+            localStorage.removeItem(STORAGE_KEY);
+            store.setLoading(false);
+            return;
+          }
+
           // Add timeout for session restore to prevent infinite hanging
           const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Session restore timeout')), 15000)
           );
           const nip46Signer = await Promise.race([
-            connectNip46({ bunkerUrl: auth.bunkerUrl, timeout: 15000 }),
+            connectNip46({
+              bunkerUrl: auth.bunkerUrl,
+              timeout: 15000,
+              clientSecretKey: auth.clientSecretKey,
+            }),
             timeoutPromise,
           ]);
           const pubkey = await nip46Signer.getPublicKey();
@@ -145,8 +159,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigner(nip46Signer);
       store.login(pubkey, 'nip46', bunkerUrl);
 
-      // Persist session
-      const auth: PersistedAuth = { method: 'nip46', bunkerUrl };
+      // Persist session with client secret key for session continuity
+      const clientSecretKey = nip46Signer.getClientSecretKey?.();
+      const auth: PersistedAuth = { method: 'nip46', bunkerUrl, clientSecretKey };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to remote signer';
