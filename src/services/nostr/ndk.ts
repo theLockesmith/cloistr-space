@@ -124,11 +124,15 @@ export class NdkService {
   private ndk: NDK;
   private statusListeners: Set<(statuses: Map<string, RelayStatus>) => void> = new Set();
   private relayStatuses: Map<string, RelayStatus> = new Map();
+  private configuredRelays: Set<string>;
   private isConnecting = false;
   private isConnected = false;
 
   constructor(config: NdkServiceConfig = {}) {
     const relayUrls = config.explicitRelayUrls ?? [...defaultRelays];
+
+    // Track which relays we explicitly configured (ignore dynamic discoveries)
+    this.configuredRelays = new Set(relayUrls);
 
     this.ndk = new NDK({
       explicitRelayUrls: relayUrls,
@@ -172,6 +176,10 @@ export class NdkService {
     status: RelayStatus['status'],
     error?: string
   ): void {
+    // Only track relays we explicitly configured (ignore dynamic discoveries)
+    if (!this.configuredRelays.has(url)) {
+      return;
+    }
     this.relayStatuses.set(url, { url, status, error });
     this.notifyStatusListeners();
   }
