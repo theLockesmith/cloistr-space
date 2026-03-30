@@ -24,7 +24,9 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const STORAGE_KEY = 'cloistr-space-auth';
+// IMPORTANT: Use a different key than authStore's 'cloistr-space-auth'
+// to avoid zustand persist overwriting our session data
+const STORAGE_KEY = 'cloistr-space-session';
 
 interface PersistedAuth {
   method: 'nip07' | 'nip46';
