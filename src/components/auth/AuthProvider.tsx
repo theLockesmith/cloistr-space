@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const restoreSession = async () => {
       const stored = localStorage.getItem(STORAGE_KEY);
+      console.log('[Auth] Checking for saved session:', stored ? 'found' : 'none');
       if (!stored) {
         store.setLoading(false);
         return;
@@ -62,6 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const auth: PersistedAuth = JSON.parse(stored);
+        console.log('[Auth] Session data:', {
+          method: auth.method,
+          hasBunkerUrl: !!auth.bunkerUrl,
+          hasClientSecretKey: !!auth.clientSecretKey,
+          clientSecretKeyPrefix: auth.clientSecretKey?.slice(0, 16) + '...',
+        });
 
         if (auth.method === 'nip07') {
           if (isNip07Supported()) {
@@ -87,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Session restore timeout')), 15000)
           );
+          console.log('[Auth] Attempting session restore with NIP-46...');
           const nip46Signer = await Promise.race([
             connectNip46({
               bunkerUrl: auth.bunkerUrl,
@@ -95,7 +103,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }),
             timeoutPromise,
           ]);
+          console.log('[Auth] NIP-46 connected, getting public key...');
           const pubkey = await nip46Signer.getPublicKey();
+          console.log('[Auth] Session restored successfully, pubkey:', pubkey.slice(0, 16) + '...');
           setSigner(nip46Signer);
           store.login(pubkey, 'nip46', auth.bunkerUrl);
         }
@@ -161,6 +171,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Persist session with client secret key for session continuity
       const clientSecretKey = nip46Signer.getClientSecretKey?.();
+      console.log('[Auth] Saving session:', {
+        method: 'nip46',
+        hasBunkerUrl: !!bunkerUrl,
+        hasClientSecretKey: !!clientSecretKey,
+        clientSecretKeyPrefix: clientSecretKey?.slice(0, 16) + '...',
+      });
       const auth: PersistedAuth = { method: 'nip46', bunkerUrl, clientSecretKey };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
     } catch (err) {
