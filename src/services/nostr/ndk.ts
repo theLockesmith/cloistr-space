@@ -132,7 +132,8 @@ export class NdkService {
     const relayUrls = config.explicitRelayUrls ?? [...defaultRelays];
 
     // Track which relays we explicitly configured (ignore dynamic discoveries)
-    this.configuredRelays = new Set(relayUrls);
+    // Normalize URLs to handle trailing slash inconsistencies
+    this.configuredRelays = new Set(relayUrls.map((url) => NdkService.normalizeUrl(url)));
 
     this.ndk = new NDK({
       explicitRelayUrls: relayUrls,
@@ -171,16 +172,24 @@ export class NdkService {
     });
   }
 
+  private static normalizeUrl(url: string): string {
+    // Remove trailing slash for consistent comparison
+    return url.replace(/\/+$/, '');
+  }
+
   private updateRelayStatus(
     url: string,
     status: RelayStatus['status'],
     error?: string
   ): void {
+    // Normalize URL for consistent comparison (NDK may add trailing slash)
+    const normalizedUrl = NdkService.normalizeUrl(url);
+
     // Only track relays we explicitly configured (ignore dynamic discoveries)
-    if (!this.configuredRelays.has(url)) {
+    if (!this.configuredRelays.has(normalizedUrl)) {
       return;
     }
-    this.relayStatuses.set(url, { url, status, error });
+    this.relayStatuses.set(normalizedUrl, { url: normalizedUrl, status, error });
     this.notifyStatusListeners();
   }
 
