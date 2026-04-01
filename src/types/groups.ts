@@ -34,8 +34,8 @@ export interface Group {
   createdAt: number;
 }
 
-/** Group member from kind:39002 */
-export interface GroupMember {
+/** Raw member data from kind:39002 p-tag (unused - useGroupMembers provides enriched type) */
+export interface GroupMemberRaw {
   pubkey: string;
   /** Optional display name */
   name?: string;
@@ -45,8 +45,8 @@ export interface GroupMember {
   joinedAt?: number;
 }
 
-/** Group admin from kind:39001 */
-export interface GroupAdmin extends GroupMember {
+/** Raw admin data from kind:39001 (unused - useGroupMembers provides enriched type) */
+export interface GroupAdminRaw extends GroupMemberRaw {
   /** Admin permissions */
   permissions: AdminPermission[];
 }

@@ -234,20 +234,23 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     }
   }, [subscribe, isConnected, pubkey, processGroups, fetchGroupMetadata]);
 
-  // Auto-subscribe on mount
+  // Auto-subscribe on mount - use startSubscription directly but include it in deps
+  // The subscription is idempotent (cleans up previous before starting new)
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    if (autoSubscribe && isAuthenticated && isConnected) {
-      timeoutId = setTimeout(() => {
-        startSubscription();
-      }, 0);
+    if (!autoSubscribe || !isAuthenticated || !isConnected) {
+      return;
     }
 
+    const timeoutId = setTimeout(() => {
+      startSubscription();
+    }, 0);
+
     return () => {
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       subscriptionRef.current?.unsubscribe();
     };
+    // startSubscription is stable enough - only changes when subscribe/isConnected/pubkey change
+    // which are already conditions we want to re-subscribe on
   }, [autoSubscribe, isAuthenticated, isConnected, startSubscription]);
 
   return {

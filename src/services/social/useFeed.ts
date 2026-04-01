@@ -283,11 +283,18 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     };
   }, [subscribe, isConnected, mode, following, hashtag, pageSize, refreshKey]);
 
+  // Stable note IDs for engagement tracking - memoize based on first 50 note IDs
+  const engagementNoteIdsKey = notes.slice(0, 50).map((n) => n.id).join(',');
+  const engagementNoteIds = useMemo(() => {
+    return notes.slice(0, 50).map((n) => n.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagementNoteIdsKey]);
+
   // Engagement subscription (reactions, reposts, zaps for visible notes)
   useEffect(() => {
-    if (!subscribe || !isConnected || notes.length === 0) return;
+    if (!subscribe || !isConnected || engagementNoteIds.length === 0) return;
 
-    const noteIds = notes.slice(0, 50).map((n) => n.id);
+    const noteIds = engagementNoteIds;
 
     const engagementFilters: NDKFilter[] = [
       { kinds: [REACTION_KIND], '#e': noteIds },
@@ -360,7 +367,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     return () => {
       sub.stop();
     };
-  }, [subscribe, isConnected, notes, pubkey]);
+  }, [subscribe, isConnected, engagementNoteIds, pubkey]);
 
   return {
     notes,

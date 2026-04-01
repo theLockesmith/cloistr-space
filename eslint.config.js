@@ -33,6 +33,7 @@ export default [
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
       'no-unused-vars': 'off',
+      'no-undef': 'off', // TypeScript handles this better
     },
   },
   {
