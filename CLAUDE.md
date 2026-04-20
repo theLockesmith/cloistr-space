@@ -7,7 +7,7 @@
 - **Company:** Coldforge
 - **Type:** Web Application (React + TypeScript)
 - **URL:** `space.cloistr.xyz`
-- **Registry:** `registry.coldforge.xyz/coldforge/cloistr-space`
+- **Registry:** `registry.aegis-hq.xyz/coldforge/cloistr-space`
 - **Repo:** `git@git.coldforge.xyz:coldforge/cloistr-space.git`
 
 **Company Rules:** See [Coldforge CLAUDE.md](~/claude/coldforge/CLAUDE.md)
