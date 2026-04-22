@@ -1,7 +1,7 @@
 stages:
   - test
   - build
-  - deploy
+# NOTE: No deploy stage - ArgoCD handles image updates automatically
 
 variables:
   NODE_VERSION: "22"
@@ -49,20 +49,5 @@ build:
       --build-arg=NPM_TOKEN=${CI_JOB_TOKEN}
       --destination=${IMAGE_NAME}:${CI_COMMIT_SHA}
       --destination=${IMAGE_NAME}:latest
-  rules:
-    - if: $CI_COMMIT_BRANCH == "master"
-
-# Deploy to production (manual trigger)
-deploy:
-  stage: deploy
-  image: alpine/k8s:1.32.3
-  environment:
-    name: production
-    url: https://space.cloistr.xyz
-  script:
-    - kubectl config use-context atlantis
-    - kubectl set image deployment/cloistr-space cloistr-space=${IMAGE_NAME}:${CI_COMMIT_SHA} -n cloistr
-    - kubectl rollout status deployment/cloistr-space -n cloistr
-  when: manual
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
