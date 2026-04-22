@@ -225,7 +225,7 @@ packages:
     hasBin: true
 
   '@cloistr/collab-common@0.2.0':
-    resolution: {integrity: sha1-CkMz6EnRRLNIq4XBfYJ0fum7VLA=, tarball: https://git.coldforge.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.2.0.tgz}
+    resolution: {integrity: sha1-CkMz6EnRRLNIq4XBfYJ0fum7VLA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.2.0.tgz}
     peerDependencies:
       react: ^18.0.0
       react-dom: ^18.0.0

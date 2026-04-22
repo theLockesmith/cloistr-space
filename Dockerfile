@@ -10,7 +10,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Install dependencies with registry auth
 COPY package.json pnpm-lock.yaml* .npmrc ./
-RUN echo "//git.coldforge.xyz/api/v4/projects/44/packages/npm/:_authToken=${NPM_TOKEN}" >> .npmrc && \
+RUN echo "//git.aegis-hq.xyz/api/v4/projects/44/packages/npm/:_authToken=${NPM_TOKEN}" >> .npmrc && \
     pnpm install --frozen-lockfile && \
     rm -f .npmrc
 
