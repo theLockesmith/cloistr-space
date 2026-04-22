@@ -3,7 +3,7 @@
  * Form for creating a new NIP-29 group
  */
 
-import { useState, useCallback, type FormEvent } from 'react';
+import { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { useGroupActions } from '@/services/groups/useGroupActions';
 
 interface CreateGroupModalProps {
@@ -22,6 +22,48 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
   const [picture, setPicture] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [isOpenGroup, setIsOpenGroup] = useState(false);
+
+  const modalRef = useRef<HTMLDivElement>(null);
+  const firstFocusRef = useRef<HTMLInputElement>(null);
+
+  // Focus trap and keyboard handling
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus first input when modal opens
+    const timer = setTimeout(() => {
+      firstFocusRef.current?.focus();
+    }, 0);
+
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, isSubmitting, onClose]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -76,11 +118,15 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
       onClick={handleClose}
     >
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-group-title"
         className="w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-cloistr-light">Create Group</h2>
+          <h2 id="create-group-title" className="text-lg font-semibold text-cloistr-light">Create Group</h2>
           <button
             onClick={handleClose}
             disabled={isSubmitting}
@@ -98,6 +144,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
               Group Name
             </label>
             <input
+              ref={firstFocusRef}
               id="group-name"
               type="text"
               value={name}
@@ -142,7 +189,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
                 <p className="text-sm font-medium text-cloistr-light/80">Public group</p>
                 <p className="text-xs text-cloistr-light/40">Anyone can see this group</p>
               </div>
-              <ToggleSwitch checked={isPublic} onChange={setIsPublic} />
+              <ToggleSwitch checked={isPublic} onChange={setIsPublic} label="Public group" />
             </div>
 
             <div className="flex items-center justify-between">
@@ -150,7 +197,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
                 <p className="text-sm font-medium text-cloistr-light/80">Open membership</p>
                 <p className="text-xs text-cloistr-light/40">Anyone can join without approval</p>
               </div>
-              <ToggleSwitch checked={isOpenGroup} onChange={setIsOpenGroup} />
+              <ToggleSwitch checked={isOpenGroup} onChange={setIsOpenGroup} label="Open membership" />
             </div>
           </div>
 
@@ -183,16 +230,34 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
   );
 }
 
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+interface ToggleSwitchProps {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}
+
+function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
+  const handleKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      onChange(!checked);
+    }
+  };
+
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors ${
+      onKeyDown={handleKeyDown}
+      className={`relative h-6 w-11 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-cloistr-primary focus:ring-offset-2 focus:ring-offset-cloistr-dark ${
         checked ? 'bg-cloistr-primary' : 'bg-cloistr-light/20'
       }`}
     >
       <span
+        aria-hidden="true"
         className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
           checked ? 'left-5' : 'left-0.5'
         }`}

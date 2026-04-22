@@ -3,7 +3,7 @@
  * Uploads to Blossom and publishes kind:1063 metadata
  */
 
-import { useState, useRef, useCallback, type DragEvent, type ChangeEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, type DragEvent, type ChangeEvent } from 'react';
 import { useFileUpload } from '@/services/cloistr';
 
 interface FileUploadModalProps {
@@ -24,6 +24,47 @@ export function FileUploadModal({
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap and keyboard handling
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus drop zone when modal opens
+    const timer = setTimeout(() => {
+      dropZoneRef.current?.focus();
+    }, 0);
+
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape' && !isUploading) {
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, isUploading, onClose]);
 
   const handleClose = useCallback(() => {
     if (isUploading) return; // Don't allow closing during upload
@@ -89,12 +130,16 @@ export function FileUploadModal({
       onClick={handleClose}
     >
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upload-file-title"
         className="w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-cloistr-light">Upload File</h2>
+          <h2 id="upload-file-title" className="text-lg font-semibold text-cloistr-light">Upload File</h2>
           <button
             onClick={handleClose}
             disabled={isUploading}
@@ -113,11 +158,21 @@ export function FileUploadModal({
 
         {/* Drop zone */}
         <div
+          ref={dropZoneRef}
+          tabIndex={0}
+          role="button"
+          aria-label={selectedFile ? `Selected file: ${selectedFile.name}. Click to change.` : 'Click or drag to select a file'}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           onClick={triggerFileSelect}
-          className={`mb-4 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              triggerFileSelect();
+            }
+          }}
+          className={`mb-4 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-cloistr-primary ${
             isDragging
               ? 'border-cloistr-primary bg-cloistr-primary/10'
               : selectedFile
@@ -130,6 +185,8 @@ export function FileUploadModal({
             type="file"
             onChange={handleFileSelect}
             className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
           />
 
           {selectedFile ? (
