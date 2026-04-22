@@ -12,7 +12,12 @@ variables:
 test:
   stage: test
   image: node:${NODE_VERSION}-alpine
+  timeout: 15 minutes
+  variables:
+    CI: "true"
   before_script:
+    # jsdom requires native dependencies on Alpine
+    - apk add --no-cache python3 make g++
     - corepack enable && corepack prepare pnpm@latest --activate
     - echo "//git.aegis-hq.xyz/api/v4/projects/44/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
     - pnpm install --frozen-lockfile

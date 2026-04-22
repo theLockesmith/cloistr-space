@@ -21,6 +21,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // CI-friendly settings
+    pool: 'forks', // More reliable than threads on Alpine/CI
+    testTimeout: 30000, // 30s per test
+    hookTimeout: 30000,
+    reporters: process.env.CI ? ['verbose'] : ['default'],
     // Exclude browser tests that require Playwright and E2E tests
     exclude: [
       'node_modules/**',
