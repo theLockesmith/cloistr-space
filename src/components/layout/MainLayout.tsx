@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { ToastContainer } from '@/components/common/Toast';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useContactsSync } from '@/services/crdt';
 
@@ -37,6 +38,9 @@ export function MainLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }

@@ -5,6 +5,7 @@
 
 import { useState, useRef, useCallback, useEffect, type DragEvent, type ChangeEvent } from 'react';
 import { useFileUpload } from '@/services/cloistr';
+import { useToast } from '@/components/common/Toast';
 
 interface FileUploadModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export function FileUploadModal({
   groupId,
 }: FileUploadModalProps) {
   const { upload, isUploading, progress, error, reset } = useFileUpload();
+  const toast = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,16 +109,21 @@ export function FileUploadModal({
   const handleUpload = useCallback(async () => {
     if (!selectedFile) return;
 
-    const descriptor = await upload(selectedFile, {
-      groupId,
-      publishMetadata: true,
-    });
+    try {
+      const descriptor = await upload(selectedFile, {
+        groupId,
+        publishMetadata: true,
+      });
 
-    if (descriptor) {
-      onUploadComplete?.(descriptor.url, selectedFile.name);
-      handleClose();
+      if (descriptor) {
+        toast.success('File uploaded', `"${selectedFile.name}" uploaded successfully`);
+        onUploadComplete?.(descriptor.url, selectedFile.name);
+        handleClose();
+      }
+    } catch (err) {
+      toast.error('Upload failed', err instanceof Error ? err.message : 'Failed to upload file');
     }
-  }, [selectedFile, upload, groupId, onUploadComplete, handleClose]);
+  }, [selectedFile, upload, groupId, onUploadComplete, handleClose, toast]);
 
   const triggerFileSelect = useCallback(() => {
     fileInputRef.current?.click();

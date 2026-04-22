@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { useGroupActions } from '@/services/groups/useGroupActions';
+import { useToast } from '@/components/common/Toast';
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface CreateGroupModalProps {
 
 export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGroupModalProps) {
   const { createGroup, canAct } = useGroupActions();
+  const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,14 +103,17 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
         isOpen: isOpenGroup,
       });
 
+      toast.success('Group created', `"${name.trim()}" is ready`);
       onGroupCreated?.(groupId);
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create group');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create group';
+      setError(errorMessage);
+      toast.error('Failed to create group', errorMessage);
     } finally {
       setIsSubmitting(false);
     }
-  }, [canAct, name, description, picture, isPublic, isOpenGroup, createGroup, onGroupCreated, handleClose]);
+  }, [canAct, name, description, picture, isPublic, isOpenGroup, createGroup, onGroupCreated, handleClose, toast]);
 
   if (!isOpen) return null;
 
