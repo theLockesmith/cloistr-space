@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import {
   connectNip07,
   connectNip46,
@@ -36,7 +36,17 @@ interface PersistedAuth {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const store = useAuthStore();
+  // Select specific state values to avoid re-render on every state change
+  const pubkey = useAuthStore((state) => state.pubkey);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+
+  // Get stable action references (these don't change between renders)
+  const storeActions = useRef(useAuthStore.getState());
+  const storeLogin = storeActions.current.login;
+  const storeLogout = storeActions.current.logout;
+  const setLoading = storeActions.current.setLoading;
+
   const [signer, setSigner] = useState<SignerInterface | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nip07Available, setNip07Available] = useState(false);
@@ -59,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const stored = localStorage.getItem(STORAGE_KEY);
       console.log('[Auth] Checking for saved session:', stored ? 'found' : 'none');
       if (!stored) {
-        store.setLoading(false);
+        setLoading(false);
         return;
       }
 
@@ -77,18 +87,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const nip07Signer = await connectNip07();
             const pubkey = await nip07Signer.getPublicKey();
             setSigner(nip07Signer);
-            store.login(pubkey, 'nip07');
+            storeLogin(pubkey, 'nip07');
           } else {
             // Extension no longer available
             localStorage.removeItem(STORAGE_KEY);
-            store.setLoading(false);
+            setLoading(false);
           }
         } else if (auth.method === 'nip46' && auth.bunkerUrl) {
           // Use persisted client secret key for session continuity
           if (!auth.clientSecretKey) {
             console.warn('No client secret key found, session cannot be restored');
             localStorage.removeItem(STORAGE_KEY);
-            store.setLoading(false);
+            setLoading(false);
             return;
           }
 
@@ -109,21 +119,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const pubkey = await nip46Signer.getPublicKey();
           console.log('[Auth] Session restored successfully, pubkey:', pubkey.slice(0, 16) + '...');
           setSigner(nip46Signer);
-          store.login(pubkey, 'nip46', auth.bunkerUrl);
+          storeLogin(pubkey, 'nip46', auth.bunkerUrl);
         }
       } catch (err) {
         console.error('Failed to restore session:', err);
         localStorage.removeItem(STORAGE_KEY);
-        store.setLoading(false);
+        setLoading(false);
       }
     };
 
     restoreSession();
-  }, [store]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only on mount - actions are stable refs
 
   const loginNip07 = useCallback(async () => {
     setError(null);
-    store.setLoading(true);
+    setLoading(true);
 
     try {
       if (!isNip07Supported()) {
@@ -134,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const pubkey = await nip07Signer.getPublicKey();
 
       setSigner(nip07Signer);
-      store.login(pubkey, 'nip07');
+      storeLogin(pubkey, 'nip07');
 
       // Persist session
       const auth: PersistedAuth = { method: 'nip07' };
@@ -142,14 +153,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect';
       setError(message);
-      store.setLoading(false);
+      setLoading(false);
       throw err;
     }
-  }, [store]);
+  }, [storeLogin, setLoading]);
 
   const loginNip46 = useCallback(async (bunkerUrl: string) => {
     setError(null);
-    store.setLoading(true);
+    setLoading(true);
 
     try {
       if (!bunkerUrl.trim()) {
@@ -169,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const pubkey = await nip46Signer.getPublicKey();
 
       setSigner(nip46Signer);
-      store.login(pubkey, 'nip46', bunkerUrl);
+      storeLogin(pubkey, 'nip46', bunkerUrl);
 
       // Persist session with client secret key for session continuity
       const clientSecretKey = nip46Signer.getClientSecretKey?.();
@@ -184,12 +195,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to remote signer';
       setError(message);
-      store.setLoading(false);
+      setLoading(false);
       throw err;
     }
-  }, [store]);
+  }, [storeLogin, setLoading]);
 
-  const logout = useCallback(async () => {
+  const logoutHandler = useCallback(async () => {
     try {
       if (signer?.disconnect) {
         await signer.disconnect();
@@ -200,9 +211,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigner(null);
       setError(null);
       localStorage.removeItem(STORAGE_KEY);
-      store.logout();
+      storeLogout();
     }
-  }, [signer, store]);
+  }, [signer, storeLogout]);
 
   const signEvent = useCallback(async (event: object) => {
     if (!signer) {
@@ -216,15 +227,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        pubkey: store.pubkey,
-        isAuthenticated: store.isAuthenticated,
-        isLoading: store.isLoading,
+        pubkey,
+        isAuthenticated,
+        isLoading,
         error,
         signer,
         nip07Available,
         loginNip07,
         loginNip46,
-        logout,
+        logout: logoutHandler,
         signEvent,
       }}
     >
