@@ -137,23 +137,26 @@ export function LoginPage() {
             </div>
 
             {displayError && (
-              <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">
+              <div role="alert" className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">
                 {displayError}
               </div>
             )}
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-cloistr-light/80">
+              <label htmlFor="bunker-url" className="block text-sm font-medium text-cloistr-light/80">
                 Bunker URL
               </label>
               <input
+                id="bunker-url"
                 type="text"
                 value={bunkerUrl}
                 onChange={(e) => setBunkerUrl(e.target.value)}
                 placeholder="bunker://pubkey?relay=wss://relay.example.com"
+                aria-describedby="bunker-url-hint"
+                aria-invalid={!!displayError}
                 className="w-full rounded-lg border border-cloistr-light/20 bg-transparent px-4 py-3 text-sm text-cloistr-light placeholder-cloistr-light/40 focus:border-cloistr-primary focus:outline-none"
               />
-              <p className="text-xs text-cloistr-light/40">
+              <p id="bunker-url-hint" className="text-xs text-cloistr-light/60">
                 Get this from your remote signer (nsecbunker, Amber, etc.)
               </p>
             </div>

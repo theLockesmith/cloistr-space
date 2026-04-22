@@ -17,19 +17,12 @@ spec:
     spec:
       containers:
         - name: cloistr-space
-          image: registry.coldforge.xyz/coldforge/cloistr-space:latest
+          image: registry.aegis-hq.xyz/coldforge/cloistr-space:latest
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               name: http
-          env:
-            - name: VITE_RELAY_URL
-              value: "wss://relay.cloistr.xyz"
-            - name: VITE_SIGNER_URL
-              value: "https://signer.cloistr.xyz"
-            - name: VITE_DRIVE_API
-              value: "https://drive-api.cloistr.xyz"
-            - name: VITE_BLOSSOM_API
-              value: "https://files.cloistr.xyz"
+          # Note: VITE_ variables are build-time only
+          # Service URLs are baked into the build via environment.ts defaults
           resources:
             requests:
               memory: "64Mi"
@@ -40,15 +33,18 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /health
-              port: 80
+              port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
       imagePullSecrets:
         - name: registry-credentials
 ---
@@ -62,7 +58,7 @@ spec:
     app: cloistr-space
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: 8080
       name: http
 ---
 apiVersion: networking.k8s.io/v1

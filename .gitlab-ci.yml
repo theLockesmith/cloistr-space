@@ -5,6 +5,8 @@ stages:
 
 variables:
   NODE_VERSION: "22"
+  # Use aegis registry for built images
+  IMAGE_NAME: registry.aegis-hq.xyz/coldforge/cloistr-space
 
 # Test and type-check
 test:
@@ -12,7 +14,7 @@ test:
   image: node:${NODE_VERSION}-alpine
   before_script:
     - corepack enable && corepack prepare pnpm@latest --activate
-    - echo "//git.coldforge.xyz/api/v4/projects/44/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
+    - echo "//git.aegis-hq.xyz/api/v4/projects/44/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
     - pnpm install --frozen-lockfile
   script:
     - pnpm lint
@@ -35,13 +37,13 @@ build:
     entrypoint: [""]
   script:
     - mkdir -p /kaniko/.docker
-    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"username\":\"${CI_REGISTRY_USER}\",\"password\":\"${CI_REGISTRY_PASSWORD}\"}}}" > /kaniko/.docker/config.json
+    - echo "{\"auths\":{\"registry.aegis-hq.xyz\":{\"username\":\"${AEGIS_REGISTRY_USER}\",\"password\":\"${AEGIS_REGISTRY_PASSWORD}\"}}}" > /kaniko/.docker/config.json
     - /kaniko/executor
       --context=${CI_PROJECT_DIR}
       --dockerfile=${CI_PROJECT_DIR}/Dockerfile
       --build-arg=NPM_TOKEN=${CI_JOB_TOKEN}
-      --destination=${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}
-      --destination=${CI_REGISTRY_IMAGE}:latest
+      --destination=${IMAGE_NAME}:${CI_COMMIT_SHA}
+      --destination=${IMAGE_NAME}:latest
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
 
@@ -54,7 +56,7 @@ deploy:
     url: https://space.cloistr.xyz
   script:
     - kubectl config use-context atlantis
-    - kubectl set image deployment/cloistr-space cloistr-space=${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA} -n cloistr
+    - kubectl set image deployment/cloistr-space cloistr-space=${IMAGE_NAME}:${CI_COMMIT_SHA} -n cloistr
     - kubectl rollout status deployment/cloistr-space -n cloistr
   when: manual
   rules:

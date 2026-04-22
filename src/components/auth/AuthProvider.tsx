@@ -208,6 +208,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!signer) {
       throw new Error('Not authenticated');
     }
+    // Type boundary between app and collab-common signer interface
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return signer.signEvent(event as any);
   }, [signer]);
 

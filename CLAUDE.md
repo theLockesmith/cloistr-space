@@ -17,17 +17,19 @@
 
 ## Current Status
 
-**SCAFFOLDED** - Core structure ready, wiring in progress.
+**FEATURE COMPLETE** - Initial scope implemented, stabilization in progress.
 
 | Component | Status |
 |-----------|--------|
 | Auth (NIP-46/NIP-07) | Done - via cloistr-collab-common |
 | NIP-0A CRDT store | Done - LWW-Element-Set implemented |
 | Three views scaffold | Done - Activity, Projects, Social |
-| TypeScript + ESLint | Passing |
+| TypeScript + ESLint | Passing (3 warnings) |
 | Production build | Working |
-| NDK relay connections | Not started |
-| Service integrations | Not started |
+| NDK relay connections | Done - NdkService with SignerAdapter |
+| Service integrations | Done - Blossom, Drive, Docs clients |
+| Unit tests | Done - 68 passing |
+| E2E tests | In progress - auth mocking needs work |
 
 ## Vision
 

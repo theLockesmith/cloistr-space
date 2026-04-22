@@ -2,53 +2,55 @@ import { Page, Locator, expect } from '@playwright/test';
 
 export class LoginPage {
   readonly page: Page;
-  readonly privateKeyInput: Locator;
-  readonly loginButton: Locator;
+  readonly bunkerUrlInput: Locator;
+  readonly connectButton: Locator;
   readonly errorMessage: Locator;
   readonly title: Locator;
+  readonly subtitle: Locator;
   readonly extensionLoginButton: Locator;
-  readonly generateKeyButton: Locator;
+  readonly remoteSignerButton: Locator;
+  readonly loadingSpinner: Locator;
 
   constructor(page: Page) {
     this.page = page;
 
-    // Login form elements (using flexible selectors since we don't have the exact structure)
-    this.privateKeyInput = page.getByLabel(/private.*key|nsec|secret/i).or(
-      page.locator('input[type="password"]').or(
-        page.locator('input[placeholder*="nsec"]').or(
-          page.locator('textarea[placeholder*="private"]')
-        )
-      )
-    );
+    // Main title: "Cloistr Space"
+    this.title = page.getByRole('heading', { name: /cloistr space/i });
 
-    this.loginButton = page.getByRole('button', { name: /login|sign in|connect/i });
-    this.extensionLoginButton = page.getByRole('button', { name: /extension|nos2x|alby/i });
-    this.generateKeyButton = page.getByRole('button', { name: /generate|create.*key/i });
+    // Subtitle: "Connect your identity"
+    this.subtitle = page.getByRole('heading', { name: /connect your identity/i });
 
-    this.errorMessage = page.getByRole('alert').or(
-      page.locator('[role="alert"]').or(
-        page.locator('.error, .alert-error').first()
-      )
-    );
+    // NIP-07 browser extension button
+    this.extensionLoginButton = page.getByRole('button', { name: /browser extension/i });
 
-    this.title = page.getByRole('heading', { name: /login|sign in|welcome/i });
+    // NIP-46 remote signer button
+    this.remoteSignerButton = page.getByRole('button', { name: /remote signer/i });
+
+    // Bunker URL input (on NIP-46 view)
+    this.bunkerUrlInput = page.getByPlaceholder(/bunker:\/\//i);
+
+    // Connect button (on NIP-46 view)
+    this.connectButton = page.getByRole('button', { name: /^connect$/i });
+
+    // Error message
+    this.errorMessage = page.locator('.bg-red-500\\/10');
+
+    // Loading spinner
+    this.loadingSpinner = page.locator('.animate-spin');
   }
 
   async goto() {
     await this.page.goto('/login');
   }
 
-  async loginWithPrivateKey(privateKey: string) {
-    await this.privateKeyInput.fill(privateKey);
-    await this.loginButton.click();
-  }
-
-  async attemptExtensionLogin() {
+  async loginWithExtension() {
     await this.extensionLoginButton.click();
   }
 
-  async generateNewKey() {
-    await this.generateKeyButton.click();
+  async loginWithBunkerUrl(bunkerUrl: string) {
+    await this.remoteSignerButton.click();
+    await this.bunkerUrlInput.fill(bunkerUrl);
+    await this.connectButton.click();
   }
 
   async expectErrorMessage(message?: string) {
@@ -61,5 +63,15 @@ export class LoginPage {
   async expectLoginPage() {
     await expect(this.title).toBeVisible();
     await expect(this.page).toHaveURL(/.*\/login/);
+  }
+
+  async expectLoading() {
+    await expect(this.loadingSpinner).toBeVisible();
+  }
+
+  async expectSelectView() {
+    await expect(this.subtitle).toBeVisible();
+    await expect(this.extensionLoginButton).toBeVisible();
+    await expect(this.remoteSignerButton).toBeVisible();
   }
 }

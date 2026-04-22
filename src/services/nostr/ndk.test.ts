@@ -142,13 +142,17 @@ describe('SignerAdapter', () => {
   });
 
   it('encrypts messages', async () => {
-    const result = await adapter.encrypt({ pubkey: 'recipient' } as any, 'hello');
+    // Use unknown to bypass NDKUser type requirements in tests
+    const mockUser = { pubkey: 'recipient' } as unknown as Parameters<typeof adapter.encrypt>[0];
+    const result = await adapter.encrypt(mockUser, 'hello');
     expect(result).toBe('encrypted');
     expect(mockSigner.encrypt).toHaveBeenCalledWith('recipient', 'hello');
   });
 
   it('decrypts messages', async () => {
-    const result = await adapter.decrypt({ pubkey: 'sender' } as any, 'ciphertext');
+    // Use unknown to bypass NDKUser type requirements in tests
+    const mockUser = { pubkey: 'sender' } as unknown as Parameters<typeof adapter.decrypt>[0];
+    const result = await adapter.decrypt(mockUser, 'ciphertext');
     expect(result).toBe('decrypted');
     expect(mockSigner.decrypt).toHaveBeenCalledWith('sender', 'ciphertext');
   });

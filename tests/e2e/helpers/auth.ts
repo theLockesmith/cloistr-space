@@ -3,55 +3,58 @@ import { Page, expect } from '@playwright/test';
 export class AuthHelper {
   readonly page: Page;
 
+  // Mock pubkey - 64 hex chars
+  static readonly MOCK_PUBKEY = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
   constructor(page: Page) {
     this.page = page;
   }
 
   /**
    * Mock authentication state to bypass login for testing
-   * This sets up localStorage/sessionStorage to simulate authenticated state
+   * This sets up localStorage and window.nostr to simulate authenticated state
    */
   async mockAuthenticatedState() {
-    await this.page.addInitScript(() => {
-      // Mock localStorage auth data
-      const mockAuth = {
-        isAuthenticated: true,
-        publicKey: 'npub1mockkey123456789abcdefghijklmnopqrstuvwxyz1234567890',
-        privateKey: 'nsec1mockprivatekey123456789abcdefghijklmnopqrstuvwxyz1234567',
-        profile: {
-          name: 'Test User',
-          displayName: 'Test User',
-          picture: 'https://example.com/avatar.jpg',
+    const mockPubkey = AuthHelper.MOCK_PUBKEY;
+
+    await this.page.addInitScript((pubkey) => {
+      // Mock window.nostr FIRST (before app loads)
+      // This is what connectNip07() from collab-common checks
+      (window as any).nostr = {
+        getPublicKey: async () => pubkey,
+        signEvent: async (event: any) => ({
+          ...event,
+          id: 'mock-event-id-' + Date.now(),
+          pubkey: pubkey,
+          sig: '0'.repeat(128), // 64 bytes hex
+        }),
+        nip04: {
+          encrypt: async (_pubkey: string, _plaintext: string) => 'mock-encrypted',
+          decrypt: async (_pubkey: string, _ciphertext: string) => 'mock-decrypted',
         },
-        relays: [
-          'wss://relay.damus.io',
-          'wss://nos.lol'
-        ],
-        connectedAt: Date.now()
+        getRelays: async () => ({}),
       };
 
-      // Set auth state in localStorage
-      localStorage.setItem('cloistr-auth', JSON.stringify(mockAuth));
-
-      // Mock session storage if used
-      sessionStorage.setItem('authenticated', 'true');
-
-      // Mock browser extension availability
-      window.nostr = {
-        async getPublicKey() {
-          return mockAuth.publicKey;
-        },
-        async signEvent(event: any) {
-          return { ...event, sig: 'mock-signature' };
-        },
-        async encrypt(pubkey: string, plaintext: string) {
-          return 'mock-encrypted-content';
-        },
-        async decrypt(pubkey: string, ciphertext: string) {
-          return 'mock-decrypted-content';
-        }
+      // Mock AuthProvider session state (cloistr-space-session)
+      const sessionState = {
+        method: 'nip07',
       };
-    });
+      localStorage.setItem('cloistr-space-session', JSON.stringify(sessionState));
+
+      // Pre-populate Zustand auth store state (cloistr-space-auth)
+      const zustandState = {
+        state: {
+          isAuthenticated: true,
+          pubkey: pubkey,
+          isLoading: false,
+          signerType: 'nip07',
+          bunkerUrl: null,
+          profile: null,
+        },
+        version: 0
+      };
+      localStorage.setItem('cloistr-space-auth', JSON.stringify(zustandState));
+    }, mockPubkey);
   }
 
   /**
@@ -59,8 +62,9 @@ export class AuthHelper {
    */
   async mockUnauthenticatedState() {
     await this.page.addInitScript(() => {
-      localStorage.removeItem('cloistr-auth');
-      sessionStorage.removeItem('authenticated');
+      localStorage.removeItem('cloistr-space-auth');
+      localStorage.removeItem('cloistr-space-session');
+      localStorage.removeItem('cloistr-space-client-id');
       delete window.nostr;
     });
   }
