@@ -121,7 +121,7 @@ function GroupRow({
           )}
         </div>
         {group.description && (
-          <p className="truncate text-xs text-cloistr-light/40">{group.description}</p>
+          <p className="truncate text-xs text-cloistr-light/60">{group.description}</p>
         )}
       </div>
       <div className="flex items-center gap-1">

@@ -262,7 +262,7 @@ function NoteCard({
         )}
         <div>
           <p className="font-medium text-cloistr-light">{displayName}</p>
-          <p className="text-xs text-cloistr-light/40">{timeStr}</p>
+          <p className="text-xs text-cloistr-light/60">{timeStr}</p>
         </div>
       </div>
 

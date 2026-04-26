@@ -192,7 +192,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-cloistr-light/80">Public group</p>
-                <p className="text-xs text-cloistr-light/40">Anyone can see this group</p>
+                <p className="text-xs text-cloistr-light/60">Anyone can see this group</p>
               </div>
               <ToggleSwitch checked={isPublic} onChange={setIsPublic} label="Public group" />
             </div>
@@ -200,7 +200,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-cloistr-light/80">Open membership</p>
-                <p className="text-xs text-cloistr-light/40">Anyone can join without approval</p>
+                <p className="text-xs text-cloistr-light/60">Anyone can join without approval</p>
               </div>
               <ToggleSwitch checked={isOpenGroup} onChange={setIsOpenGroup} label="Open membership" />
             </div>

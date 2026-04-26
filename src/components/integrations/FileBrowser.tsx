@@ -252,7 +252,7 @@ export function FileBrowser({
                 />
               </svg>
               <p className="text-cloistr-light/60">This folder is empty</p>
-              <p className="mt-1 text-sm text-cloistr-light/40">
+              <p className="mt-1 text-sm text-cloistr-light/60">
                 Upload files or create folders to get started
               </p>
             </div>
@@ -270,7 +270,7 @@ export function FileBrowser({
                   <span className="text-xl">📁</span>
                   <div className="flex-1 min-w-0">
                     <p className="truncate font-medium text-cloistr-light">{folder.name}</p>
-                    <p className="text-xs text-cloistr-light/40">{formatDate(folder.createdAt)}</p>
+                    <p className="text-xs text-cloistr-light/60">{formatDate(folder.createdAt)}</p>
                   </div>
                   <button
                     onClick={(e) => {
@@ -303,7 +303,7 @@ export function FileBrowser({
                   <span className="text-xl">{getFileIcon(file.mimeType)}</span>
                   <div className="flex-1 min-w-0">
                     <p className="truncate font-medium text-cloistr-light">{file.name}</p>
-                    <p className="text-xs text-cloistr-light/40">
+                    <p className="text-xs text-cloistr-light/60">
                       {formatSize(file.size)} • {formatDate(file.createdAt)}
                     </p>
                   </div>

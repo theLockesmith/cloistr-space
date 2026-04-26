@@ -20,7 +20,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-cloistr-light/10 px-4 py-3">
         <h3 className="font-medium text-cloistr-light">
-          Members {!isLoading && <span className="text-cloistr-light/40">({members.length})</span>}
+          Members {!isLoading && <span className="text-cloistr-light/60">({members.length})</span>}
         </h3>
         <button
           onClick={refresh}
@@ -62,7 +62,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
         ) : members.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-cloistr-light/40">No members found</p>
+              <p className="text-sm text-cloistr-light/60">No members found</p>
             </div>
           </div>
         ) : (
@@ -70,7 +70,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
             {/* Admins section */}
             {admins.length > 0 && (
               <div>
-                <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-cloistr-light/40">
+                <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-cloistr-light/60">
                   Admins ({admins.length})
                 </h4>
                 <div className="space-y-2">
@@ -84,7 +84,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
             {/* Members section */}
             {regularMembers.length > 0 && (
               <div>
-                <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-cloistr-light/40">
+                <h4 className="mb-3 text-xs font-medium uppercase tracking-wider text-cloistr-light/60">
                   Members ({regularMembers.length})
                 </h4>
                 <div className="space-y-2">
@@ -128,7 +128,7 @@ function MemberRow({ member }: { member: GroupMember }) {
           )}
         </div>
         {member.profile?.nip05 && (
-          <p className="truncate text-xs text-cloistr-light/40">{member.profile.nip05}</p>
+          <p className="truncate text-xs text-cloistr-light/60">{member.profile.nip05}</p>
         )}
         {member.isAdmin && member.permissions.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -141,7 +141,7 @@ function MemberRow({ member }: { member: GroupMember }) {
               </span>
             ))}
             {member.permissions.length > 3 && (
-              <span className="text-xs text-cloistr-light/40">
+              <span className="text-xs text-cloistr-light/60">
                 +{member.permissions.length - 3} more
               </span>
             )}

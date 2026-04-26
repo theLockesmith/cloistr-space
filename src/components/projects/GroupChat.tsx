@@ -80,7 +80,7 @@ export function GroupChat({ groupId, groupName }: GroupChatProps) {
         ) : messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-cloistr-light/40">No messages yet</p>
+              <p className="text-sm text-cloistr-light/60">No messages yet</p>
               <p className="text-xs text-cloistr-light/30">Be the first to say something!</p>
             </div>
           </div>
@@ -148,7 +148,7 @@ function MessageBubble({ message }: { message: GroupMessage }) {
       <div className="flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium text-cloistr-light">{displayName}</span>
-          <span className="text-xs text-cloistr-light/40">{timeStr}</span>
+          <span className="text-xs text-cloistr-light/60">{timeStr}</span>
         </div>
         <p className="mt-1 text-sm text-cloistr-light/80 whitespace-pre-wrap">{message.content}</p>
       </div>

@@ -93,7 +93,7 @@ export function GroupFiles({ groupId }: GroupFilesProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                 </svg>
               </div>
-              <p className="text-sm text-cloistr-light/40">No files shared yet</p>
+              <p className="text-sm text-cloistr-light/60">No files shared yet</p>
               <p className="text-xs text-cloistr-light/30">Upload a file to share with the group</p>
             </div>
           </div>
@@ -139,7 +139,7 @@ function FileRow({ file }: { file: GroupFile }) {
         <p className="truncate text-sm font-medium text-cloistr-light">
           {file.name || 'Untitled'}
         </p>
-        <div className="flex items-center gap-2 text-xs text-cloistr-light/40">
+        <div className="flex items-center gap-2 text-xs text-cloistr-light/60">
           {sizeStr && <span>{sizeStr}</span>}
           {sizeStr && <span>-</span>}
           <span>{dateStr}</span>

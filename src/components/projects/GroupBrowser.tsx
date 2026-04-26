@@ -161,7 +161,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
         ) : filteredGroups.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-cloistr-light/40">
+              <p className="text-sm text-cloistr-light/60">
                 {searchQuery ? 'No groups match your search' : 'No public groups found'}
               </p>
             </div>

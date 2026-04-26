@@ -214,7 +214,7 @@ export function FileUploadModal({
                 </svg>
               </div>
               <p className="text-sm font-medium text-cloistr-light">{selectedFile.name}</p>
-              <p className="text-xs text-cloistr-light/40">
+              <p className="text-xs text-cloistr-light/60">
                 {formatFileSize(selectedFile.size)}
               </p>
             </div>
@@ -238,7 +238,7 @@ export function FileUploadModal({
               <p className="text-sm text-cloistr-light/80">
                 Drop a file here or click to browse
               </p>
-              <p className="text-xs text-cloistr-light/40">Any file type supported</p>
+              <p className="text-xs text-cloistr-light/60">Any file type supported</p>
             </div>
           )}
         </div>

@@ -222,7 +222,7 @@ function FileRow({ file }: { file: FileMetadata }) {
         )}
         <div>
           <p className="text-sm font-medium text-cloistr-light">{file.name}</p>
-          <p className="text-xs text-cloistr-light/40">{timeAgo}</p>
+          <p className="text-xs text-cloistr-light/60">{timeAgo}</p>
         </div>
       </div>
       <FileActionsMenu onOpen={handleOpen} onShare={handleShare} onDelete={handleDelete} />
@@ -488,7 +488,7 @@ function MentionRow({
             <div className="h-6 w-6 rounded-full bg-cloistr-primary/20" />
           )}
           <span className="text-sm font-medium text-cloistr-light">{displayName}</span>
-          <span className="text-xs text-cloistr-light/40">{timeAgo}</span>
+          <span className="text-xs text-cloistr-light/60">{timeAgo}</span>
         </div>
         <button
           onClick={(e) => {
@@ -672,7 +672,7 @@ function CalendarRow({ event, isToday }: { event: CalendarEvent; isToday: boolea
       />
       <div className="flex-1">
         <p className="text-sm text-cloistr-light">{event.title}</p>
-        <p className="text-xs text-cloistr-light/40">{timeDisplay}</p>
+        <p className="text-xs text-cloistr-light/60">{timeDisplay}</p>
       </div>
     </div>
   );
@@ -736,7 +736,7 @@ function WidgetError({ message }: { message: string }) {
 function WidgetEmpty({ message }: { message: string }) {
   return (
     <div className="py-8 text-center">
-      <p className="text-sm text-cloistr-light/40">{message}</p>
+      <p className="text-sm text-cloistr-light/60">{message}</p>
     </div>
   );
 }
