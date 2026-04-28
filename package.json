@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@cloistr/collab-common": "^0.2.0",
+    "@cloistr/ui": "0.2.1",
     "@nostr-dev-kit/ndk": "^2.18.1",
     "@tanstack/react-query": "^5.90.20",
     "nostr-tools": "^2.22.0",

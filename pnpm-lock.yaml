@@ -11,6 +11,9 @@ importers:
       '@cloistr/collab-common':
         specifier: ^0.2.0
         version: 0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      '@cloistr/ui':
+        specifier: 0.2.1
+        version: 0.2.1(@cloistr/collab-common@0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@nostr-dev-kit/ndk':
         specifier: ^2.18.1
         version: 2.18.1(nostr-tools@2.23.3(typescript@5.9.3))
@@ -229,6 +232,13 @@ packages:
     peerDependencies:
       react: ^18.0.0
       react-dom: ^18.0.0
+
+  '@cloistr/ui@0.2.1':
+    resolution: {integrity: sha1-YFKvniLvBWW4QHvas81mU+4p2Ec=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.2.1.tgz}
+    peerDependencies:
+      '@cloistr/collab-common': ^0.1.0 || ^0.2.0
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   '@codesandbox/nodebox@0.1.8':
     resolution: {integrity: sha512-2VRS6JDSk+M+pg56GA6CryyUSGPjBEe8Pnae0QL3jJF1mJZJVMDKr93gJRtBbLkfZN6LD/DwMtf+2L0bpWrjqg==}
@@ -2295,6 +2305,12 @@ snapshots:
       yjs: 13.6.30
     transitivePeerDependencies:
       - typescript
+
+  '@cloistr/ui@0.2.1(@cloistr/collab-common@0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      '@cloistr/collab-common': 0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   '@codesandbox/nodebox@0.1.8':
     dependencies:

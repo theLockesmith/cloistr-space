@@ -1,5 +1,7 @@
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useLocation } from 'react-router-dom';
+import { ServiceMenu, defaultServices } from '@cloistr/ui/components';
+import '@cloistr/ui/styles';
 
 const viewTitles: Record<string, string> = {
   '/activity': 'Activity',
@@ -16,7 +18,10 @@ export function Header() {
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-cloistr-light/10 px-6">
-      <h1 className="text-xl font-semibold text-cloistr-light">{title}</h1>
+      <div className="flex items-center gap-4">
+        <ServiceMenu services={defaultServices} activeServiceId="space" />
+        <h1 className="text-xl font-semibold text-cloistr-light">{title}</h1>
+      </div>
 
       <div className="flex items-center gap-4">
         {/* Notifications */}
