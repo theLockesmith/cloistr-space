@@ -7,6 +7,11 @@ import {
   type SignerInterface,
   type Nip46Config,
 } from '@cloistr/collab-common/auth';
+import {
+  getSharedSession,
+  saveSharedSession,
+  clearSharedSession,
+} from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 
 interface AuthContextValue {
@@ -63,11 +68,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timeout);
   }, []);
 
-  // Restore session on mount
+  // Restore session on mount - check local storage first, then shared session
   useEffect(() => {
     const restoreSession = async () => {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      let stored = localStorage.getItem(STORAGE_KEY);
       console.log('[Auth] Checking for saved session:', stored ? 'found' : 'none');
+
+      // If no local session, check shared session cookie (SSO)
+      if (!stored) {
+        const sharedSession = getSharedSession();
+        if (sharedSession) {
+          console.log('[Auth] Found shared session from another Cloistr app:', sharedSession.method);
+          // Convert shared session format to our local format
+          stored = JSON.stringify({
+            method: sharedSession.method,
+            bunkerUrl: sharedSession.bunkerUrl,
+          } as PersistedAuth);
+        }
+      }
+
       if (!stored) {
         setLoading(false);
         return;
@@ -88,6 +107,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const pubkey = await nip07Signer.getPublicKey();
             setSigner(nip07Signer);
             storeLogin(pubkey, 'nip07');
+            // Sync to shared session
+            saveSharedSession({ method: 'nip07', pubkey });
           } else {
             // Extension no longer available
             localStorage.removeItem(STORAGE_KEY);
@@ -120,6 +141,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('[Auth] Session restored successfully, pubkey:', pubkey.slice(0, 16) + '...');
           setSigner(nip46Signer);
           storeLogin(pubkey, 'nip46', auth.bunkerUrl);
+          // Sync to shared session
+          saveSharedSession({ method: 'nip46', pubkey, bunkerUrl: auth.bunkerUrl });
         }
       } catch (err) {
         console.error('Failed to restore session:', err);
@@ -147,9 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigner(nip07Signer);
       storeLogin(pubkey, 'nip07');
 
-      // Persist session
+      // Persist session locally
       const auth: PersistedAuth = { method: 'nip07' };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+
+      // Sync to shared session for SSO across Cloistr apps
+      saveSharedSession({ method: 'nip07', pubkey });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect';
       setError(message);
@@ -182,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigner(nip46Signer);
       storeLogin(pubkey, 'nip46', bunkerUrl);
 
-      // Persist session with client secret key for session continuity
+      // Persist session locally with client secret key for session continuity
       const clientSecretKey = nip46Signer.getClientSecretKey?.();
       console.log('[Auth] Saving session:', {
         method: 'nip46',
@@ -192,6 +218,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const auth: PersistedAuth = { method: 'nip46', bunkerUrl, clientSecretKey };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
+
+      // Sync to shared session for SSO across Cloistr apps
+      saveSharedSession({ method: 'nip46', pubkey, bunkerUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to remote signer';
       setError(message);
@@ -211,6 +240,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSigner(null);
       setError(null);
       localStorage.removeItem(STORAGE_KEY);
+      // Clear shared session for SSO logout
+      clearSharedSession();
       storeLogout();
     }
   }, [signer, storeLogout]);
