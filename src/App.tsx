@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { ToastProvider } from '@cloistr/ui/components';
 import { AuthProvider } from './components/auth/AuthProvider';
 import { SessionManager } from './components/auth/SessionManager';
 import { NdkProvider } from './services/nostr';
@@ -12,13 +13,14 @@ import { AuthGuard } from './components/auth/AuthGuard';
 
 export default function App() {
   return (
-    <ErrorBoundary
-      fallbackRender={({ error, resetError }) => (
-        <FullPageErrorFallback error={error} resetError={resetError} />
-      )}
-      context="App"
-    >
-      <AuthProvider>
+    <ToastProvider>
+      <ErrorBoundary
+        fallbackRender={({ error, resetError }) => (
+          <FullPageErrorFallback error={error} resetError={resetError} />
+        )}
+        context="App"
+      >
+        <AuthProvider>
         <NdkProvider>
           <SessionManager />
           <Routes>
@@ -74,7 +76,8 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </NdkProvider>
-      </AuthProvider>
-    </ErrorBoundary>
+        </AuthProvider>
+      </ErrorBoundary>
+    </ToastProvider>
   );
 }
