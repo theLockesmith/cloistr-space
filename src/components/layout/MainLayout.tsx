@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { Header } from './Header';
-import { Footer } from '@cloistr/ui/components';
+import { SubHeader } from './SubHeader';
+import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { ToastContainer } from '@/components/common/Toast';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useContactsSync } from '@/services/crdt';
@@ -34,7 +34,8 @@ export function MainLayout() {
           sidebarOpen ? 'ml-64' : 'ml-16'
         }`}
       >
-        <Header />
+        <UnifiedHeader activeServiceId="space" />
+        <SubHeader />
         <main id="main-content" className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
