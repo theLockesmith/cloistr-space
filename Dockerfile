@@ -6,7 +6,7 @@ WORKDIR /app
 ARG NPM_TOKEN
 
 # Enable pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
 # Install dependencies with registry auth
 COPY package.json pnpm-lock.yaml* .npmrc ./
