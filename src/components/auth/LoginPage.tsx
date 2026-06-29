@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { Header } from '@cloistr/ui/components';
 import { useAuth } from './AuthProvider';
 
 type LoginView = 'select' | 'nip46';
@@ -53,8 +54,10 @@ export function LoginPage() {
   const displayError = localError || error;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-cloistr-dark p-4">
-      <div className="w-full max-w-md space-y-8">
+    <div className="flex min-h-screen flex-col bg-cloistr-dark">
+      <Header activeServiceId="space" />
+      <div className="flex flex-1 flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-8">
         {/* Logo and title */}
         <div className="text-center">
           <h1 className="text-4xl font-bold text-cloistr-primary">Cloistr Space</h1>
@@ -199,6 +202,7 @@ export function LoginPage() {
         <p className="text-center text-sm text-cloistr-light/40">
           Your keys, your data, your space.
         </p>
+        </div>
       </div>
     </div>
   );
