@@ -1,6 +1,6 @@
 {
   "name": "cloistr-space",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Nostr-native productivity workspace - Activity, Projects, Social",
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cloistr/auth": "^0.1.0",
     "@cloistr/collab-common": "^0.2.0",
     "@cloistr/ui": "^0.5.3",
     "@nostr-dev-kit/ndk": "^2.18.1",

@@ -6,7 +6,7 @@ import {
   isValidBunkerUrl,
   type SignerInterface,
   type Nip46Config,
-} from '@cloistr/collab-common/auth';
+} from '@cloistr/auth';
 import {
   getSharedSession,
   saveSharedSession,

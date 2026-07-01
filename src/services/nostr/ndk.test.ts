@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NdkService, SignerAdapter } from './ndk';
-import type { SignerInterface } from '@cloistr/collab-common/auth';
+import type { SignerInterface } from '@cloistr/auth';
 
 // Mock NDK to avoid actual network connections in tests
 vi.mock('@nostr-dev-kit/ndk', () => {

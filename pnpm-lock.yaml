@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@cloistr/auth':
+        specifier: ^0.1.0
+        version: 0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/collab-common':
         specifier: ^0.2.0
         version: 0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
@@ -226,6 +229,12 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@cloistr/auth@0.1.0':
+    resolution: {integrity: sha1-zDoBrTVJgpYLPkWBrHAhqrEm0V8=, tarball: https://git.aegis-hq.xyz/api/v4/projects/175/packages/npm/@cloistr/auth/-/@cloistr/auth-0.1.0.tgz}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   '@cloistr/collab-common@0.2.0':
     resolution: {integrity: sha1-CkMz6EnRRLNIq4XBfYJ0fum7VLA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.2.0.tgz}
@@ -2290,6 +2299,14 @@ snapshots:
   '@bramus/specificity@2.4.2':
     dependencies:
       css-tree: 3.2.1
+
+  '@cloistr/auth@0.1.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
+    dependencies:
+      nostr-tools: 2.23.3(typescript@5.9.3)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+    transitivePeerDependencies:
+      - typescript
 
   '@cloistr/collab-common@0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
     dependencies:

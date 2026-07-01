@@ -13,7 +13,7 @@ import NDK, {
   type NostrEvent,
 } from '@nostr-dev-kit/ndk';
 import type { UnsignedEvent } from 'nostr-tools';
-import type { SignerInterface } from '@cloistr/collab-common/auth';
+import type { SignerInterface } from '@cloistr/auth';
 import { defaultRelays } from '@/config/environment';
 
 /**
