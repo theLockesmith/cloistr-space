@@ -1,11 +1,13 @@
 @import "tailwindcss";
 
 @theme {
-  --color-cloistr-primary: #6366f1;
-  --color-cloistr-secondary: #8b5cf6;
-  --color-cloistr-accent: #f59e0b;
-  --color-cloistr-dark: #1e1e2e;
-  --color-cloistr-light: #f8fafc;
+  /* Map Tailwind v4 utilities to @cloistr/ui CSS custom properties.
+     Source of truth is @cloistr/ui/dist/styles/variables.css; never hardcode hex here. */
+  --color-cloistr-primary: var(--cloistr-primary);
+  --color-cloistr-secondary: var(--cloistr-primary-light);
+  --color-cloistr-accent: var(--cloistr-warning);
+  --color-cloistr-dark: var(--cloistr-bg);
+  --color-cloistr-light: var(--cloistr-text);
 }
 
 body {
