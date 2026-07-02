@@ -5,9 +5,14 @@ import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { ToastContainer } from '@/components/common/Toast';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useContactsSync } from '@/services/crdt';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 export function MainLayout() {
   const { sidebarOpen } = useWorkspaceStore();
+  // space authenticates through its own local AuthProvider (zustand authStore),
+  // not SharedAuthProvider. Pass that session to the shared Header so its Sign Out
+  // clears the local store + shared session — otherwise logout is a no-op here.
+  const { isAuthenticated, pubkey, logout } = useAuth();
 
   // Initialize contacts sync - auto-syncs on auth + connection
   useContactsSync({
@@ -34,7 +39,14 @@ export function MainLayout() {
           sidebarOpen ? 'ml-64' : 'ml-16'
         }`}
       >
-        <UnifiedHeader activeServiceId="space" />
+        <UnifiedHeader
+          activeServiceId="space"
+          auth={{
+            authenticated: isAuthenticated,
+            pubkey: pubkey ?? undefined,
+            onLogout: logout,
+          }}
+        />
         <SubHeader />
         <main id="main-content" className="flex-1 overflow-auto p-6">
           <Outlet />
