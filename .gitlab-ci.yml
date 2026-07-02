@@ -62,7 +62,7 @@ build:
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
 
-# Smoke-test gate: load built image in real Chromium, fail on console errors / blank page
+# Smoke-test gate (with crypto.randomUUID polyfill): load built image in real Chromium, fail on console errors / blank page
 # NOTE: space uses IMAGE_NAME (registry.aegis-hq.xyz/coldforge/cloistr-space) + full CI_COMMIT_SHA
 smoke-test:
   extends: .smoke-test
