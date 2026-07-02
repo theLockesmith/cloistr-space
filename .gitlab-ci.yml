@@ -5,12 +5,18 @@ default:
 stages:
   - test
   - build
+  - smoke
 # NOTE: No deploy stage - ArgoCD handles image updates automatically
 
 variables:
   NODE_VERSION: "22"
   # Use aegis registry for built images
   IMAGE_NAME: registry.aegis-hq.xyz/coldforge/cloistr-space
+
+include:
+  - project: 'coldforge/ci-templates'
+    ref: main
+    file: '/templates/frontend-smoke.yml'
 
 # Test and type-check
 test:
@@ -55,3 +61,11 @@ build:
       --destination=${IMAGE_NAME}:latest
   rules:
     - if: $CI_COMMIT_BRANCH == "master"
+
+# Smoke-test: load built image in real Chromium, fail on console errors / blank page
+# NOTE: space uses IMAGE_NAME (registry.aegis-hq.xyz/coldforge/cloistr-space) + full CI_COMMIT_SHA
+smoke-test:
+  extends: .smoke-test
+  needs: ["build"]
+  variables:
+    SMOKE_IMAGE: "${IMAGE_NAME}:${CI_COMMIT_SHA}"
