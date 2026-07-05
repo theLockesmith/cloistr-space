@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { ToastProvider, SharedAuthProvider } from '@cloistr/ui/components';
+import { ThemeProvider, ToastProvider, SharedAuthProvider } from '@cloistr/ui/components';
 import '@cloistr/ui/styles';
 import { AuthProvider } from './components/auth/AuthProvider';
 import { SessionManager } from './components/auth/SessionManager';
@@ -14,8 +14,9 @@ import { AuthGuard } from './components/auth/AuthGuard';
 
 export default function App() {
   return (
-    <ToastProvider>
-      <SharedAuthProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <SharedAuthProvider>
         <ErrorBoundary
           fallbackRender={({ error, resetError }) => (
             <FullPageErrorFallback error={error} resetError={resetError} />
@@ -80,7 +81,8 @@ export default function App() {
         </NdkProvider>
         </AuthProvider>
         </ErrorBoundary>
-      </SharedAuthProvider>
-    </ToastProvider>
+        </SharedAuthProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }
