@@ -90,8 +90,8 @@ export function Sidebar() {
         ) : (
           <div className="flex flex-col items-center gap-1">
             <RelayStatusDot />
-            <div className="h-2 w-2 rounded-full bg-gray-400" title="Drive (pending)" />
-            <div className="h-2 w-2 rounded-full bg-gray-400" title="Blossom (pending)" />
+            <div className="h-2 w-2 rounded-full bg-cloistr-text-dim" title="Drive (pending)" />
+            <div className="h-2 w-2 rounded-full bg-cloistr-text-dim" title="Blossom (pending)" />
           </div>
         )}
       </div>
@@ -101,9 +101,9 @@ export function Sidebar() {
 
 function ServiceIndicator({ name, status }: { name: string; status: 'connected' | 'disconnected' | 'pending' }) {
   const colors = {
-    connected: 'text-green-400',
-    disconnected: 'text-red-400',
-    pending: 'text-gray-400',
+    connected: 'text-cloistr-success',
+    disconnected: 'text-cloistr-error',
+    pending: 'text-cloistr-text-dim',
   };
   const labels = {
     connected: 'Connected',

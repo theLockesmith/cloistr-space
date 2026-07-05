@@ -54,8 +54,8 @@ export function GroupFiles({ groupId }: GroupFilesProps) {
       </div>
 
       {uploadError && (
-        <div className="border-b border-red-500/20 bg-red-500/5 px-4 py-2">
-          <p className="text-sm text-red-400">{uploadError}</p>
+        <div className="border-b border-cloistr-error/20 bg-cloistr-error/5 px-4 py-2">
+          <p className="text-sm text-cloistr-error">{uploadError}</p>
         </div>
       )}
 
@@ -76,7 +76,7 @@ export function GroupFiles({ groupId }: GroupFilesProps) {
         ) : error ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-red-400">{error}</p>
+              <p className="text-sm text-cloistr-error">{error}</p>
               <button
                 onClick={refresh}
                 className="mt-2 text-xs text-cloistr-primary underline hover:no-underline"

@@ -214,7 +214,7 @@ export function FileBrowser({
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-cloistr-light/10">
             <div
-              className={`h-full transition-all ${quota.percent > 90 ? 'bg-red-500' : 'bg-cloistr-primary'}`}
+              className={`h-full transition-all ${quota.percent > 90 ? 'bg-cloistr-error' : 'bg-cloistr-primary'}`}
               style={{ width: `${Math.min(quota.percent, 100)}%` }}
             />
           </div>
@@ -223,8 +223,8 @@ export function FileBrowser({
 
       {/* Error message */}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="mb-4 rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 px-4 py-3">
+          <p className="text-sm text-cloistr-error">{error}</p>
         </div>
       )}
 
@@ -277,7 +277,7 @@ export function FileBrowser({
                       e.stopPropagation();
                       handleDeleteFolder(folder);
                     }}
-                    className="rounded p-1 text-cloistr-light/40 opacity-0 hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                    className="rounded p-1 text-cloistr-light/40 opacity-0 hover:bg-cloistr-error/10 hover:text-cloistr-error group-hover:opacity-100"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -349,7 +349,7 @@ export function FileBrowser({
                         e.stopPropagation();
                         handleDeleteFile(file);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-red-500/10 hover:text-red-400"
+                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
                       title="Delete"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

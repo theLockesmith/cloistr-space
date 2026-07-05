@@ -84,10 +84,10 @@ function DefaultErrorFallback({
   resetError: () => void;
 }) {
   return (
-    <div className="flex min-h-[200px] flex-col items-center justify-center rounded-lg border border-red-500/30 bg-red-500/5 p-6 text-center">
-      <div className="mb-4 rounded-full bg-red-500/20 p-3">
+    <div className="flex min-h-[200px] flex-col items-center justify-center rounded-lg border border-cloistr-error/30 bg-cloistr-error/5 p-6 text-center">
+      <div className="mb-4 rounded-full bg-cloistr-error/20 p-3">
         <svg
-          className="h-6 w-6 text-red-500"
+          className="h-6 w-6 text-cloistr-error"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -108,7 +108,7 @@ function DefaultErrorFallback({
       </p>
       <button
         onClick={resetError}
-        className="rounded-md bg-red-500/20 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/30"
+        className="rounded-md bg-cloistr-error/20 px-4 py-2 text-sm font-medium text-cloistr-error hover:bg-cloistr-error/30"
       >
         Try again
       </button>
@@ -129,10 +129,10 @@ export function CompactErrorFallback({
   title?: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
+    <div className="flex items-center justify-between rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 px-4 py-3">
       <div className="flex items-center gap-3">
         <svg
-          className="h-5 w-5 text-red-400"
+          className="h-5 w-5 text-cloistr-error"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -151,7 +151,7 @@ export function CompactErrorFallback({
       </div>
       <button
         onClick={resetError}
-        className="rounded px-2 py-1 text-xs text-red-400 hover:bg-red-500/10"
+        className="rounded px-2 py-1 text-xs text-cloistr-error hover:bg-cloistr-error/10"
       >
         Retry
       </button>
@@ -172,9 +172,9 @@ export function FullPageErrorFallback({
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-cloistr-dark p-6">
       <div className="max-w-md text-center">
-        <div className="mb-6 inline-flex rounded-full bg-red-500/20 p-4">
+        <div className="mb-6 inline-flex rounded-full bg-cloistr-error/20 p-4">
           <svg
-            className="h-12 w-12 text-red-500"
+            className="h-12 w-12 text-cloistr-error"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -198,7 +198,7 @@ export function FullPageErrorFallback({
           <summary className="cursor-pointer text-sm font-medium text-cloistr-light/80">
             Error details
           </summary>
-          <pre className="mt-2 overflow-auto text-xs text-red-400">
+          <pre className="mt-2 overflow-auto text-xs text-cloistr-error">
             {error.stack || error.message}
           </pre>
         </details>

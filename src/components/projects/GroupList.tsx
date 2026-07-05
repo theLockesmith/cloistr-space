@@ -33,11 +33,11 @@ export function GroupList({ onSelectGroup, selectedGroupId }: GroupListProps) {
   if (error) {
     return (
       <div className="p-4">
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 p-4 text-center">
+          <p className="text-sm text-cloistr-error">{error}</p>
           <button
             onClick={refresh}
-            className="mt-2 text-xs text-red-400 underline hover:no-underline"
+            className="mt-2 text-xs text-cloistr-error underline hover:no-underline"
           >
             Try again
           </button>

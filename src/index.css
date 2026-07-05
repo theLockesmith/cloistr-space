@@ -4,10 +4,28 @@
   /* Map Tailwind v4 utilities to @cloistr/ui CSS custom properties.
      Source of truth is @cloistr/ui/dist/styles/variables.css; never hardcode hex here. */
   --color-cloistr-primary: var(--cloistr-primary);
+  --color-cloistr-primary-hover: var(--cloistr-primary-hover);
+  --color-cloistr-primary-dark: var(--cloistr-primary-dark);
+  --color-cloistr-primary-light: var(--cloistr-primary-light);
   --color-cloistr-secondary: var(--cloistr-primary-light);
   --color-cloistr-accent: var(--cloistr-warning);
   --color-cloistr-dark: var(--cloistr-bg);
   --color-cloistr-light: var(--cloistr-text);
+
+  /* Semantic status tokens */
+  --color-cloistr-error: var(--cloistr-error);
+  --color-cloistr-success: var(--cloistr-success);
+  --color-cloistr-warning: var(--cloistr-warning);
+  --color-cloistr-info: var(--cloistr-info);
+
+  /* Neutral surface tokens */
+  --color-cloistr-bg: var(--cloistr-bg);
+  --color-cloistr-bg-elevated: var(--cloistr-bg-elevated);
+  --color-cloistr-bg-hover: var(--cloistr-bg-hover);
+  --color-cloistr-border: var(--cloistr-border);
+  --color-cloistr-text: var(--cloistr-text);
+  --color-cloistr-text-muted: var(--cloistr-text-muted);
+  --color-cloistr-text-dim: var(--cloistr-text-dim);
 }
 
 body {

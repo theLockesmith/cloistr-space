@@ -138,8 +138,8 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
 
       {/* Error message */}
       {error && (
-        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="mb-4 rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 px-4 py-3">
+          <p className="text-sm text-cloistr-error">{error}</p>
         </div>
       )}
 
@@ -209,7 +209,7 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
                         e.stopPropagation();
                         handleDeleteDocument(doc);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-red-500/10 hover:text-red-400"
+                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
                       title="Delete"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

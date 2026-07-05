@@ -18,10 +18,10 @@ export function RelayStatusCompact() {
   const totalCount = relayStatuses.size;
 
   const statusColor = isConnecting
-    ? 'bg-yellow-400 animate-pulse'
+    ? 'bg-cloistr-warning animate-pulse'
     : isConnected
-    ? 'bg-green-400'
-    : 'bg-red-400';
+    ? 'bg-cloistr-success'
+    : 'bg-cloistr-error';
 
   const statusText = isConnecting
     ? 'Connecting...'
@@ -40,7 +40,7 @@ export function RelayStatusCompact() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className={`h-2 w-2 rounded-full ${statusColor}`} />
-        <span className={isConnected ? 'text-green-400' : isConnecting ? 'text-yellow-400' : 'text-red-400'}>
+        <span className={isConnected ? 'text-cloistr-success' : isConnecting ? 'text-cloistr-warning' : 'text-cloistr-error'}>
           {statusText}
         </span>
       </span>
@@ -55,10 +55,10 @@ export function RelayStatusDot() {
   const { isConnected, isConnecting } = useNdk();
 
   const statusColor = isConnecting
-    ? 'bg-yellow-400 animate-pulse'
+    ? 'bg-cloistr-warning animate-pulse'
     : isConnected
-    ? 'bg-green-400'
-    : 'bg-red-400';
+    ? 'bg-cloistr-success'
+    : 'bg-cloistr-error';
 
   return (
     <div
@@ -154,10 +154,10 @@ function RelayItem({ relay }: { relay: RelayStatusType }) {
 
 function StatusIndicator({ status }: { status: RelayStatusType['status'] }) {
   const colors: Record<RelayStatusType['status'], string> = {
-    connected: 'bg-green-400',
-    connecting: 'bg-yellow-400 animate-pulse',
-    disconnected: 'bg-gray-400',
-    error: 'bg-red-400',
+    connected: 'bg-cloistr-success',
+    connecting: 'bg-cloistr-warning animate-pulse',
+    disconnected: 'bg-cloistr-text-dim',
+    error: 'bg-cloistr-error',
   };
 
   return <span className={`h-2 w-2 rounded-full ${colors[status]}`} />;

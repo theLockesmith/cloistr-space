@@ -29,18 +29,18 @@ export function ConflictResolutionPanel({ maxDisplay = 5 }: ConflictResolutionPa
   const hasMore = conflictLog.length > maxDisplay;
 
   return (
-    <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4">
+    <div className="rounded-lg border border-cloistr-warning/30 bg-cloistr-warning/5 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="rounded-full bg-yellow-500/20 p-1.5">
-            <svg className="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="rounded-full bg-cloistr-warning/20 p-1.5">
+            <svg className="h-4 w-4 text-cloistr-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
           <h3 className="text-sm font-medium text-cloistr-light">
             Sync Conflicts Resolved
           </h3>
-          <span className="rounded-full bg-yellow-500/20 px-2 py-0.5 text-xs text-yellow-500">
+          <span className="rounded-full bg-cloistr-warning/20 px-2 py-0.5 text-xs text-cloistr-warning">
             {conflictLog.length}
           </span>
         </div>
@@ -80,8 +80,8 @@ function ConflictItem({ conflict }: { conflict: ConflictResolution }) {
         <code className="text-cloistr-light/80">{shortPubkey}</code>
         <span className={`rounded px-1.5 py-0.5 ${
           conflict.winner === 'local'
-            ? 'bg-green-500/20 text-green-400'
-            : 'bg-blue-500/20 text-blue-400'
+            ? 'bg-cloistr-success/20 text-cloistr-success'
+            : 'bg-cloistr-info/20 text-cloistr-info'
         }`}>
           {conflict.winner === 'local' ? 'Local won' : 'Remote won'}
         </span>
@@ -113,7 +113,7 @@ export function ConflictIndicator() {
     <div className="relative">
       <button
         onClick={() => setShowPanel(!showPanel)}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-yellow-500 hover:bg-yellow-500/10"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-cloistr-warning hover:bg-cloistr-warning/10"
         title={`${conflictLog.length} sync conflicts resolved`}
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

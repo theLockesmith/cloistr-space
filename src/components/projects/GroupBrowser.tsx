@@ -155,7 +155,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
         ) : error ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-red-400">{error}</p>
+              <p className="text-sm text-cloistr-error">{error}</p>
             </div>
           </div>
         ) : filteredGroups.length === 0 ? (
@@ -190,7 +190,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
                   <div className="flex items-center gap-2">
                     <h3 className="font-medium text-cloistr-light truncate">{group.name}</h3>
                     {group.isOpen && (
-                      <span className="rounded bg-green-500/20 px-1.5 py-0.5 text-xs text-green-400">
+                      <span className="rounded bg-cloistr-success/20 px-1.5 py-0.5 text-xs text-cloistr-success">
                         Open
                       </span>
                     )}

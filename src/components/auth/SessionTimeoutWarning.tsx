@@ -99,12 +99,12 @@ export function SessionTimeoutWarning({ onSessionExpired }: SessionTimeoutWarnin
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="mx-4 max-w-md rounded-lg border border-yellow-500/30 bg-cloistr-dark p-6 shadow-xl">
+      <div className="mx-4 max-w-md rounded-lg border border-cloistr-warning/30 bg-cloistr-dark p-6 shadow-xl">
         {/* Warning icon */}
         <div className="mb-4 flex justify-center">
-          <div className="rounded-full bg-yellow-500/20 p-3">
+          <div className="rounded-full bg-cloistr-warning/20 p-3">
             <svg
-              className="h-8 w-8 text-yellow-500"
+              className="h-8 w-8 text-cloistr-warning"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -125,7 +125,7 @@ export function SessionTimeoutWarning({ onSessionExpired }: SessionTimeoutWarnin
         </h2>
         <p className="mb-4 text-center text-cloistr-light/70">
           Your session will expire in{' '}
-          <span className="font-mono font-bold text-yellow-500">{timeDisplay}</span>
+          <span className="font-mono font-bold text-cloistr-warning">{timeDisplay}</span>
           {' '}due to inactivity.
         </p>
 
@@ -217,7 +217,7 @@ export function SessionIndicator() {
   const seconds = timeRemaining % 60;
 
   return (
-    <div className="flex items-center gap-1.5 rounded-md bg-yellow-500/10 px-2 py-1 text-xs text-yellow-500">
+    <div className="flex items-center gap-1.5 rounded-md bg-cloistr-warning/10 px-2 py-1 text-xs text-cloistr-warning">
       <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           strokeLinecap="round"

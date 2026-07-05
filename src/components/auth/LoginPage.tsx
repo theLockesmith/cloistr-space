@@ -71,7 +71,7 @@ export function LoginPage() {
             </h2>
 
             {displayError && (
-              <div className="rounded-md bg-red-500/10 p-3 text-center text-sm text-red-400">
+              <div className="rounded-md bg-cloistr-error/10 p-3 text-center text-sm text-cloistr-error">
                 {displayError}
               </div>
             )}
@@ -140,7 +140,7 @@ export function LoginPage() {
             </div>
 
             {displayError && (
-              <div role="alert" className="rounded-md bg-red-500/10 p-3 text-sm text-red-400">
+              <div role="alert" className="rounded-md bg-cloistr-error/10 p-3 text-sm text-cloistr-error">
                 {displayError}
               </div>
             )}

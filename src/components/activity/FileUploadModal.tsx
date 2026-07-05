@@ -183,7 +183,7 @@ export function FileUploadModal({
             isDragging
               ? 'border-cloistr-primary bg-cloistr-primary/10'
               : selectedFile
-                ? 'border-green-500/50 bg-green-500/5'
+                ? 'border-cloistr-success/50 bg-cloistr-success/5'
                 : 'border-cloistr-light/20 hover:border-cloistr-light/40 hover:bg-cloistr-light/5'
           }`}
         >
@@ -198,9 +198,9 @@ export function FileUploadModal({
 
           {selectedFile ? (
             <div className="space-y-2">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/20">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-cloistr-success/20">
                 <svg
-                  className="h-6 w-6 text-green-500"
+                  className="h-6 w-6 text-cloistr-success"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -261,8 +261,8 @@ export function FileUploadModal({
 
         {/* Error message */}
         {error && (
-          <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-            <p className="text-sm text-red-400">{error}</p>
+          <div className="mb-4 rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 px-4 py-3">
+            <p className="text-sm text-cloistr-error">{error}</p>
           </div>
         )}
 

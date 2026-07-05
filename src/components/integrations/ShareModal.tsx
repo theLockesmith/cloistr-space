@@ -92,7 +92,7 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
               onClick={handleCopyLink}
               className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 copied
-                  ? 'bg-green-500/20 text-green-400'
+                  ? 'bg-cloistr-success/20 text-cloistr-success'
                   : 'bg-cloistr-primary text-white hover:bg-cloistr-primary/90'
               }`}
             >
@@ -102,8 +102,8 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
         </div>
 
         {/* Note about public links */}
-        <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-4 py-3">
-          <p className="text-sm text-yellow-400/80">
+        <div className="rounded-lg border border-cloistr-warning/20 bg-cloistr-warning/5 px-4 py-3">
+          <p className="text-sm text-cloistr-warning/80">
             Anyone with this link can download the file. For encrypted sharing, use the Nostr-based sharing feature (coming soon).
           </p>
         </div>

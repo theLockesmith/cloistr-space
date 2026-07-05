@@ -68,7 +68,7 @@ export function GroupChat({ groupId, groupName }: GroupChatProps) {
         ) : error ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <p className="text-sm text-red-400">{error}</p>
+              <p className="text-sm text-cloistr-error">{error}</p>
               <button
                 onClick={refresh}
                 className="mt-2 text-xs text-cloistr-primary underline hover:no-underline"

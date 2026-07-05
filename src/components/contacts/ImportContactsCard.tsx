@@ -51,8 +51,8 @@ export function ImportContactsCard() {
           {importResult && (
             <div className={`mt-2 rounded px-2 py-1 text-xs ${
               importResult.success
-                ? 'bg-green-500/10 text-green-400'
-                : 'bg-red-500/10 text-red-400'
+                ? 'bg-cloistr-success/10 text-cloistr-success'
+                : 'bg-cloistr-error/10 text-cloistr-error'
             }`}>
               {importResult.success
                 ? `Imported ${importResult.contactsImported} contacts (${importResult.contactsSkipped} already synced)`

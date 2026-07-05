@@ -96,7 +96,7 @@ export function SocialFeed() {
           className="w-full resize-none rounded-lg border border-cloistr-light/10 bg-transparent p-3 text-sm text-cloistr-light placeholder-cloistr-light/40 focus:border-cloistr-primary focus:outline-none disabled:opacity-50"
         />
         {composeError && (
-          <p className="mt-2 text-sm text-red-400">{composeError}</p>
+          <p className="mt-2 text-sm text-cloistr-error">{composeError}</p>
         )}
         <div className="mt-3 flex items-center justify-between">
           <div className="flex gap-2">
@@ -156,8 +156,8 @@ export function SocialFeed() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 p-4 text-center">
+          <p className="text-sm text-cloistr-error">{error}</p>
           <button onClick={refresh} className="mt-2 text-xs text-cloistr-primary underline hover:no-underline">
             Try again
           </button>
@@ -294,7 +294,7 @@ function NoteCard({
         </button>
         <button
           onClick={onRepost}
-          className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-green-400"
+          className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-success"
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -304,7 +304,7 @@ function NoteCard({
         <button
           onClick={onReact}
           className={`flex items-center gap-2 text-sm ${
-            note.userReacted ? 'text-red-400' : 'text-cloistr-light/40 hover:text-red-400'
+            note.userReacted ? 'text-cloistr-error' : 'text-cloistr-light/40 hover:text-cloistr-error'
           }`}
         >
           <svg className="h-5 w-5" fill={note.userReacted ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
