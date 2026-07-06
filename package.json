@@ -31,7 +31,7 @@
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.5.0",
     "yjs": "^13.6.24",
-    "zustand": "^5.0.10"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@cloistr/tailwind-config": "^0.1.0",
