@@ -92,15 +92,22 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
     }
   }, [signer]);
 
-  // Auto-connect when authenticated
+  // Connect to relays on mount, regardless of auth. Reading Nostr content is
+  // public (REQ needs no signer) — space is a public-browsing surface, so a
+  // logged-out visitor must still get a live relay connection and content.
+  // The signer (for writes) is attached separately in the effect above once
+  // the user authenticates. Gating connect on isAuthenticated was why a
+  // logged-out visitor saw "relays offline" + an empty feed.
   useEffect(() => {
     const service = serviceRef.current;
     if (!service) return;
 
-    if (isAuthenticated && !service.hasConnection()) {
+    if (!service.hasConnection()) {
       setIsConnecting(true);
       service.connect().finally(() => setIsConnecting(false));
     }
+    // Re-run once the service ref is populated and whenever auth flips (so a
+    // fresh login still guarantees a connection if the initial dial failed).
   }, [isAuthenticated]);
 
   const reconnect = useCallback(async () => {
