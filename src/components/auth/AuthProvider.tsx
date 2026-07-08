@@ -4,6 +4,7 @@ import {
   connectNip46,
   isNip07Supported,
   isValidBunkerUrl,
+  useNostrAuth,
   type SignerInterface,
   type Nip46Config,
 } from '@cloistr/auth';
@@ -55,6 +56,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signer, setSigner] = useState<SignerInterface | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nip07Available, setNip07Available] = useState(false);
+
+  // SSO bridge: SharedAuthProvider (@cloistr/ui) restores the cross-subdomain
+  // signer session into @cloistr/auth's context, but space gates on its OWN
+  // local store — which the SSO path never populated, so a user logged in on
+  // another *.cloistr.xyz app still hit space's /login wall (the "SSO doesn't
+  // maintain across pages" bug). Mirror the shared session (pubkey + method +
+  // the live signer) into the local store so AuthGuard passes and writes work.
+  // Safe against the mount race because @cloistr/ui 0.12.5's isResolving gate
+  // holds children unmounted until the SSO restore settles, so `shared` is
+  // already resolved by the time this provider mounts.
+  const shared = useNostrAuth();
+  useEffect(() => {
+    const { isConnected, pubkey: sharedPubkey, method } = shared.authState;
+    if (isConnected && sharedPubkey && !isAuthenticated) {
+      setSigner(shared.signer);
+      storeLogin(sharedPubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+    }
+  }, [shared.authState, shared.signer, isAuthenticated, storeLogin]);
 
   // Check for NIP-07 extension on mount
   useEffect(() => {
