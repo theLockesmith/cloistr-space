@@ -14,6 +14,7 @@ import {
   clearSharedSession,
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
+import { useContactsStore } from '@/stores/contactsStore';
 
 interface AuthContextValue {
   pubkey: string | null;
@@ -74,6 +75,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       storeLogin(sharedPubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
     }
   }, [shared.authState, shared.signer, isAuthenticated, storeLogin]);
+
+  // Key-switcher: when the user switches identities in the Header's account
+  // menu, @cloistr/auth 0.2.0 updates authState.activePubkey and re-points
+  // `signer` to the new key's signer. Space has its own local authStore and
+  // contactsStore that don't observe the shared session, so we bridge the
+  // change here. On every activePubkey change after the initial mount we:
+  //   1. Update the local authStore so all pubkey-scoped hooks (useGroups,
+  //      useFeed, useContactsSync) re-scope to the new identity.
+  //   2. Replace the local signer state so NdkProvider picks up the new signer.
+  //   3. Reset contactsStore (contacts + CRDT) because it holds in-memory data
+  //      scoped to the previous key; the sync hooks will repopulate it.
+  const prevActivePubkeyRef = useRef<string | null>(null);
+  const resetContacts = useContactsStore((s) => s.setContacts);
+  useEffect(() => {
+    const { activePubkey, isConnected, method, isSwitching } = shared.authState;
+
+    // Skip: not yet connected, or switch still in flight
+    if (!isConnected || isSwitching || !activePubkey) return;
+
+    // Skip initial population (handled by the SSO bridge above)
+    if (prevActivePubkeyRef.current === null) {
+      prevActivePubkeyRef.current = activePubkey;
+      return;
+    }
+
+    // Skip if the key hasn't actually changed
+    if (prevActivePubkeyRef.current === activePubkey) return;
+
+    console.log('[Auth] Key switch detected:', prevActivePubkeyRef.current, '→', activePubkey);
+    prevActivePubkeyRef.current = activePubkey;
+
+    // 1. Update signer for the new key
+    setSigner(shared.signer);
+
+    // 2. Re-scope local authStore — useGroups/useFeed/useContactsSync all
+    //    read pubkey from here and will re-subscribe when it changes.
+    storeLogin(activePubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+
+    // 3. Clear contacts for the old key so useContactsSync starts fresh
+    resetContacts(new Map());
+  }, [shared.authState, shared.signer, storeLogin, resetContacts]);
 
   // Check for NIP-07 extension on mount
   useEffect(() => {
