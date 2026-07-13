@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@cloistr/auth':
-        specifier: ^0.2.0
-        version: 0.2.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+        specifier: ^0.2.2
+        version: 0.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/collab-common':
         specifier: ^0.2.0
         version: 0.2.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/ui':
-        specifier: ^0.14.0
-        version: 0.14.0(@cloistr/auth@0.2.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^0.17.0
+        version: 0.17.0(@cloistr/auth@0.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@nostr-dev-kit/ndk':
         specifier: ^2.18.1
         version: 2.18.1(nostr-tools@2.23.3(typescript@5.9.3))
@@ -233,8 +233,8 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@cloistr/auth@0.2.1':
-    resolution: {integrity: sha1-o641bh2Nzx7LRvlAblH8F72ytSo=, tarball: https://git.aegis-hq.xyz/api/v4/projects/175/packages/npm/@cloistr/auth/-/@cloistr/auth-0.2.1.tgz}
+  '@cloistr/auth@0.2.2':
+    resolution: {integrity: sha1-zMkq2HCCrDXyNaUmmYW/OrXYZqA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/175/packages/npm/@cloistr/auth/-/@cloistr/auth-0.2.2.tgz}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -250,8 +250,8 @@ packages:
     peerDependencies:
       tailwindcss: '>=3'
 
-  '@cloistr/ui@0.14.0':
-    resolution: {integrity: sha1-NKjM9y34Tlci+ngjgZe4LioGO3g=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.14.0.tgz}
+  '@cloistr/ui@0.17.0':
+    resolution: {integrity: sha1-D8CRCuDfxZH5ZLJn9KFtTD5PvlA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.17.0.tgz}
     peerDependencies:
       '@cloistr/auth': ^0.2.0
       react: ^18.0.0 || ^19.0.0
@@ -2418,7 +2418,7 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@cloistr/auth@0.2.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
+  '@cloistr/auth@0.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
     dependencies:
       nostr-tools: 2.23.3(typescript@5.9.3)
       react: 19.2.4
@@ -2445,9 +2445,9 @@ snapshots:
     dependencies:
       tailwindcss: 4.2.2
 
-  '@cloistr/ui@0.14.0(@cloistr/auth@0.2.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@cloistr/ui@0.17.0(@cloistr/auth@0.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
-      '@cloistr/auth': 0.2.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      '@cloistr/auth': 0.2.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@types/qrcode': 1.5.6
       qrcode: 1.5.4
       react: 19.2.4

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { LoginModal } from '@cloistr/ui/components';
+import { LoginModal, Header as UnifiedHeader } from '@cloistr/ui/components';
 import { useAuth } from './AuthProvider';
 
 const SIGNER_URL = 'https://signer.cloistr.xyz';
@@ -31,7 +31,13 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-cloistr-dark px-6 py-12 text-center">
+    <div className="flex min-h-screen flex-col bg-cloistr-dark">
+      <UnifiedHeader
+        activeServiceId="space"
+        auth={{ authenticated: false }}
+        signerUrl="https://signer.cloistr.xyz"
+      />
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="max-w-2xl">
         <h1 className="mb-3 text-4xl font-bold text-cloistr-light">Cloistr Space</h1>
         <p className="mb-8 text-xl text-cloistr-light/60">
@@ -60,6 +66,8 @@ export function LoginPage() {
             </div>
           ))}
         </div>
+      </div>
+
       </div>
 
       <LoginModal
