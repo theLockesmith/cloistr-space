@@ -10,10 +10,11 @@ stages:
 
 variables:
   NODE_VERSION: "22"
-  # Use aegis registry for built images
-  IMAGE_NAME: registry.aegis-hq.xyz/coldforge/cloistr-space
 
 include:
+  - project: 'coldforge/ci-templates'
+    ref: main
+    file: '/templates/kaniko-build.yml'
   - project: 'coldforge/ci-templates'
     ref: main
     file: '/templates/frontend-smoke.yml'
@@ -44,28 +45,24 @@ test:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "master"
 
-# Build container image
+# Build container image via the shared template (runs on default branch +
+# merge_request + renovate/* so Renovate MRs get a green build+smoke pipeline
+# and can auto-merge; pushes :latest only on the default branch). NPM_TOKEN
+# build-arg passed via KANIKO_EXTRA_FLAGS. CI_REGISTRY_IMAGE already resolves to
+# registry.aegis-hq.xyz/coldforge/cloistr-space.
 build:
+  extends: .kaniko-build
   stage: build
-  image:
-    name: gcr.io/kaniko-project/executor:debug
-    entrypoint: [""]
-  script:
-    - mkdir -p /kaniko/.docker
-    - echo "{\"auths\":{\"registry.aegis-hq.xyz\":{\"username\":\"${AEGIS_REGISTRY_USER}\",\"password\":\"${AEGIS_REGISTRY_PASSWORD}\"}}}" > /kaniko/.docker/config.json
-    - /kaniko/executor
-      --context=${CI_PROJECT_DIR}
-      --dockerfile=${CI_PROJECT_DIR}/Dockerfile
-      --build-arg=NPM_TOKEN=${CI_JOB_TOKEN}
-      --destination=${IMAGE_NAME}:${CI_COMMIT_SHA}
-      --destination=${IMAGE_NAME}:latest
+  variables:
+    KANIKO_EXTRA_FLAGS: "--build-arg=NPM_TOKEN=${CI_JOB_TOKEN}"
   rules:
-    - if: $CI_COMMIT_BRANCH == "master"
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^renovate\// && $CI_OPEN_MERGE_REQUESTS == null'
 
-# Smoke-test gate (with crypto.randomUUID polyfill): load built image in real Chromium, fail on console errors / blank page
-# NOTE: space uses IMAGE_NAME (registry.aegis-hq.xyz/coldforge/cloistr-space) + full CI_COMMIT_SHA
+# Smoke-test gate: load built image in real Chromium, fail on console errors /
+# blank page. Uses the template default SMOKE_IMAGE ($CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA),
+# which matches the :<short-sha> tag .kaniko-build now pushes.
 smoke-test:
   extends: .smoke-test
   needs: ["build"]
-  variables:
-    SMOKE_IMAGE: "${IMAGE_NAME}:${CI_COMMIT_SHA}"
