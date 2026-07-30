@@ -44,7 +44,7 @@ importers:
     devDependencies:
       '@cloistr/tailwind-config':
         specifier: ^0.1.0
-        version: 0.1.0(tailwindcss@4.2.2)
+        version: 0.1.0(tailwindcss@4.3.3)
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.1.0(jiti@2.6.1)(supports-color@7.2.0))
@@ -106,8 +106,8 @@ importers:
         specifier: ^8.5.3
         version: 8.5.8
       tailwindcss:
-        specifier: ^4.1.4
-        version: 4.2.2
+        specifier: ^4.3.3
+        version: 4.3.3
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
@@ -1972,6 +1972,9 @@ packages:
   tailwindcss@4.2.2:
     resolution: {integrity: sha512-KWBIxs1Xb6NoLdMVqhbhgwZf2PGBpPEiwOqgI4pFIYbNTfBXiKYyWoTsXgBQ9WFg/OlhnvHaY+AEpW7wSmFo2Q==}
 
+  tailwindcss@4.3.3:
+    resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
+
   tapable@2.3.1:
     resolution: {integrity: sha512-b+u3CEM6FjDHru+nhUSjDofpWSBp2rINziJWgApm72wwGasQ/wKXftZe4tI2Y5HPv6OpzXSZHOFq87H4vfsgsw==}
     engines: {node: '>=6'}
@@ -2443,9 +2446,9 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@cloistr/tailwind-config@0.1.0(tailwindcss@4.2.2)':
+  '@cloistr/tailwind-config@0.1.0(tailwindcss@4.3.3)':
     dependencies:
-      tailwindcss: 4.2.2
+      tailwindcss: 4.3.3
 
   '@cloistr/ui@0.20.2(@cloistr/auth@0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
@@ -4062,6 +4065,8 @@ snapshots:
   symbol-tree@3.2.4: {}
 
   tailwindcss@4.2.2: {}
+
+  tailwindcss@4.3.3: {}
 
   tapable@2.3.1: {}
 
