@@ -97,17 +97,29 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
   // treating that as "down" would just reproduce the original wrong answer in
   // the other direction. Only a network-level failure means not reachable.
   useEffect(() => {
-    const HTTP_SERVICES = ['drive', 'blossom', 'signer'] as const;
+    // Per-service health path. NOT every service answers /health with 200:
+    // blossom returns 400 there, and the browser logs any non-2xx as
+    // "Failed to load resource", which the CI smoke gate correctly treats as a
+    // console error and fails the build on. Probing an endpoint that is actually
+    // healthy avoids manufacturing noise to detect health.
+    //   drive/stash  /health              -> 200
+    //   signer       /health              -> 200
+    //   blossom      /.well-known/blossom -> 200 (BUD-01 discovery)
+    const HTTP_SERVICES = [
+      { key: 'drive' as const, path: '/health' },
+      { key: 'signer' as const, path: '/health' },
+      { key: 'blossom' as const, path: '/.well-known/blossom' },
+    ];
     let cancelled = false;
 
     const probe = async () => {
       const services = useWorkspaceStore.getState().services;
       await Promise.all(
-        HTTP_SERVICES.map(async (key) => {
+        HTTP_SERVICES.map(async ({ key, path }) => {
           const svc = services.get(key);
           if (!svc) return;
           try {
-            await fetch(`${svc.url}/health`, { method: 'GET', mode: 'no-cors' });
+            await fetch(`${svc.url}${path}`, { method: 'GET', mode: 'no-cors' });
             if (!cancelled) {
               updateServiceStatus(key, { isConnected: true, lastPing: new Date() });
             }
