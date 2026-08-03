@@ -28,6 +28,20 @@ export function ActivityDashboard() {
     setIsEventModalOpen(true);
   }, []);
 
+  // New Document and New Task were `onClick={() => {}}` -- literally no-ops, so
+  // the buttons looked functional and did nothing when clicked. Space is a
+  // workspace shell, not a document or task editor, so the correct behaviour is
+  // to hand off to the app that owns each: docs.cloistr.xyz and
+  // tasks.cloistr.xyz. Both are same-site *.cloistr.xyz, so the shared session
+  // cookie carries over and the user is not asked to log in again.
+  const handleNewDocument = useCallback(() => {
+    window.open('https://docs.cloistr.xyz', '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const handleNewTask = useCallback(() => {
+    window.open('https://tasks.cloistr.xyz', '_blank', 'noopener,noreferrer');
+  }, []);
+
   const handleCloseEvent = useCallback(() => {
     setIsEventModalOpen(false);
   }, []);
@@ -54,7 +68,7 @@ export function ActivityDashboard() {
             </svg>
           }
           label="New Document"
-          onClick={() => {}}
+          onClick={handleNewDocument}
         />
         <QuickAction
           icon={
@@ -81,7 +95,7 @@ export function ActivityDashboard() {
             </svg>
           }
           label="New Task"
-          onClick={() => {}}
+          onClick={handleNewTask}
         />
       </div>
 

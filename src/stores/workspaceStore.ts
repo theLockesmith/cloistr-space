@@ -30,7 +30,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   sidebarOpen: true,
   services: new Map([
     ['relay', { name: 'Relay', url: 'wss://relay.cloistr.xyz', isConnected: false }],
-    ['drive', { name: 'Drive', url: 'https://drive-api.cloistr.xyz', isConnected: false }],
+    // drive-api.cloistr.xyz does not exist -- it is NXDOMAIN, so this could
+    // never have connected. The Drive/Stash service is served at
+    // stash.cloistr.xyz (the cloistr-drive deployment), whose /health answers 200.
+    ['drive', { name: 'Drive', url: 'https://stash.cloistr.xyz', isConnected: false }],
     ['blossom', { name: 'Blossom', url: 'https://files.cloistr.xyz', isConnected: false }],
     ['signer', { name: 'Signer', url: 'https://signer.cloistr.xyz', isConnected: false }],
   ]),

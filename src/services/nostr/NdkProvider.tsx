@@ -85,6 +85,49 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
     }
   }, [config, updateServiceStatus]);
 
+  // Probe the HTTP-backed services.
+  //
+  // Only 'relay' was ever given a status above; drive, blossom and signer were
+  // seeded isConnected:false and nothing ever updated them, so the Services
+  // panel reported them as "Not wired" permanently regardless of whether they
+  // were up. This polls each one's /health and reports what it finds.
+  //
+  // A reachable service is the claim being made, so any HTTP response counts --
+  // including 4xx. Blossom answers /health with 400 but is plainly serving, and
+  // treating that as "down" would just reproduce the original wrong answer in
+  // the other direction. Only a network-level failure means not reachable.
+  useEffect(() => {
+    const HTTP_SERVICES = ['drive', 'blossom', 'signer'] as const;
+    let cancelled = false;
+
+    const probe = async () => {
+      const services = useWorkspaceStore.getState().services;
+      await Promise.all(
+        HTTP_SERVICES.map(async (key) => {
+          const svc = services.get(key);
+          if (!svc) return;
+          try {
+            await fetch(`${svc.url}/health`, { method: 'GET', mode: 'no-cors' });
+            if (!cancelled) {
+              updateServiceStatus(key, { isConnected: true, lastPing: new Date() });
+            }
+          } catch {
+            if (!cancelled) {
+              updateServiceStatus(key, { isConnected: false, lastPing: new Date() });
+            }
+          }
+        })
+      );
+    };
+
+    probe();
+    const interval = setInterval(probe, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [updateServiceStatus]);
+
   // Update signer when auth changes
   useEffect(() => {
     if (serviceRef.current) {
