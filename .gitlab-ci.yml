@@ -49,6 +49,12 @@ test:
 build:
   extends: .kaniko-build
   stage: build
+  # space is the slowest build in the fleet (~42m warm) and the project default
+  # is 60m, so any dependency change that invalidates the kaniko cache pushes a
+  # cold rebuild past the ceiling — two consecutive job_execution_timeouts, the
+  # second at 3586s of 3600s. Raised here rather than in ci-templates so the
+  # other repos keep the 60m default.
+  timeout: 90 minutes
   variables:
     KANIKO_EXTRA_FLAGS: "--build-arg=NPM_TOKEN=${CI_JOB_TOKEN}"
   rules:
