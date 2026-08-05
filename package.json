@@ -3,6 +3,7 @@
   "version": "0.1.2",
   "description": "Nostr-native productivity workspace - Activity, Projects, Social",
   "type": "module",
+  "packageManager": "pnpm@10.29.3",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
