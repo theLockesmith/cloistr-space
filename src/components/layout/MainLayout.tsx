@@ -8,7 +8,7 @@ import { useContactsSync } from '@/services/crdt';
 import { useAuth } from '@/components/auth/AuthProvider';
 
 export function MainLayout() {
-  const { sidebarOpen } = useWorkspaceStore();
+  const { sidebarOpen, toggleSidebar } = useWorkspaceStore();
   // space authenticates through its own local AuthProvider (zustand authStore),
   // not SharedAuthProvider. Pass that session to the shared Header so its Sign Out
   // clears the local store + shared session — otherwise logout is a no-op here.
@@ -33,12 +33,28 @@ export function MainLayout() {
       {/* Sidebar */}
       <Sidebar />
 
-      {/* Main content area */}
+      {/* Main content area.
+          The sidebar is off-canvas below md, so the content must NOT be pushed
+          over by ml-64/ml-16 there — that margin is what left a phone with a
+          sliver of usable width. min-w-0 so a wide child cannot set the floor
+          and overflow the row horizontally. */}
       <div
-        className={`flex flex-1 flex-col transition-all duration-300 ${
-          sidebarOpen ? 'ml-64' : 'ml-16'
+        className={`flex min-w-0 flex-1 flex-col transition-all duration-300 ml-0 ${
+          sidebarOpen ? 'md:ml-64' : 'md:ml-16'
         }`}
       >
+        {/* Mobile-only control to reach the drawer, since it is off-canvas. */}
+        <button
+          type="button"
+          className="absolute left-2 top-2 z-50 rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
+          aria-label="Open navigation"
+          aria-expanded={sidebarOpen}
+          onClick={toggleSidebar}
+        >
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
         <UnifiedHeader
           activeServiceId="space"
           auth={{

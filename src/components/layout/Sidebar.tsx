@@ -50,11 +50,34 @@ export function Sidebar() {
   };
 
   return (
-    <aside
-      className={`fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark transition-all duration-300 ${
-        sidebarOpen ? 'w-64' : 'w-16'
-      }`}
-    >
+    <>
+      {/* Backdrop: mobile only, only while open. Tapping it closes the drawer. */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          aria-hidden="true"
+          onClick={toggleSidebar}
+        />
+      )}
+
+      {/*
+        COLLAPSIBLE BELOW md (governance §5.8).
+        The open state was a fixed 256px panel at every width — on a 375px phone
+        that is ~68% of the viewport, and the authenticated responsive audit
+        measured it occupying 256px of 375. Desktop keeps the existing w-64/w-16
+        rail; mobile gets a true off-canvas drawer that slides fully out of view
+        instead of permanently squeezing the content column.
+      */}
+      <aside
+        className={[
+          'fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
+          'transition-all duration-300',
+          sidebarOpen
+            ? 'w-64 translate-x-0'
+            : 'w-16 -translate-x-full md:translate-x-0',
+        ].join(' ')}
+        aria-label="Workspace navigation"
+      >
       {/* Logo */}
       <div className="flex h-16 items-center justify-between border-b border-cloistr-light/10 px-4">
         {sidebarOpen && (
@@ -114,7 +137,8 @@ export function Sidebar() {
           </div>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
