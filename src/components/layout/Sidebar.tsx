@@ -34,6 +34,20 @@ const navItems = [
 
 export function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useWorkspaceStore();
+  const services = useWorkspaceStore((s) => s.services);
+
+  // Map a probed service to an indicator state.
+  //
+  // 'pending' is reserved for "we have not probed this yet" — a service with no
+  // lastPing. Once NdkProvider's poll has actually reported, the answer is
+  // connected or disconnected, never pending. Previously every entry was
+  // hardcoded 'pending', so a healthy service and an unprobed one were
+  // indistinguishable and both read "Not wired".
+  const statusOf = (key: string): 'connected' | 'disconnected' | 'pending' => {
+    const svc = services.get(key);
+    if (!svc || !svc.lastPing) return 'pending';
+    return svc.isConnected ? 'connected' : 'disconnected';
+  };
 
   return (
     <aside
@@ -83,8 +97,13 @@ export function Sidebar() {
             <p className="mb-2 text-xs font-medium text-cloistr-light/40">Services</p>
             <div className="space-y-1">
               <RelayStatusCompact />
-              <ServiceIndicator name="Drive" status="pending" />
-              <ServiceIndicator name="Blossom" status="pending" />
+              {/* Read the ACTUAL probe result. These were hardcoded to
+                  "pending", so the panel reported "Not wired" forever no matter
+                  what the services were doing — including after NdkProvider
+                  gained a real /health poll for exactly these entries. The probe
+                  was landing in the store and nothing was reading it. */}
+              <ServiceIndicator name="Drive" status={statusOf('drive')} />
+              <ServiceIndicator name="Blossom" status={statusOf('blossom')} />
             </div>
           </div>
         ) : (
