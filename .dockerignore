@@ -1,0 +1,16 @@
+# The image is nginx + dist/. Everything else is context kaniko would otherwise
+# have to read and snapshot for nothing.
+node_modules
+.pnpm-store
+.git
+.gitlab-ci.yml
+src
+public
+tests
+e2e
+*.config.ts
+*.config.js
+tsconfig*.json
+package.json
+pnpm-lock.yaml
+.npmrc
