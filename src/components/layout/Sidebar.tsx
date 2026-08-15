@@ -34,13 +34,50 @@ const navItems = [
 
 export function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useWorkspaceStore();
+  const services = useWorkspaceStore((s) => s.services);
+
+  // Map a probed service to an indicator state.
+  //
+  // 'pending' is reserved for "we have not probed this yet" — a service with no
+  // lastPing. Once NdkProvider's poll has actually reported, the answer is
+  // connected or disconnected, never pending. Previously every entry was
+  // hardcoded 'pending', so a healthy service and an unprobed one were
+  // indistinguishable and both read "Not wired".
+  const statusOf = (key: string): 'connected' | 'disconnected' | 'pending' => {
+    const svc = services.get(key);
+    if (!svc || !svc.lastPing) return 'pending';
+    return svc.isConnected ? 'connected' : 'disconnected';
+  };
 
   return (
-    <aside
-      className={`fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark transition-all duration-300 ${
-        sidebarOpen ? 'w-64' : 'w-16'
-      }`}
-    >
+    <>
+      {/* Backdrop: mobile only, only while open. Tapping it closes the drawer. */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          aria-hidden="true"
+          onClick={toggleSidebar}
+        />
+      )}
+
+      {/*
+        COLLAPSIBLE BELOW md (governance §5.8).
+        The open state was a fixed 256px panel at every width — on a 375px phone
+        that is ~68% of the viewport, and the authenticated responsive audit
+        measured it occupying 256px of 375. Desktop keeps the existing w-64/w-16
+        rail; mobile gets a true off-canvas drawer that slides fully out of view
+        instead of permanently squeezing the content column.
+      */}
+      <aside
+        className={[
+          'fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
+          'transition-all duration-300',
+          sidebarOpen
+            ? 'w-64 translate-x-0'
+            : 'w-16 -translate-x-full md:translate-x-0',
+        ].join(' ')}
+        aria-label="Workspace navigation"
+      >
       {/* Logo */}
       <div className="flex h-16 items-center justify-between border-b border-cloistr-light/10 px-4">
         {sidebarOpen && (
@@ -83,8 +120,13 @@ export function Sidebar() {
             <p className="mb-2 text-xs font-medium text-cloistr-light/40">Services</p>
             <div className="space-y-1">
               <RelayStatusCompact />
-              <ServiceIndicator name="Drive" status="pending" />
-              <ServiceIndicator name="Blossom" status="pending" />
+              {/* Read the ACTUAL probe result. These were hardcoded to
+                  "pending", so the panel reported "Not wired" forever no matter
+                  what the services were doing — including after NdkProvider
+                  gained a real /health poll for exactly these entries. The probe
+                  was landing in the store and nothing was reading it. */}
+              <ServiceIndicator name="Drive" status={statusOf('drive')} />
+              <ServiceIndicator name="Blossom" status={statusOf('blossom')} />
             </div>
           </div>
         ) : (
@@ -95,7 +137,8 @@ export function Sidebar() {
           </div>
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 

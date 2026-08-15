@@ -1,5 +1,6 @@
 stages:
   - test
+  - dist
   - build
   - smoke
 # NOTE: No deploy stage - ArgoCD handles image updates automatically
@@ -41,22 +42,64 @@ test:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == "master"
 
-# Build container image via the shared template (runs on default branch +
-# merge_request + renovate/* so Renovate MRs get a green build+smoke pipeline
-# and can auto-merge; pushes :latest only on the default branch). NPM_TOKEN
-# build-arg passed via KANIKO_EXTRA_FLAGS. CI_REGISTRY_IMAGE already resolves to
+# Build the bundle on an ordinary runner, NOT inside kaniko.
+#
+# This job exists because installing this dependency tree under kaniko is
+# pathologically slow: no BuildKit cache mounts means ~410 packages linked into
+# an overlayfs node_modules from a cold store every time. Pipeline 11072
+# measured 54m50s for the install and another 28m in the snapshot before the
+# 90-minute timeout killed it, while the same install here takes ~4 minutes.
+#
+# The rules MUST stay identical to the `build` job's. If this job is skipped on
+# a ref where the image build runs, the Dockerfile's `COPY dist` has nothing to
+# copy and the build fails.
+build:dist:
+  stage: dist
+  image: node:${NODE_VERSION}-alpine
+  timeout: 20 minutes
+  variables:
+    CI: "true"
+  before_script:
+    # Native deps for the dev dependency tree, same as the test job.
+    - apk add --no-cache python3 make g++
+    - corepack enable && corepack prepare pnpm@10.29.3 --activate
+    - echo "//git.aegis-hq.xyz/api/v4/projects/44/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
+    - pnpm install --frozen-lockfile
+  script:
+    - pnpm build
+    # An empty or missing bundle must fail here rather than ship as an image
+    # that serves a blank page and passes every downstream check.
+    - test -s dist/index.html
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 day
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - node_modules/
+      - .pnpm-store/
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH =~ /^renovate\// && $CI_OPEN_MERGE_REQUESTS == null'
+
+# Package the bundle from build:dist into the nginx image (runs on default
+# branch + merge_request + renovate/* so Renovate MRs get a green build+smoke
+# pipeline and can auto-merge; pushes :latest only on the default branch).
+# CI_REGISTRY_IMAGE already resolves to
 # registry.aegis-hq.xyz/coldforge/cloistr-space.
 build:
   extends: .kaniko-build
   stage: build
-  # space is the slowest build in the fleet (~42m warm) and the project default
-  # is 60m, so any dependency change that invalidates the kaniko cache pushes a
-  # cold rebuild past the ceiling — two consecutive job_execution_timeouts, the
-  # second at 3586s of 3600s. Raised here rather than in ci-templates so the
-  # other repos keep the 60m default.
-  timeout: 90 minutes
+  # Two COPY layers over a small context. The old 90-minute allowance was for
+  # the in-kaniko dependency install that no longer happens here.
+  timeout: 20 minutes
+  needs: ["build:dist"]
   variables:
-    KANIKO_EXTRA_FLAGS: "--build-arg=NPM_TOKEN=${CI_JOB_TOKEN}"
+    # Layer caching costs more than it saves on a two-layer image, and the
+    # cache-repo push is itself a documented source of timeouts.
+    KANIKO_CACHE: "false"
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
