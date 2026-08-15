@@ -33,7 +33,7 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const { sidebarOpen, toggleSidebar } = useWorkspaceStore();
+  const { sidebarOpen, toggleSidebar, mobileNavOpen, setMobileNavOpen } = useWorkspaceStore();
   const services = useWorkspaceStore((s) => s.services);
 
   // Map a probed service to an indicator state.
@@ -51,30 +51,39 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Backdrop: mobile only, only while open. Tapping it closes the drawer. */}
-      {sidebarOpen && (
+      {/* Backdrop: mobile only, only while the drawer is open. Tap to close. */}
+      {mobileNavOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
           aria-hidden="true"
-          onClick={toggleSidebar}
+          onClick={() => setMobileNavOpen(false)}
         />
       )}
 
       {/*
-        COLLAPSIBLE BELOW md (governance §5.8).
-        The open state was a fixed 256px panel at every width — on a 375px phone
-        that is ~68% of the viewport, and the authenticated responsive audit
-        measured it occupying 256px of 375. Desktop keeps the existing w-64/w-16
-        rail; mobile gets a true off-canvas drawer that slides fully out of view
-        instead of permanently squeezing the content column.
+        TWO INDEPENDENT STATES, deliberately (governance §5.8).
+
+        `sidebarOpen`    desktop rail: expanded w-64 vs collapsed w-16, always visible at md+
+        `mobileNavOpen`  phone drawer: on screen vs fully off-canvas, closed by default
+
+        An earlier version drove both from `sidebarOpen` alone and only slid the
+        drawer away when it was FALSE. Since the store defaults it to true — the
+        right default for a desktop rail — a phone rendered the full 256px panel
+        over a 375px viewport. The authenticated audit measured exactly that: 68%
+        of the screen. One boolean cannot carry both meanings, because their
+        correct defaults are opposites.
       */}
       <aside
         className={[
           'fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
-          'transition-all duration-300',
-          sidebarOpen
-            ? 'w-64 translate-x-0'
-            : 'w-16 -translate-x-full md:translate-x-0',
+          'transition-transform duration-300',
+          // Phone: full-width drawer regardless of the desktop rail state.
+          // Desktop: the rail width follows sidebarOpen.
+          'w-64',
+          sidebarOpen ? 'md:w-64' : 'md:w-16',
+          // Off-canvas below md unless opened; never translated at md+.
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
+          'md:translate-x-0',
         ].join(' ')}
         aria-label="Workspace navigation"
       >
@@ -99,6 +108,9 @@ export function Sidebar() {
           <NavLink
             key={item.path}
             to={item.path}
+            // Dismiss the drawer on navigate — otherwise a phone tap changes the
+            // route behind a drawer that is still covering the whole screen.
+            onClick={() => setMobileNavOpen(false)}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
                 isActive

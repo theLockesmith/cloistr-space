@@ -8,7 +8,7 @@ import { useContactsSync } from '@/services/crdt';
 import { useAuth } from '@/components/auth/AuthProvider';
 
 export function MainLayout() {
-  const { sidebarOpen, toggleSidebar } = useWorkspaceStore();
+  const { sidebarOpen, mobileNavOpen, toggleMobileNav } = useWorkspaceStore();
   // space authenticates through its own local AuthProvider (zustand authStore),
   // not SharedAuthProvider. Pass that session to the shared Header so its Sign Out
   // clears the local store + shared session — otherwise logout is a no-op here.
@@ -48,8 +48,8 @@ export function MainLayout() {
           type="button"
           className="absolute left-2 top-2 z-50 rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
           aria-label="Open navigation"
-          aria-expanded={sidebarOpen}
-          onClick={toggleSidebar}
+          aria-expanded={mobileNavOpen}
+          onClick={toggleMobileNav}
         >
           <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
