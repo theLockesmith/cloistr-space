@@ -3,7 +3,7 @@
  * Creates NIP-52 calendar events (kind:31922 date-based or kind:31923 time-based)
  */
 
-import { useState, useCallback, type FormEvent } from 'react';
+import { useState, useCallback, useEffect, type FormEvent } from 'react';
 import { useNdk } from '@/services/nostr';
 import { CALENDAR_DATE_KIND, CALENDAR_TIME_KIND } from '@/types/activity';
 
@@ -51,6 +51,21 @@ export function CreateEventModal({
     setError(null);
     onClose();
   }, [isSubmitting, onClose]);
+
+  // Escape closes the modal, matching FileUploadModal. Without this the two
+  // dialogs in the same app behaved differently and a keyboard user had to
+  // mouse over to Cancel. Guarded on isSubmitting for the same reason the
+  // Cancel button is: closing mid-publish would strand the event.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) handleClose();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isSubmitting, handleClose]);
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();

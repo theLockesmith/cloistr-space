@@ -20,7 +20,32 @@ include:
 test:
   stage: test
   image: node:${NODE_VERSION}-alpine
-  timeout: 15 minutes
+  # These jobs pull from the Alpine mirrors and the npm registry, and both flake.
+  # Observed on this pipeline alone: an apk mirror aborting mid-download of g++
+  # ("failed to extract cc1plus: Connection aborted"), a runner_system_failure,
+  # and an install that outran its timeout. None were code faults, and each one
+  # blocked a merge by skipping the downstream stages.
+  #
+  # script_failure is included deliberately — for these jobs it almost always
+  # means a fetch died, not that the build is wrong. A genuinely broken build
+  # fails fast and burns only a little extra time.
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - job_execution_timeout
+      - api_failure
+      - scheduler_failure
+      - unknown_failure
+      - script_failure
+
+  # `pnpm install` plus the native rebuild jsdom needs on Alpine is the whole
+  # cost of this job; the suite itself runs in seconds. At 15 minutes it hit the
+  # ceiling mid-install (measured: exactly 900s, killed), which SKIPPED build,
+  # build:dist and smoke-test — so an infrastructure timeout blocked a merge
+  # without any test having failed. Same fix already applied to cloistr-slides.
+  timeout: 25 minutes
   variables:
     CI: "true"
   before_script:
@@ -56,6 +81,26 @@ test:
 build:dist:
   stage: dist
   image: node:${NODE_VERSION}-alpine
+  # These jobs pull from the Alpine mirrors and the npm registry, and both flake.
+  # Observed on this pipeline alone: an apk mirror aborting mid-download of g++
+  # ("failed to extract cc1plus: Connection aborted"), a runner_system_failure,
+  # and an install that outran its timeout. None were code faults, and each one
+  # blocked a merge by skipping the downstream stages.
+  #
+  # script_failure is included deliberately — for these jobs it almost always
+  # means a fetch died, not that the build is wrong. A genuinely broken build
+  # fails fast and burns only a little extra time.
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+      - job_execution_timeout
+      - api_failure
+      - scheduler_failure
+      - unknown_failure
+      - script_failure
+
   timeout: 20 minutes
   variables:
     CI: "true"
