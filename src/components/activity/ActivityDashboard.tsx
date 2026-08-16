@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ImportContactsCard, ConflictResolutionPanel } from '@/components/contacts';
 import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/activity';
 import { useNdk } from '@/services/nostr';
+import { getDrive } from '@/services/cloistr';
 import { getFileType } from '@/types/activity';
 import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
 import { FileUploadModal } from './FileUploadModal';
@@ -161,9 +163,13 @@ function QuickAction({
 
 function RecentFilesWidget() {
   const { items: files, isLoading, error } = useRecentFiles({ limit: 5 });
+  const navigate = useNavigate();
 
   return (
-    <WidgetCard title="Recent Files" action={{ label: 'View all', onClick: () => {} }}>
+    <WidgetCard
+      title="Recent Files"
+      action={{ label: 'View all', onClick: () => navigate('/files') }}
+    >
       {isLoading ? (
         <WidgetSkeleton count={4} />
       ) : error ? (
@@ -207,10 +213,41 @@ function FileRow({ file }: { file: FileMetadata }) {
     }
   }, [file.name, file.url]);
 
-  const handleDelete = useCallback(() => {
-    // TODO: Implement file deletion (requires auth)
-    console.log('Delete file:', file.id);
-  }, [file.id]);
+  // Deletion goes through the same DriveClient that FileBrowser uses. This was
+  // a console.log stub, so the menu item looked functional and did nothing —
+  // worse than an absent control, because the user believes the file is gone.
+  //
+  // getDrive() rather than the useDrive hook: FileRow renders once per file, and
+  // a hook here would spin up a drive instance (and its fetches) per row.
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    // Blossom addresses blobs by content hash. `file.id` is the activity-feed
+    // event id and is NOT the blob address, so deleting by it would fail or
+    // target the wrong blob.
+    if (!file.hash) {
+      alert(`Cannot delete "${file.name}": this entry has no content hash.`);
+      return;
+    }
+    if (!confirm(`Delete "${file.name}"?`)) return;
+
+    setDeleting(true);
+    try {
+      await getDrive().deleteFile(file.hash);
+      setDeleted(true);
+    } catch (err) {
+      console.error('[space] delete failed', err);
+      alert(`Could not delete "${file.name}": ${(err as Error).message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [file]);
+
+  // Optimistically hide the row. The activity feed is relay-derived and will
+  // not re-render on its own, so without this the file appears to survive a
+  // successful delete.
+  const [deleted, setDeleted] = useState(false);
+  if (deleted) return null;
 
   return (
     <div className="flex items-center justify-between rounded-lg p-3 hover:bg-cloistr-light/5">
@@ -239,7 +276,12 @@ function FileRow({ file }: { file: FileMetadata }) {
           <p className="text-xs text-cloistr-light/60">{timeAgo}</p>
         </div>
       </div>
-      <FileActionsMenu onOpen={handleOpen} onShare={handleShare} onDelete={handleDelete} />
+      <FileActionsMenu
+        onOpen={handleOpen}
+        onShare={handleShare}
+        onDelete={handleDelete}
+        busy={deleting}
+      />
     </div>
   );
 }
@@ -248,10 +290,13 @@ function FileActionsMenu({
   onOpen,
   onShare,
   onDelete,
+  busy = false,
 }: {
   onOpen: () => void;
   onShare: () => void;
   onDelete: () => void;
+  /** Disables the trigger while a delete is in flight, so it cannot double-fire. */
+  busy?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -274,7 +319,9 @@ function FileActionsMenu({
     <div ref={menuRef} className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+        disabled={busy}
+        aria-label={busy ? 'Deleting…' : 'File actions'}
+        className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light disabled:opacity-40"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
@@ -330,7 +377,16 @@ function TasksWidget() {
   const { items: tasks, isLoading, error, toggleTask } = useTasks({ limit: 5 });
 
   return (
-    <WidgetCard title="Tasks" action={{ label: 'Add task', onClick: () => {} }}>
+    <WidgetCard
+      title="Tasks"
+      action={{
+        label: 'Add task',
+        // Tasks live in a separate app (tasks.cloistr.xyz); space has no task
+        // creation of its own. Sending the user there is honest — the button
+        // previously did nothing at all.
+        onClick: () => window.open('https://tasks.cloistr.xyz/', '_blank', 'noopener,noreferrer'),
+      }}
+    >
       {isLoading ? (
         <WidgetSkeleton count={3} />
       ) : error ? (
@@ -381,6 +437,7 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
 
 function MentionsWidget() {
   const { items: mentions, isLoading, error, markAsRead, unreadCount } = useMentions({ limit: 5 });
+  const navigate = useNavigate();
   const { publish, createEvent, isConnected } = useNdk();
 
   const handleReply = useCallback(async (mention: Mention, content: string) => {
@@ -428,7 +485,7 @@ function MentionsWidget() {
           )}
         </span>
       }
-      action={{ label: 'View all', onClick: () => {} }}
+      action={{ label: 'View all', onClick: () => navigate('/social') }}
     >
       {isLoading ? (
         <WidgetSkeleton count={2} />

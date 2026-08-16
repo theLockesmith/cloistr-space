@@ -9,6 +9,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { ActivityDashboard } from './components/activity/ActivityDashboard';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { SocialFeed } from './components/social/SocialFeed';
+import { FileBrowser } from './components/integrations';
 import { LoginPage } from './components/auth/LoginPage';
 import { AuthGuard } from './components/auth/AuthGuard';
 
@@ -70,6 +71,17 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Social">
                     <SocialFeed />
+                  </ErrorBoundary>
+                }
+              />
+              {/* FileBrowser was fully built and routed NOWHERE — dead code,
+                  and the dashboard's "View all" on Recent Files had no
+                  destination to point at. */}
+              <Route
+                path="files"
+                element={
+                  <ErrorBoundary context="Files">
+                    <FileBrowser />
                   </ErrorBoundary>
                 }
               />
