@@ -54,7 +54,7 @@ export function Sidebar() {
       {/* Backdrop: mobile only, only while the drawer is open. Tap to close. */}
       {mobileNavOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-0 z-[var(--cloistr-z-drawer-backdrop,60)] bg-black/50 md:hidden"
           aria-hidden="true"
           onClick={() => setMobileNavOpen(false)}
         />
@@ -75,7 +75,7 @@ export function Sidebar() {
       */}
       <aside
         className={[
-          'fixed left-0 top-0 z-40 h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
+          'fixed left-0 top-0 z-[var(--cloistr-z-drawer,70)] h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
           'transition-transform duration-300',
           // Phone: full-width drawer regardless of the desktop rail state.
           // Desktop: the rail width follows sidebarOpen.
