@@ -46,7 +46,10 @@ export function MainLayout() {
         {/* Mobile-only control to reach the drawer, since it is off-canvas. */}
         <button
           type="button"
-          className="absolute left-2 top-2 z-50 rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
+          // z ABOVE the header. At z-50 this tied with .cloistr-header and lost on
+          // DOM order, so the only control that opens the drawer was painted over
+          // and unreachable — the drawer existed but looked absent on a phone.
+          className="absolute left-2 top-2 z-[var(--cloistr-z-drawer,70)] rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
           aria-label="Open navigation"
           aria-expanded={mobileNavOpen}
           onClick={toggleMobileNav}
