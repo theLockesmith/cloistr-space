@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@cloistr/auth':
-        specifier: ^0.4.0
-        version: 0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+        specifier: ^0.5.0
+        version: 0.5.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/collab-common':
         specifier: ^0.2.14
         version: 0.2.14(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/ui':
-        specifier: ^0.21.0
-        version: 0.21.0(@cloistr/auth@0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^0.22.0
+        version: 0.22.0(@cloistr/auth@0.5.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@nostr-dev-kit/ndk':
         specifier: ^2.18.1
         version: 2.18.1(nostr-tools@2.23.3(typescript@5.9.3))
@@ -243,6 +243,12 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
+  '@cloistr/auth@0.5.0':
+    resolution: {integrity: sha1-CduOAVgqXKGToSbwcJu255EMjm8=, tarball: https://git.aegis-hq.xyz/api/v4/projects/175/packages/npm/@cloistr/auth/-/@cloistr/auth-0.5.0.tgz}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+
   '@cloistr/collab-common@0.2.14':
     resolution: {integrity: sha1-r+z4g8c9NQbyaMCsQTFI0u92vf8=, tarball: https://git.aegis-hq.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.2.14.tgz}
     peerDependencies:
@@ -254,8 +260,8 @@ packages:
     peerDependencies:
       tailwindcss: '>=3'
 
-  '@cloistr/ui@0.21.0':
-    resolution: {integrity: sha1-uSLiVnGp6Qp92U+4syb3Om08JUU=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.21.0.tgz}
+  '@cloistr/ui@0.22.0':
+    resolution: {integrity: sha1-yIyW5ym9eYutKoo9ggsIz1Bwi5I=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.22.0.tgz}
     peerDependencies:
       '@cloistr/auth': ^0.2.0 || ^0.3.0 || ^0.4.0
       react: ^18.0.0 || ^19.0.0
@@ -1719,6 +1725,14 @@ packages:
       typescript:
         optional: true
 
+  nostr-tools@2.24.3:
+    resolution: {integrity: sha512-8vPgdWuje+H0v2bnxo1/hZOi8VLLMqGjfO+Oxqkx+J22r76rIt/iICKZKBoTXWAP2qTYKCQv89M4A3PRc48JYw==}
+    peerDependencies:
+      typescript: '>=5.0.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   nostr-wasm@0.1.0:
     resolution: {integrity: sha512-78BTryCLcLYv96ONU8Ws3Q1JzjlAt+43pWQhIl86xZmWeegYCNLPml7yQ+gG3vR6V5h4XGj+TxO+SS5dsThQIA==}
 
@@ -2433,6 +2447,14 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
+  '@cloistr/auth@0.5.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
+    dependencies:
+      nostr-tools: 2.24.3(typescript@5.9.3)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+    transitivePeerDependencies:
+      - typescript
+
   '@cloistr/collab-common@0.2.14(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
     dependencies:
       '@cloistr/auth': 0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
@@ -2453,9 +2475,9 @@ snapshots:
     dependencies:
       tailwindcss: 4.2.2
 
-  '@cloistr/ui@0.21.0(@cloistr/auth@0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@cloistr/ui@0.22.0(@cloistr/auth@0.5.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
-      '@cloistr/auth': 0.4.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      '@cloistr/auth': 0.5.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@types/qrcode': 1.5.6
       qrcode: 1.5.4
       react: 19.2.4
@@ -3797,6 +3819,18 @@ snapshots:
   node-releases@2.0.36: {}
 
   nostr-tools@2.23.3(typescript@5.9.3):
+    dependencies:
+      '@noble/ciphers': 2.1.1
+      '@noble/curves': 2.0.1
+      '@noble/hashes': 2.0.1
+      '@scure/base': 2.0.0
+      '@scure/bip32': 2.0.1
+      '@scure/bip39': 2.0.1
+      nostr-wasm: 0.1.0
+    optionalDependencies:
+      typescript: 5.9.3
+
+  nostr-tools@2.24.3(typescript@5.9.3):
     dependencies:
       '@noble/ciphers': 2.1.1
       '@noble/curves': 2.0.1
