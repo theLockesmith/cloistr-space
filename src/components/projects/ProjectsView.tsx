@@ -15,11 +15,16 @@ export function ProjectsView() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
+  // On mobile the two panels cannot coexist — stack them and show one at a time.
+  // true = show group list (default); false = show workspace.
+  // On md+ this flag is ignored; both panels render via CSS.
+  const [mobileShowList, setMobileShowList] = useState(true);
 
   const selectedGroup = groups.find((g) => g.group.identifier === selectedGroupId);
 
   const handleSelectGroup = useCallback((groupId: string) => {
     setSelectedGroupId(groupId);
+    setMobileShowList(false); // switch to workspace on mobile
   }, []);
 
   const handleOpenCreateModal = useCallback(() => {
@@ -33,23 +38,42 @@ export function ProjectsView() {
   const handleGroupCreated = useCallback((groupId: string) => {
     refresh();
     setSelectedGroupId(groupId);
+    setMobileShowList(false);
   }, [refresh]);
 
   const handleLeaveGroup = useCallback(() => {
     refresh();
     setSelectedGroupId(null);
+    setMobileShowList(true);
   }, [refresh]);
 
   const handleJoinGroup = useCallback((groupId: string) => {
     refresh();
     setSelectedGroupId(groupId);
     setShowBrowser(false);
+    setMobileShowList(false);
   }, [refresh]);
+
+  const handleBackToList = useCallback(() => {
+    setMobileShowList(true);
+  }, []);
 
   return (
     <div className="flex h-full">
-      {/* Sidebar - Group list */}
-      <div className="w-64 flex-shrink-0 border-r border-cloistr-light/10 overflow-y-auto">
+      {/* Sidebar - Group list
+          md+: fixed 256 px column, always visible.
+          mobile: full-width, hidden when user has drilled into a workspace. */}
+      <div
+        data-testid="projects-group-list-panel"
+        className={`
+          ${mobileShowList ? 'flex' : 'hidden'}
+          md:flex
+          w-full md:w-64
+          flex-shrink-0 flex-col
+          border-r border-cloistr-light/10
+          overflow-y-auto
+        `}
+      >
         <div className="flex items-center justify-between border-b border-cloistr-light/10 px-4 py-3">
           <h2 className="font-semibold text-cloistr-light">Projects</h2>
           <div className="flex items-center gap-1">
@@ -79,34 +103,57 @@ export function ProjectsView() {
         />
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden">
-        {showBrowser ? (
-          <GroupBrowser
-            onJoinGroup={handleJoinGroup}
-            onClose={() => setShowBrowser(false)}
-          />
-        ) : selectedGroup ? (
-          <GroupWorkspace
-            groupId={selectedGroup.group.identifier}
-            groupName={selectedGroup.group.name}
-            onLeaveGroup={handleLeaveGroup}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-cloistr-light/10">
-                <svg className="h-8 w-8 text-cloistr-light/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
+      {/* Main content
+          md+: fills remaining width alongside the sidebar.
+          mobile: full-width, hidden while the group list is shown. */}
+      <div
+        className={`
+          ${mobileShowList ? 'hidden' : 'flex'}
+          md:flex
+          flex-1 flex-col
+          overflow-hidden
+        `}
+      >
+        {/* Mobile back-navigation: return to group list without leaving the route */}
+        <button
+          onClick={handleBackToList}
+          className="md:hidden flex items-center gap-1 border-b border-cloistr-light/10 px-4 py-2 text-sm text-cloistr-light/70 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+          aria-label="Back to projects list"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Projects
+        </button>
+
+        <div className="flex-1 overflow-hidden">
+          {showBrowser ? (
+            <GroupBrowser
+              onJoinGroup={handleJoinGroup}
+              onClose={() => setShowBrowser(false)}
+            />
+          ) : selectedGroup ? (
+            <GroupWorkspace
+              groupId={selectedGroup.group.identifier}
+              groupName={selectedGroup.group.name}
+              onLeaveGroup={handleLeaveGroup}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-cloistr-light/10">
+                  <svg className="h-8 w-8 text-cloistr-light/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                </div>
+                <h3 className="mb-2 font-medium text-cloistr-light">Select a project</h3>
+                <p className="text-sm text-cloistr-light/60">
+                  Choose a project from the sidebar to view chat and files
+                </p>
               </div>
-              <h3 className="mb-2 font-medium text-cloistr-light">Select a project</h3>
-              <p className="text-sm text-cloistr-light/60">
-                Choose a project from the sidebar to view chat and files
-              </p>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Create group modal */}
