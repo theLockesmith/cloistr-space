@@ -21,11 +21,11 @@ export function MainLayout() {
   });
 
   return (
-    <div className="flex h-screen bg-cloistr-dark">
+    <div className="flex h-dvh bg-cloistr-dark">
       {/* Skip navigation link for keyboard users */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cloistr-primary focus:px-4 focus:py-2 focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cloistr-primary focus:px-4 focus:py-2 focus:text-cloistr-primary-fg"
       >
         Skip to main content
       </a>
@@ -49,7 +49,7 @@ export function MainLayout() {
           // z ABOVE the header. At z-50 this tied with .cloistr-header and lost on
           // DOM order, so the only control that opens the drawer was painted over
           // and unreachable — the drawer existed but looked absent on a phone.
-          className="absolute left-2 top-2 z-[var(--cloistr-z-drawer,70)] rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
+          className="absolute left-2 top-2 z-[var(--cloistr-z-drawer,70)] flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
           aria-label="Open navigation"
           aria-expanded={mobileNavOpen}
           onClick={toggleMobileNav}

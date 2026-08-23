@@ -119,7 +119,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm"
       onClick={handleClose}
     >
       <div
@@ -127,7 +127,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-group-title"
-        className="w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl"
+        className="relative w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl my-auto max-h-[90dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-center justify-between">
@@ -135,7 +135,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
           <button
             onClick={handleClose}
             disabled={isSubmitting}
-            className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light disabled:opacity-50"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light disabled:opacity-50"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -224,7 +224,7 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
             <button
               type="submit"
               disabled={isSubmitting || !name.trim()}
-              className="rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+              className="rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
             >
               {isSubmitting ? 'Creating...' : 'Create Group'}
             </button>

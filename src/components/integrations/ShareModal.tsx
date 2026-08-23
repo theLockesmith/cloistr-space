@@ -38,11 +38,11 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl"
+        className="relative w-full max-w-md rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-6 shadow-xl my-auto max-h-[90dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -50,7 +50,7 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
           <h2 className="text-lg font-semibold text-cloistr-light">Share File</h2>
           <button
             onClick={onClose}
-            className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -93,7 +93,7 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
               className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
                 copied
                   ? 'bg-cloistr-success/20 text-cloistr-success'
-                  : 'bg-cloistr-primary text-white hover:bg-cloistr-primary/90'
+                  : 'bg-cloistr-primary text-cloistr-primary-fg hover:bg-cloistr-primary/90'
               }`}
             >
               {copied ? 'Copied!' : 'Copy'}

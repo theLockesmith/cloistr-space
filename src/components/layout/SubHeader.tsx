@@ -69,7 +69,7 @@ function NotificationsBell() {
         aria-label={unread > 0 ? `Notifications (${unread} unread)` : 'Notifications'}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        className="relative rounded-lg p-2 text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
+        className="relative flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
       >
         <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -114,7 +114,7 @@ function NotificationsBell() {
                     type="button"
                     aria-label={`Dismiss ${n.title}`}
                     onClick={() => dismissNotification(n.id)}
-                    className="shrink-0 rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+                    className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
                   >
                     ×
                   </button>

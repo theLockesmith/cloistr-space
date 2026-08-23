@@ -109,7 +109,7 @@ export function GroupChat({ groupId, groupName }: GroupChatProps) {
           <button
             onClick={handleSend}
             disabled={!newMessage.trim() || isSending}
-            className="rounded-lg bg-cloistr-primary px-4 py-2 text-sm font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+            className="rounded-lg bg-cloistr-primary px-4 py-2 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
           >
             {isSending ? (
               <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">

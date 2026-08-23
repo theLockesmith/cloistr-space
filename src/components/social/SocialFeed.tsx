@@ -120,7 +120,7 @@ export function SocialFeed() {
           <button
             onClick={handlePost}
             disabled={!canPost || !composeText.trim() || isPosting}
-            className="rounded-lg bg-cloistr-primary px-4 py-2 text-sm font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+            className="rounded-lg bg-cloistr-primary px-4 py-2 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
           >
             {isPosting ? 'Posting...' : 'Post'}
           </button>
@@ -342,7 +342,7 @@ function FilterButton({
       onClick={onClick}
       className={`rounded-md px-3 py-1 text-sm transition-colors ${
         active
-          ? 'bg-cloistr-primary text-white'
+          ? 'bg-cloistr-primary text-cloistr-primary-fg'
           : 'text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light'
       }`}
     >

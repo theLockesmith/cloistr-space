@@ -42,7 +42,7 @@ export function GroupFiles({ groupId }: GroupFilesProps) {
       {/* Header with upload button */}
       <div className="flex items-center justify-between border-b border-cloistr-light/10 px-4 py-3">
         <h3 className="font-medium text-cloistr-light">Shared Files</h3>
-        <label className="cursor-pointer rounded-lg bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90">
+        <label className="cursor-pointer rounded-lg bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90">
           <input
             type="file"
             className="hidden"

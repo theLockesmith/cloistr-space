@@ -81,7 +81,7 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
           </button>
           <button
             onClick={() => setShowNewDocInput(true)}
-            className="flex items-center gap-1.5 rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90"
+            className="flex items-center gap-1.5 rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -128,7 +128,7 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
             <button
               onClick={handleCreateDocument}
               disabled={!newDocTitle.trim()}
-              className="rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+              className="rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
             >
               Create
             </button>

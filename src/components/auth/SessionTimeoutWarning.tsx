@@ -144,7 +144,7 @@ export function SessionTimeoutWarning({ onSessionExpired }: SessionTimeoutWarnin
           </button>
           <button
             onClick={handleExtend}
-            className="flex-1 rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-cloistr-primary/90"
+            className="flex-1 rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-cloistr-primary-fg transition-colors hover:bg-cloistr-primary/90"
           >
             Stay logged in
           </button>
