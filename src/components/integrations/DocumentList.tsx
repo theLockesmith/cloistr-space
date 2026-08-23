@@ -186,13 +186,13 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
                       {doc.description || `Updated ${formatDate(doc.updatedAt)}`}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleOpenInEditor(doc);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
                       title="Open in editor"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -209,7 +209,7 @@ export function DocumentList({ onOpenDocument }: DocumentListProps) {
                         e.stopPropagation();
                         handleDeleteDocument(doc);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
                       title="Delete"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

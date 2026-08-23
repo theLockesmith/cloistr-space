@@ -14,7 +14,7 @@
  * "must not pass on revert" requirement while being honest about the level.
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { describe, it, expect } from 'vitest';
 
@@ -115,7 +115,7 @@ describe('modal mobile-safety — max-h + overflow', () => {
 
 // ---------------------------------------------------------------------------
 // Tap targets: critical icon-only buttons must declare min-h-[44px].
-// iOS HIG and WCAG 2.5.5 require at least 44×44 CSS px touch targets.
+// iOS HIG and WCAG 2.5.5 require at least 44x44 CSS px touch targets.
 // Buttons with small padding icons (p-1, p-2) are below that threshold
 // without an explicit minimum.
 // ---------------------------------------------------------------------------
@@ -178,5 +178,50 @@ describe('Sidebar NavLink tap targets', () => {
   it('NavLink className includes min-h-[44px]', () => {
     const content = src('src/components/layout/Sidebar.tsx');
     expect(content).toContain('min-h-[44px]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// No hover-only action visibility anywhere in src/components.
+// opacity-0 group-hover:opacity-100 makes action buttons permanently invisible
+// on touch (hover events never fire on capacitive screens). This was present
+// in FileBrowser and DocumentList; scan every component file so it cannot
+// silently recur in a new file.
+// ---------------------------------------------------------------------------
+
+function collectComponentFiles(dir: string): string[] {
+  const entries = readdirSync(dir);
+  const files: string[] = [];
+  for (const entry of entries) {
+    const full = `${dir}/${entry}`;
+    if (statSync(full).isDirectory()) {
+      files.push(...collectComponentFiles(full));
+    } else if ((entry.endsWith('.tsx') || entry.endsWith('.ts')) && !entry.endsWith('.test.tsx') && !entry.endsWith('.test.ts')) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+describe('no hover-only action visibility — all component files', () => {
+  const root = resolve(__dirname, '../../..');
+  const componentDir = resolve(root, 'src/components');
+  const files = collectComponentFiles(componentDir);
+
+  it('no component file uses opacity-0 group-hover:opacity-100 to hide action buttons', () => {
+    const violators: string[] = [];
+    for (const file of files) {
+      const content = readFileSync(file, 'utf8');
+      if (
+        content.includes('opacity-0 group-hover:opacity-100') ||
+        content.includes('opacity-0 hover:opacity-100')
+      ) {
+        violators.push(file.replace(root + '/', ''));
+      }
+    }
+    expect(
+      violators,
+      `These files hide action buttons from touch users:\n${violators.join('\n')}`
+    ).toHaveLength(0);
   });
 });
