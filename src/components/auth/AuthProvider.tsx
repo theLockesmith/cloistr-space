@@ -12,6 +12,8 @@ import {
   getSharedSession,
   saveSharedSession,
   clearSharedSession,
+  withSignerRetry,
+  classifySignerError,
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
@@ -27,6 +29,19 @@ interface AuthContextValue {
   loginNip46: (bunkerUrl: string) => Promise<void>;
   logout: () => Promise<void>;
   signEvent: (event: object) => Promise<object>;
+  /**
+   * Non-null when a signing or signer-connection attempt failed.
+   * The session is still valid; this is a connectivity problem, not an auth
+   * problem. See SignerErrorOverlay, which renders SignerRecovery on this state.
+   */
+  signerError: unknown | null;
+  /** Clear the error after the user has acknowledged or retried. */
+  clearSignerError: () => void;
+  /**
+   * Re-attempt the NIP-46 signer connection using the stored credentials.
+   * Safe to call when signerError is set; clears the error before trying.
+   */
+  retrySignerConnection: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,6 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signer, setSigner] = useState<SignerInterface | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nip07Available, setNip07Available] = useState(false);
+  /**
+   * Signer connectivity error — distinct from session validity.
+   *
+   * Session = who you are (backend JWT + shared SSO). Only a genuine expiry
+   * means "sign in again". Signer reachability = can we reach your bunker over
+   * relays RIGHT NOW. Transient. Retry.
+   *
+   * This state is set on retryable and needs-user signing failures. It is
+   * never set by a genuine session expiry. Setting it must NEVER also clear
+   * the session (localStorage key or authStore).
+   */
+  const [signerError, setSignerError] = useState<unknown | null>(null);
 
   // SSO bridge: SharedAuthProvider (@cloistr/ui) restores the cross-subdomain
   // signer session into @cloistr/auth's context, but space gates on its OWN
@@ -153,8 +180,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Parse the stored session outside the restore try/catch so the catch
+      // can reference `auth` when deciding whether to preserve the session.
+      let auth: PersistedAuth;
       try {
-        const auth: PersistedAuth = JSON.parse(stored);
+        auth = JSON.parse(stored);
+      } catch {
+        // Corrupted data — nothing to recover.
+        localStorage.removeItem(STORAGE_KEY);
+        setLoading(false);
+        return;
+      }
+
+      try {
         console.log('[Auth] Session data:', {
           method: auth.method,
           hasBunkerUrl: !!auth.bunkerUrl,
@@ -165,13 +203,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (auth.method === 'nip07') {
           if (isNip07Supported()) {
             const nip07Signer = await connectNip07();
-            const pubkey = await nip07Signer.getPublicKey();
+            const nip07Pubkey = await nip07Signer.getPublicKey();
             setSigner(nip07Signer);
-            storeLogin(pubkey, 'nip07');
+            storeLogin(nip07Pubkey, 'nip07');
             // Sync to shared session
-            saveSharedSession({ method: 'nip07', pubkey });
+            saveSharedSession({ method: 'nip07', pubkey: nip07Pubkey });
           } else {
-            // Extension no longer available
+            // Extension no longer available — terminal, clear the session.
             localStorage.removeItem(STORAGE_KEY);
             setLoading(false);
           }
@@ -184,9 +222,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          // Add timeout for session restore to prevent infinite hanging
+          // The timeout error needs a code so classifySignerError can handle
+          // it correctly. A bare Error with no code is classified 'terminal',
+          // which would cause the session to be wrongly cleared when the race
+          // fires before @cloistr/auth's own internal timeout does.
           const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Session restore timeout')), 15000)
+            setTimeout(() => {
+              const err = Object.assign(
+                new Error('Session restore timeout'),
+                { code: 'TIMEOUT' },
+              );
+              reject(err);
+            }, 15000)
           );
           console.log('[Auth] Attempting session restore with NIP-46...');
           const nip46Signer = await Promise.race([
@@ -198,17 +245,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             timeoutPromise,
           ]);
           console.log('[Auth] NIP-46 connected, getting public key...');
-          const pubkey = await nip46Signer.getPublicKey();
-          console.log('[Auth] Session restored successfully, pubkey:', pubkey.slice(0, 16) + '...');
+          const nip46Pubkey = await nip46Signer.getPublicKey();
+          console.log('[Auth] Session restored successfully, pubkey:', nip46Pubkey.slice(0, 16) + '...');
           setSigner(nip46Signer);
-          storeLogin(pubkey, 'nip46', auth.bunkerUrl);
+          storeLogin(nip46Pubkey, 'nip46', auth.bunkerUrl);
           // Sync to shared session
-          saveSharedSession({ method: 'nip46', pubkey, bunkerUrl: auth.bunkerUrl });
+          saveSharedSession({ method: 'nip46', pubkey: nip46Pubkey, bunkerUrl: auth.bunkerUrl });
         }
       } catch (err) {
-        console.error('Failed to restore session:', err);
-        localStorage.removeItem(STORAGE_KEY);
-        setLoading(false);
+        console.error('[Auth] Failed to restore session:', err);
+
+        const kind = classifySignerError(err);
+        const persistedPubkey = useAuthStore.getState().pubkey;
+        const persistedMethod = useAuthStore.getState().method;
+
+        if (kind !== 'terminal' && persistedPubkey && persistedMethod) {
+          // Relay was unreachable or timed out. The credential in localStorage
+          // is still valid, so do NOT remove it. Use the persisted pubkey to
+          // keep isAuthenticated true — AuthGuard passes, and the user lands in
+          // the app rather than at the login screen. The signer stays null, so
+          // signing attempts will fail until the user hits Retry in the overlay.
+          storeLogin(persistedPubkey, persistedMethod, auth.bunkerUrl);
+          setSignerError(err);
+        } else {
+          // Terminal failure (e.g., INVALID_BUNKER_URL, corrupted key) or no
+          // persisted identity to fall back on. Clear the session.
+          localStorage.removeItem(STORAGE_KEY);
+          setLoading(false);
+        }
       }
     };
 
@@ -226,17 +290,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const nip07Signer = await connectNip07();
-      const pubkey = await nip07Signer.getPublicKey();
+      const nip07Pubkey = await nip07Signer.getPublicKey();
 
       setSigner(nip07Signer);
-      storeLogin(pubkey, 'nip07');
+      storeLogin(nip07Pubkey, 'nip07');
 
       // Persist session locally
       const auth: PersistedAuth = { method: 'nip07' };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
 
       // Sync to shared session for SSO across Cloistr apps
-      saveSharedSession({ method: 'nip07', pubkey });
+      saveSharedSession({ method: 'nip07', pubkey: nip07Pubkey });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect';
       setError(message);
@@ -264,10 +328,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       const nip46Signer = await connectNip46(config);
-      const pubkey = await nip46Signer.getPublicKey();
+      const nip46Pubkey = await nip46Signer.getPublicKey();
 
       setSigner(nip46Signer);
-      storeLogin(pubkey, 'nip46', bunkerUrl);
+      storeLogin(nip46Pubkey, 'nip46', bunkerUrl);
 
       // Persist session locally with client secret key for session continuity
       const clientSecretKey = nip46Signer.getClientSecretKey?.();
@@ -281,7 +345,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
 
       // Sync to shared session for SSO across Cloistr apps
-      saveSharedSession({ method: 'nip46', pubkey, bunkerUrl });
+      saveSharedSession({ method: 'nip46', pubkey: nip46Pubkey, bunkerUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to remote signer';
       setError(message);
@@ -300,6 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setSigner(null);
       setError(null);
+      setSignerError(null);
       localStorage.removeItem(STORAGE_KEY);
       // Clear shared session for SSO logout
       clearSharedSession();
@@ -307,13 +372,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [signer, storeLogout]);
 
-  const signEvent = useCallback(async (event: object) => {
+  /**
+   * Re-attempt the NIP-46 signer connection using the stored credentials.
+   *
+   * Called by SignerErrorOverlay when the user clicks "Try again" after a
+   * session-restore failure. The retry uses withSignerRetry so RETRYABLE
+   * errors are retried automatically; a TIMEOUT or terminal error surfaces
+   * immediately so the user can see it and decide.
+   */
+  const retrySignerConnection = useCallback(async () => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
+
+    let auth: PersistedAuth;
+    try {
+      auth = JSON.parse(stored);
+    } catch {
+      return;
+    }
+
+    if (auth.method !== 'nip46' || !auth.bunkerUrl || !auth.clientSecretKey) return;
+
+    setSignerError(null);
+
+    try {
+      const nip46Signer = await withSignerRetry(() =>
+        connectNip46({
+          bunkerUrl: auth.bunkerUrl!,
+          timeout: 15000,
+          clientSecretKey: auth.clientSecretKey,
+        })
+      );
+      const retryPubkey = await nip46Signer.getPublicKey();
+      setSigner(nip46Signer);
+      storeLogin(retryPubkey, 'nip46', auth.bunkerUrl);
+      saveSharedSession({ method: 'nip46', pubkey: retryPubkey, bunkerUrl: auth.bunkerUrl! });
+    } catch (err) {
+      console.error('[Auth] Retry signer connection failed:', err);
+      setSignerError(err);
+    }
+  }, [storeLogin]);
+
+  const clearSignerError = useCallback(() => {
+    setSignerError(null);
+  }, []);
+
+  const signEvent = useCallback(async (event: object): Promise<object> => {
     if (!signer) {
       throw new Error('Not authenticated');
     }
     // Type boundary between app and collab-common signer interface
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return signer.signEvent(event as any);
+    const signerFn = signer as any;
+    try {
+      return (await withSignerRetry(() => signerFn.signEvent(event))) as object;
+    } catch (err) {
+      // withSignerRetry rethrows after exhausting retries (for retryable
+      // errors) or immediately (for terminal/needs-user). Record the error so
+      // SignerErrorOverlay can surface it. Session state is untouched.
+      setSignerError(err);
+      throw err;
+    }
   }, [signer]);
 
   return (
@@ -329,6 +448,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginNip46,
         logout: logoutHandler,
         signEvent,
+        signerError,
+        clearSignerError,
+        retrySignerConnection,
       }}
     >
       {children}
