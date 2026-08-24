@@ -170,7 +170,7 @@ export function FullPageErrorFallback({
   resetError: () => void;
 }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-cloistr-dark p-6">
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-cloistr-dark p-6">
       <div className="max-w-md text-center">
         <div className="mb-6 inline-flex rounded-full bg-cloistr-error/20 p-4">
           <svg
@@ -205,7 +205,7 @@ export function FullPageErrorFallback({
         <div className="flex justify-center gap-4">
           <button
             onClick={resetError}
-            className="rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-white hover:bg-cloistr-primary/90"
+            className="rounded-md bg-cloistr-primary px-4 py-2 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90"
           >
             Try again
           </button>

@@ -130,7 +130,7 @@ export function FileBrowser({
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="rounded p-1.5 text-cloistr-light/60 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1.5 text-cloistr-light/60 hover:bg-cloistr-light/10 hover:text-cloistr-light"
             title="Refresh"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -144,7 +144,7 @@ export function FileBrowser({
           </button>
           <button
             onClick={() => setShowNewFolderInput(true)}
-            className="rounded p-1.5 text-cloistr-light/60 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1.5 text-cloistr-light/60 hover:bg-cloistr-light/10 hover:text-cloistr-light"
             title="New folder"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -159,7 +159,7 @@ export function FileBrowser({
           {showUpload && (
             <button
               onClick={() => setShowUploadModal(true)}
-              className="flex items-center gap-1.5 rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90"
+              className="flex min-h-[44px] items-center gap-1.5 rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -189,7 +189,7 @@ export function FileBrowser({
           />
           <button
             onClick={handleCreateFolder}
-            className="rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90"
+            className="rounded-md bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90"
           >
             Create
           </button>
@@ -277,7 +277,7 @@ export function FileBrowser({
                       e.stopPropagation();
                       handleDeleteFolder(folder);
                     }}
-                    className="rounded p-1 text-cloistr-light/40 opacity-0 hover:bg-cloistr-error/10 hover:text-cloistr-error group-hover:opacity-100"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
@@ -307,13 +307,13 @@ export function FileBrowser({
                       {formatSize(file.size)} • {formatDate(file.createdAt)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDownload(file);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
                       title="Download"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -331,7 +331,7 @@ export function FileBrowser({
                           e.stopPropagation();
                           onShare(file);
                         }}
-                        className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+                        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
                         title="Share"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -349,7 +349,7 @@ export function FileBrowser({
                         e.stopPropagation();
                         handleDeleteFile(file);
                       }}
-                      className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error"
                       title="Delete"
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

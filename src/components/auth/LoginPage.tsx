@@ -17,7 +17,7 @@ export function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-cloistr-dark">
+      <div className="flex h-dvh items-center justify-center bg-cloistr-dark">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-cloistr-primary border-t-transparent" />
           <p className="text-cloistr-light/60">Signing you in…</p>
@@ -31,7 +31,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-cloistr-dark">
+    <div className="flex min-h-dvh flex-col bg-cloistr-dark">
       <UnifiedHeader
         activeServiceId="space"
         auth={{ authenticated: false }}
@@ -46,7 +46,7 @@ export function LoginPage() {
 
         <button
           onClick={() => setModalOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-cloistr-primary px-6 py-3 font-medium text-white transition-colors hover:opacity-90"
+          className="inline-flex items-center gap-2 rounded-lg bg-cloistr-primary px-6 py-3 font-medium text-cloistr-primary-fg transition-colors hover:opacity-90"
         >
           Sign in with Cloistr
         </button>

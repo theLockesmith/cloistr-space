@@ -75,7 +75,7 @@ export function Sidebar() {
       */}
       <aside
         className={[
-          'fixed left-0 top-0 z-[var(--cloistr-z-drawer,70)] h-screen border-r border-cloistr-light/10 bg-cloistr-dark',
+          'fixed left-0 top-0 z-[var(--cloistr-z-drawer,70)] h-dvh border-r border-cloistr-light/10 bg-cloistr-dark',
           'transition-transform duration-300',
           // Phone: full-width drawer regardless of the desktop rail state.
           // Desktop: the rail width follows sidebarOpen.
@@ -94,7 +94,8 @@ export function Sidebar() {
         )}
         <button
           onClick={toggleSidebar}
-          className="rounded-lg p-2 text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
+          aria-label="Toggle sidebar"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -112,7 +113,7 @@ export function Sidebar() {
             // route behind a drawer that is still covering the whole screen.
             onClick={() => setMobileNavOpen(false)}
             className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
+              `flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
                 isActive
                   ? 'bg-cloistr-primary/10 text-cloistr-primary'
                   : 'text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light'

@@ -11,7 +11,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-cloistr-dark">
+      <div className="flex h-dvh items-center justify-center bg-cloistr-dark">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-cloistr-primary border-t-transparent" />
           <p className="text-cloistr-light/60">Loading...</p>

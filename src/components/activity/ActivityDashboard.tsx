@@ -321,7 +321,7 @@ function FileActionsMenu({
         onClick={() => setIsOpen(!isOpen)}
         disabled={busy}
         aria-label={busy ? 'Deleting…' : 'File actions'}
-        className="rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light disabled:opacity-40"
+        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1 text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light disabled:opacity-40"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
@@ -479,7 +479,7 @@ function MentionsWidget() {
         <span className="flex items-center gap-2">
           Mentions
           {unreadCount > 0 && (
-            <span className="rounded-full bg-cloistr-primary px-2 py-0.5 text-xs text-white">
+            <span className="rounded-full bg-cloistr-primary px-2 py-0.5 text-xs text-cloistr-primary-fg">
               {unreadCount}
             </span>
           )}
@@ -598,7 +598,7 @@ function MentionRow({
             <button
               onClick={handleReply}
               disabled={!replyContent.trim() || isSending}
-              className="rounded bg-cloistr-primary px-3 py-1 text-xs font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+              className="rounded bg-cloistr-primary px-3 py-1 text-xs font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
             >
               {isSending ? 'Sending...' : 'Reply'}
             </button>

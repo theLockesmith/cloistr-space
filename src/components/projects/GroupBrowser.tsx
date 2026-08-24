@@ -204,7 +204,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
                 <button
                   onClick={() => handleJoin(group)}
                   disabled={!canAct || joiningId === group.identifier}
-                  className="shrink-0 rounded-lg bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-cloistr-primary/90 disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-cloistr-primary px-3 py-1.5 text-sm font-medium text-cloistr-primary-fg hover:bg-cloistr-primary/90 disabled:opacity-50"
                 >
                   {joiningId === group.identifier ? 'Joining...' : group.isOpen ? 'Join' : 'Request'}
                 </button>
