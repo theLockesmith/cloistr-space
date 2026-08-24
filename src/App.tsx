@@ -3,6 +3,7 @@ import { ThemeProvider, ToastProvider, SharedAuthProvider } from '@cloistr/ui/co
 import '@cloistr/ui/styles';
 import { AuthProvider } from './components/auth/AuthProvider';
 import { SessionManager } from './components/auth/SessionManager';
+import { SignerErrorOverlay } from './components/auth/SignerErrorOverlay';
 import { NdkProvider } from './services/nostr';
 import { ErrorBoundary, FullPageErrorFallback } from './components/common';
 import { MainLayout } from './components/layout/MainLayout';
@@ -27,6 +28,7 @@ export default function App() {
           <AuthProvider>
           <NdkProvider>
           <SessionManager />
+          <SignerErrorOverlay />
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
