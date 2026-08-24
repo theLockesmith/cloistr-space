@@ -1,27 +1,38 @@
 import { Outlet } from 'react-router-dom';
-import { Sidebar } from './Sidebar';
-import { SubHeader } from './SubHeader';
+import { AppShell } from '@cloistr/ui/components';
 import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
+import { SpaceNavLinks } from './SpaceNavLinks';
+import { SubHeader } from './SubHeader';
 import { ToastContainer } from '@/components/common/Toast';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useContactsSync } from '@/services/crdt';
 import { useAuth } from '@/components/auth/AuthProvider';
 
+/**
+ * MainLayout — outer shell for all authenticated routes.
+ *
+ * AppShell owns the single mobile hamburger (opens a drawer with SpaceNavLinks)
+ * and renders the nav links as a sidebar on desktop. No app-owned hamburger
+ * lives here — that was the source of the double-hamburger measured in the
+ * 2026-08-24 audit.
+ *
+ * Space has in-app nav (Activity, Projects, Social) but no app-level menu
+ * commands. AppShell receives `nav` only; it renders no menu bar and no
+ * hamburger on desktop, and exactly one hamburger on mobile.
+ */
 export function MainLayout() {
-  const { sidebarOpen, mobileNavOpen, toggleMobileNav } = useWorkspaceStore();
   // space authenticates through its own local AuthProvider (zustand authStore),
   // not SharedAuthProvider. Pass that session to the shared Header so its Sign Out
   // clears the local store + shared session — otherwise logout is a no-op here.
   const { isAuthenticated, pubkey, logout } = useAuth();
 
-  // Initialize contacts sync - auto-syncs on auth + connection
+  // Initialize contacts sync — auto-syncs on auth + connection.
   useContactsSync({
     autoSync: true,
     subscribeToUpdates: true,
   });
 
   return (
-    <div className="flex h-dvh bg-cloistr-dark">
+    <>
       {/* Skip navigation link for keyboard users */}
       <a
         href="#main-content"
@@ -30,51 +41,34 @@ export function MainLayout() {
         Skip to main content
       </a>
 
-      {/* Sidebar */}
-      <Sidebar />
+      {/*
+        AppShell owns the single mobile hamburger.
+        nav=... → hamburger on mobile (opens drawer with SpaceNavLinks),
+                   sidebar in flow on desktop (no hamburger, no drawer).
+        No menu prop → no horizontal menu bar, no menu sections in the drawer.
+        Neither condition → no hamburger at all (per navigation-model.md).
+      */}
+      <AppShell serviceId="space" nav={<SpaceNavLinks />}>
+        {/* h-dvh here so the inner flex column fills the AppShell content area. */}
+        <div className="flex h-dvh flex-col bg-cloistr-dark">
+          <UnifiedHeader
+            activeServiceId="space"
+            auth={{
+              authenticated: isAuthenticated,
+              pubkey: pubkey ?? undefined,
+              onLogout: logout,
+            }}
+          />
+          <SubHeader />
+          <main id="main-content" className="flex-1 overflow-auto p-6">
+            <Outlet />
+          </main>
+          <Footer />
+        </div>
+      </AppShell>
 
-      {/* Main content area.
-          The sidebar is off-canvas below md, so the content must NOT be pushed
-          over by ml-64/ml-16 there — that margin is what left a phone with a
-          sliver of usable width. min-w-0 so a wide child cannot set the floor
-          and overflow the row horizontally. */}
-      <div
-        className={`flex min-w-0 flex-1 flex-col transition-all duration-300 ml-0 ${
-          sidebarOpen ? 'md:ml-64' : 'md:ml-16'
-        }`}
-      >
-        {/* Mobile-only control to reach the drawer, since it is off-canvas. */}
-        <button
-          type="button"
-          // z ABOVE the header. At z-50 this tied with .cloistr-header and lost on
-          // DOM order, so the only control that opens the drawer was painted over
-          // and unreachable — the drawer existed but looked absent on a phone.
-          className="absolute left-2 top-2 z-[var(--cloistr-z-drawer,70)] flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-cloistr-light/70 hover:bg-cloistr-light/10 md:hidden"
-          aria-label="Open navigation"
-          aria-expanded={mobileNavOpen}
-          onClick={toggleMobileNav}
-        >
-          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-        <UnifiedHeader
-          activeServiceId="space"
-          auth={{
-            authenticated: isAuthenticated,
-            pubkey: pubkey ?? undefined,
-            onLogout: logout,
-          }}
-        />
-        <SubHeader />
-        <main id="main-content" className="flex-1 overflow-auto p-6">
-          <Outlet />
-        </main>
-        <Footer />
-      </div>
-
-      {/* Toast notifications */}
+      {/* Toast notifications — rendered outside AppShell so they overlay everything. */}
       <ToastContainer />
-    </div>
+    </>
   );
 }

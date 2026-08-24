@@ -12,6 +12,12 @@
  * Each test fails when the change it guards is reverted (the old token is
  * put back) and passes when the new token is present — which satisfies the
  * "must not pass on revert" requirement while being honest about the level.
+ *
+ * NOTE (2026-08-24 AppShell migration)
+ * The mobile hamburger is now owned by AppShell from @cloistr/ui 0.30.0.
+ * Sidebar.tsx was removed — nav links live in SpaceNavLinks.tsx. Tests that
+ * previously asserted on Sidebar.tsx or the app-owned hamburger in MainLayout
+ * have been updated accordingly.
  */
 
 import { readFileSync, readdirSync, statSync } from 'fs';
@@ -28,7 +34,6 @@ const src = (rel: string) => readFileSync(resolve(__dirname, '../../..', rel), '
 describe('100dvh — no 100vh via h-screen', () => {
   const layoutFiles = [
     'src/components/layout/MainLayout.tsx',
-    'src/components/layout/Sidebar.tsx',
     'src/components/auth/LoginPage.tsx',
     'src/components/auth/AuthGuard.tsx',
     'src/components/common/ErrorBoundary.tsx',
@@ -43,13 +48,8 @@ describe('100dvh — no 100vh via h-screen', () => {
     });
   }
 
-  it('MainLayout uses h-dvh for the root shell', () => {
+  it('MainLayout uses h-dvh for the inner content column', () => {
     const content = src('src/components/layout/MainLayout.tsx');
-    expect(content).toContain('h-dvh');
-  });
-
-  it('Sidebar uses h-dvh for the fixed aside panel', () => {
-    const content = src('src/components/layout/Sidebar.tsx');
     expect(content).toContain('h-dvh');
   });
 
@@ -121,14 +121,18 @@ describe('modal mobile-safety — max-h + overflow', () => {
 // ---------------------------------------------------------------------------
 
 describe('tap targets — min-h-[44px] on critical icon buttons', () => {
-  it('MainLayout hamburger button has min-h-[44px]', () => {
+  it('AppShell owns the mobile hamburger; MainLayout must NOT contain a hamburger button', () => {
     const content = src('src/components/layout/MainLayout.tsx');
-    // The hamburger opens the mobile drawer — it MUST be reachable with a thumb.
-    expect(content).toContain('min-h-[44px]');
+    // The app-owned hamburger was removed in the AppShell migration. The shell
+    // (AppShell from @cloistr/ui 0.30.0) renders its own tap-compliant toggle
+    // via SidebarToggle. The app must not add a second one.
+    expect(content).not.toContain('aria-label="Open navigation"');
+    expect(content).not.toContain('md:hidden');
   });
 
-  it('Sidebar toggle button has min-h-[44px]', () => {
-    const content = src('src/components/layout/Sidebar.tsx');
+  it('SpaceNavLinks nav items have min-h-[44px]', () => {
+    const content = src('src/components/layout/SpaceNavLinks.tsx');
+    // Every nav link must be reachable with a thumb.
     expect(content).toContain('min-h-[44px]');
   });
 
@@ -171,12 +175,44 @@ describe('FileBrowser — no hover-only action visibility', () => {
 });
 
 // ---------------------------------------------------------------------------
-// NavLinks: sidebar nav items must have min-h-[44px] for touch targets.
+// AppShell integration: MainLayout must use AppShell from @cloistr/ui.
+// The single mobile hamburger belongs to the shell, not the app.
 // ---------------------------------------------------------------------------
 
-describe('Sidebar NavLink tap targets', () => {
+describe('AppShell integration', () => {
+  it('MainLayout imports AppShell from @cloistr/ui/components', () => {
+    const content = src('src/components/layout/MainLayout.tsx');
+    expect(content).toContain("from '@cloistr/ui/components'");
+    expect(content).toContain('AppShell');
+  });
+
+  it('MainLayout passes nav to AppShell (space has in-app nav)', () => {
+    const content = src('src/components/layout/MainLayout.tsx');
+    // nav= wires SpaceNavLinks into the shell drawer / desktop sidebar.
+    expect(content).toContain('nav={');
+    expect(content).toContain('SpaceNavLinks');
+  });
+
+  it('MainLayout does not pass menu to AppShell (space has no app commands)', () => {
+    const content = src('src/components/layout/MainLayout.tsx');
+    // space has no menu bar — passing menu would add an empty control.
+    expect(content).not.toMatch(/menu=\{/);
+  });
+
+  it('index.css does not contain the old mobile hamburger clearance rule', () => {
+    const css = src('src/index.css');
+    // The padding-left:56px hack was only needed for the now-removed app hamburger.
+    expect(css).not.toContain('padding-left: 56px');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NavLinks: nav items must have min-h-[44px] for touch targets.
+// ---------------------------------------------------------------------------
+
+describe('SpaceNavLinks tap targets', () => {
   it('NavLink className includes min-h-[44px]', () => {
-    const content = src('src/components/layout/Sidebar.tsx');
+    const content = src('src/components/layout/SpaceNavLinks.tsx');
     expect(content).toContain('min-h-[44px]');
   });
 });
