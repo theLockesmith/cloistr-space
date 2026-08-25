@@ -56,26 +56,12 @@ body {
 }
 
 /*
- * Mobile hamburger clearance.
- *
- * MainLayout renders an absolute-positioned hamburger button at left:8 top:8
- * (40 px wide, right edge at 48 px) above the shared header. Without
- * adjustment, the z-70 button physically overlaps the .cloistr-header-logo
- * click target (measured left:24–right:128 at 375 px width), capturing ~23%
- * of it. This rule pushes the header's internal padding-left out to 56 px on
- * mobile — just past the button's right edge — so the logo lands at x≥56 and
- * no click area is shadowed. The shared Header component has no prop for this
- * because the control is app-specific; the correct long-term fix is a hamburger
- * slot in @cloistr/ui Header.
- *
- * The Tailwind md breakpoint (768 px) matches MainLayout's md:hidden guard on
- * the button, so this override is also limited to the same breakpoint.
+ * AppShell owns the mobile hamburger as of @cloistr/ui 0.30.0. The
+ * app-specific hamburger button that was absolute-positioned at left:8 top:8
+ * and required this padding-left clearance has been removed. The media query
+ * below is intentionally deleted — restoring it would push the header logo
+ * right for no reason now that the overlapping button is gone.
  */
-@media (max-width: 767px) {
-  .cloistr-header {
-    padding-left: 56px;
-  }
-}
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
