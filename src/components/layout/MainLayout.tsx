@@ -1,5 +1,5 @@
 import { Outlet } from 'react-router-dom';
-import { AppShell } from '@cloistr/ui/components';
+import { AppShell, AppShellToggle } from '@cloistr/ui/components';
 import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { SpaceNavLinks } from './SpaceNavLinks';
 import { SubHeader } from './SubHeader';
@@ -48,7 +48,11 @@ export function MainLayout() {
         No menu prop → no horizontal menu bar, no menu sections in the drawer.
         Neither condition → no hamburger at all (per navigation-model.md).
       */}
-      <AppShell serviceId="space" nav={<SpaceNavLinks />}>
+      {/* toggleInHeader: without it AppShell renders the control as its own
+          row ABOVE the content, which showed up as unexplained blank space
+          above the header. Portaled into UnifiedHeader instead. */}
+      <AppShell serviceId="space" nav={<SpaceNavLinks />} toggleInHeader>
+        <AppShellToggle />
         {/* h-dvh here so the inner flex column fills the AppShell content area. */}
         <div className="flex h-dvh flex-col bg-cloistr-dark">
           <UnifiedHeader
