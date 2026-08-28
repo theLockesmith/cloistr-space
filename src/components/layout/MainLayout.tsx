@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import { AppShell, AppShellToggle } from '@cloistr/ui/components';
 import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { SpaceNavLinks } from './SpaceNavLinks';
@@ -24,6 +24,7 @@ export function MainLayout() {
   // not SharedAuthProvider. Pass that session to the shared Header so its Sign Out
   // clears the local store + shared session — otherwise logout is a no-op here.
   const { isAuthenticated, pubkey, logout } = useAuth();
+  const navigate = useNavigate();
 
   // Initialize contacts sync — auto-syncs on auth + connection.
   useContactsSync({
@@ -61,6 +62,16 @@ export function MainLayout() {
               authenticated: isAuthenticated,
               pubkey: pubkey ?? undefined,
               onLogout: logout,
+              // Without this the header renders NO sign-in control when logged
+              // out. Passing `auth` at all makes the shared Header treat this
+              // app as managing its own session, and its logged-out branch then
+              // renders null specifically when onSignIn is absent -- that case
+              // exists for login screens, where the page IS the form and a
+              // second Sign In button would be redundant. MainLayout wraps every
+              // route, not just the login screen, so it was taking the
+              // login-screen branch everywhere and the header lost its only
+              // affordance for signing in.
+              onSignIn: () => navigate('/login'),
             }}
           />
           <SubHeader />
