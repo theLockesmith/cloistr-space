@@ -5,11 +5,12 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { GroupChat } from './GroupChat';
+import { GroupThreads } from './GroupThreads';
 import { GroupFiles } from './GroupFiles';
 import { GroupMembers } from './GroupMembers';
 import { useGroupActions } from '@/services/groups/useGroupActions';
 
-type Tab = 'chat' | 'files' | 'members';
+type Tab = 'chat' | 'threads' | 'files' | 'members';
 
 interface GroupWorkspaceProps {
   groupId: string;
@@ -95,6 +96,16 @@ export function GroupWorkspace({ groupId, groupName, onLeaveGroup }: GroupWorksp
             isActive={activeTab === 'chat'}
             onClick={() => setActiveTab('chat')}
           />
+          {/* Beside Chat rather than above it: threads are group-scoped by
+              construction, so a top-level Threads section would need a group
+              picker as its first interaction, which is Projects with extra
+              steps. */}
+          <TabButton
+            label="Threads"
+            icon={<ThreadsIcon />}
+            isActive={activeTab === 'threads'}
+            onClick={() => setActiveTab('threads')}
+          />
           <TabButton
             label="Files"
             icon={<FilesIcon />}
@@ -114,6 +125,9 @@ export function GroupWorkspace({ groupId, groupName, onLeaveGroup }: GroupWorksp
       <div className="flex-1 overflow-hidden">
         {activeTab === 'chat' && (
           <GroupChat groupId={groupId} groupName={groupName} />
+        )}
+        {activeTab === 'threads' && (
+          <GroupThreads groupId={groupId} />
         )}
         {activeTab === 'files' && (
           <GroupFiles groupId={groupId} />
@@ -156,6 +170,14 @@ function ChatIcon() {
   return (
     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+    </svg>
+  );
+}
+
+function ThreadsIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
     </svg>
   );
 }
