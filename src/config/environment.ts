@@ -7,7 +7,13 @@ export const config = {
 
   // Cloistr services
   signerUrl: import.meta.env.VITE_SIGNER_URL ?? 'https://signer.cloistr.xyz',
-  driveApiUrl: import.meta.env.VITE_DRIVE_API ?? 'https://drive-api.cloistr.xyz',
+  // Drive/Stash is served at stash.cloistr.xyz. drive-api.cloistr.xyz has never
+  // existed -- it is NXDOMAIN -- so this default produced a NetworkError on
+  // every drive call rather than a clean failure, which is why the activity
+  // dashboard's file widgets read as "no files" instead of as an error.
+  // Verified 2026-08-27: stash.cloistr.xyz answers 200 on /health, /api/files
+  // and /api/quota with the shapes the DriveClient mappers expect.
+  driveApiUrl: import.meta.env.VITE_DRIVE_API ?? 'https://stash.cloistr.xyz',
   blossomApiUrl: import.meta.env.VITE_BLOSSOM_API ?? 'https://files.cloistr.xyz',
   discoveryApiUrl: import.meta.env.VITE_DISCOVERY_API ?? 'https://discover.cloistr.xyz/api',
 
