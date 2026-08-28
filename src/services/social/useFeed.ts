@@ -36,6 +36,8 @@ interface UseFeedReturn {
   refresh: () => void;
   setMode: (mode: FeedMode) => void;
   mode: FeedMode;
+  /** Number of contacts the following/wot filters are built from. */
+  followingCount: number;
 }
 
 /** Parse a kind:1 event into a Note */
@@ -378,5 +380,16 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     refresh,
     setMode,
     mode,
+    /**
+     * How many contacts the following/wot filters are built from.
+     *
+     * Exposed so the empty state can tell apart "we asked and there was
+     * nothing" from "we never asked, because there were no authors to ask
+     * about". Those render identically otherwise, and the second one is the
+     * common case: Space's contact store is NIP-0A kind:33000, while almost
+     * every other Nostr client writes kind:3. A user with a full follow list
+     * elsewhere starts here with an empty one until they import it.
+     */
+    followingCount: following.length,
   };
 }

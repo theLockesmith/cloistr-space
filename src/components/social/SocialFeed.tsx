@@ -8,7 +8,8 @@ import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import type { Note, FeedMode } from '@/types/social';
 
 export function SocialFeed() {
-  const { notes, isLoading, error, hasMore, loadMore, refresh, setMode, mode } = useFeed();
+  const { notes, isLoading, error, hasMore, loadMore, refresh, setMode, mode, followingCount } =
+    useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, canAct } = useNoteActions();
 
@@ -193,12 +194,33 @@ export function SocialFeed() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
           </div>
-          <h3 className="mb-2 font-medium text-cloistr-light">No notes yet</h3>
-          <p className="text-sm text-cloistr-light/60">
-            {mode === 'following'
-              ? 'Follow some people to see their notes here'
-              : 'No notes found in this feed'}
-          </p>
+          {(mode === 'following' || mode === 'wot') && followingCount === 0 ? (
+            <>
+              {/* Not "no notes" -- we never ran a query. The following and wot
+                  filters need authors, so with no contacts they are skipped
+                  entirely. Saying "follow some people" here is wrong and
+                  actively misleading for the common case: the user very likely
+                  does follow people, in a kind:3 list that this app has not
+                  imported into its kind:33000 store yet. */}
+              <h3 className="mb-2 font-medium text-cloistr-light">No contacts yet</h3>
+              <p className="text-sm text-cloistr-light/60">
+                This feed is built from your contact list, which is empty. If you already follow
+                people with another Nostr app, import them from the Activity page to see their
+                notes here.
+              </p>
+            </>
+          ) : (
+            <>
+              <h3 className="mb-2 font-medium text-cloistr-light">No notes yet</h3>
+              <p className="text-sm text-cloistr-light/60">
+                {mode === 'following' || mode === 'wot'
+                  ? `Nothing found from the ${followingCount} ${
+                      followingCount === 1 ? 'contact' : 'contacts'
+                    } in your list.`
+                  : 'No notes found in this feed'}
+              </p>
+            </>
+          )}
         </div>
       )}
 
