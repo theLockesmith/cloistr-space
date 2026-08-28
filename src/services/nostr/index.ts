@@ -21,3 +21,6 @@ export {
 } from './NdkProvider';
 
 export { RelayAuthPolicy, type RelayAuthPolicyState } from './authPolicy';
+
+export { resolveAndApplyRelays, type ResolveResult } from './relayPrefs';
+export { useRelayPrefsSync } from './useRelayPrefsSync';

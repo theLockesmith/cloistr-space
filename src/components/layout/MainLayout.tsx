@@ -5,6 +5,7 @@ import { SpaceNavLinks } from './SpaceNavLinks';
 import { SubHeader } from './SubHeader';
 import { ToastContainer } from '@/components/common/Toast';
 import { useContactsSync } from '@/services/crdt';
+import { useRelayPrefsSync } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 
 /**
@@ -25,6 +26,12 @@ export function MainLayout() {
   // clears the local store + shared session — otherwise logout is a no-op here.
   const { isAuthenticated, pubkey, logout } = useAuth();
   const navigate = useNavigate();
+
+  // Resolve the user's own relays (kind:30078 cloistr-relays, falling back to
+  // NIP-65 kind:10002) and hand them to NDK. Without this the pool stays on the
+  // hardcoded default and the relay list a user curates on the Profile page is
+  // never read back.
+  useRelayPrefsSync();
 
   // Initialize contacts sync — auto-syncs on auth + connection.
   useContactsSync({
