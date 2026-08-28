@@ -15,6 +15,7 @@ import NDK, {
 import type { UnsignedEvent } from 'nostr-tools';
 import type { SignerInterface } from '@cloistr/auth';
 import { defaultRelays } from '@/config/environment';
+import { RelayAuthPolicy } from './authPolicy';
 
 /**
  * Relay connection status for UI
@@ -23,6 +24,16 @@ export interface RelayStatus {
   url: string;
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   error?: string;
+  /**
+   * True for relays we asked for, false for ones the outbox model found on its
+   * own while resolving a followed author's relay list.
+   *
+   * Before outbox, discovered relays were dropped from tracking entirely, which
+   * was fine when the pool only ever held what we configured. It is not fine now:
+   * most connections are discovered, so dropping them made the status UI report
+   * a number with no relationship to how many sockets are actually open.
+   */
+  configured: boolean;
 }
 
 /**
@@ -32,6 +43,11 @@ export interface NdkServiceConfig {
   explicitRelayUrls?: string[];
   autoConnect?: boolean;
   debug?: boolean;
+  /**
+   * Authenticate to relays beyond the user's own set. Defaults to true.
+   * Backs the single user-facing setting described in ded5c8fc.
+   */
+  relayAuthEnabled?: boolean;
 }
 
 /**
@@ -127,26 +143,41 @@ export class NdkService {
   private configuredRelays: Set<string>;
   private isConnecting = false;
   private isConnected = false;
+  private readonly authPolicy: RelayAuthPolicy;
 
   constructor(config: NdkServiceConfig = {}) {
     const relayUrls = config.explicitRelayUrls ?? [...defaultRelays];
 
-    // Track which relays we explicitly configured (ignore dynamic discoveries)
-    // Normalize URLs to handle trailing slash inconsistencies
+    // Relays we asked for, as opposed to ones outbox resolution turns up later.
+    // Normalize URLs to handle trailing slash inconsistencies.
     this.configuredRelays = new Set(relayUrls.map((url) => NdkService.normalizeUrl(url)));
+
+    // These are the user's own relays, so they are tier 1: always authenticated.
+    // Anything the outbox model discovers later is not, and has to earn a
+    // signature by having an open subscription. See authPolicy.ts.
+    this.authPolicy = new RelayAuthPolicy(relayUrls, config.relayAuthEnabled ?? true);
 
     this.ndk = new NDK({
       explicitRelayUrls: relayUrls,
-      autoConnectUserRelays: false, // Manual control
-      enableOutboxModel: false, // Start simple, enable later
-      // Auto-authenticate with relays when challenged (NIP-42)
-      // Required for HAVEN relays that need auth for outbox writes
-      relayAuthDefaultPolicy: async () => true,
+      // Both of these default to true in NDK and were turned off during the
+      // Phase 1 scaffold (c9fb26b) with a note to enable them later. Leaving
+      // them off meant every feed query went to explicitRelayUrls only, so a
+      // following feed asked one relay for events written to relays it does not
+      // carry -- see useFeed.ts, which builds a single authors[] filter.
+      // Outbox resolves each author's own write relays instead.
+      autoConnectUserRelays: true,
+      enableOutboxModel: true,
+      relayAuthDefaultPolicy: this.authPolicy.policy,
     });
 
     // Initialize relay statuses
     for (const url of relayUrls) {
-      this.relayStatuses.set(url, { url, status: 'disconnected' });
+      const normalized = NdkService.normalizeUrl(url);
+      this.relayStatuses.set(normalized, {
+        url: normalized,
+        status: 'disconnected',
+        configured: true,
+      });
     }
 
     // Set up relay event listeners
@@ -185,11 +216,62 @@ export class NdkService {
     // Normalize URL for consistent comparison (NDK may add trailing slash)
     const normalizedUrl = NdkService.normalizeUrl(url);
 
-    // Only track relays we explicitly configured (ignore dynamic discoveries)
-    if (!this.configuredRelays.has(normalizedUrl)) {
-      return;
+    // Track discovered relays too, flagged so the UI can tell them apart. They
+    // used to be dropped here, which was harmless when the pool only held what
+    // we configured and actively misleading once outbox started adding to it.
+    this.relayStatuses.set(normalizedUrl, {
+      url: normalizedUrl,
+      status,
+      error,
+      configured: this.configuredRelays.has(normalizedUrl),
+    });
+    this.notifyStatusListeners();
+  }
+
+  /**
+   * Relay auth policy, for callers that need to update it after construction:
+   * `setTrustedRelays` on login or key switch, `setEnabled` from the user
+   * setting, `addTrustedRelay` when joining a NIP-29 group.
+   */
+  getAuthPolicy(): RelayAuthPolicy {
+    return this.authPolicy;
+  }
+
+  /**
+   * Replace the configured relay set.
+   *
+   * Used once relay preferences resolve (kind:30078 cloistr-relays, falling back
+   * to kind:10002), which happens after construction because it needs a pubkey.
+   * Updates tier 1 to match, since the user's own relays are exactly the set
+   * that should always be authenticated.
+   *
+   * Does not reconnect on its own -- NDK keeps existing sockets and the caller
+   * decides whether a reconnect is warranted.
+   */
+  setConfiguredRelays(urls: string[]): void {
+    this.configuredRelays = new Set(urls.map((url) => NdkService.normalizeUrl(url)));
+    this.authPolicy.setTrustedRelays(urls);
+
+    for (const url of urls) {
+      const normalized = NdkService.normalizeUrl(url);
+      if (!this.relayStatuses.has(normalized)) {
+        this.relayStatuses.set(normalized, {
+          url: normalized,
+          status: 'disconnected',
+          configured: true,
+        });
+      }
     }
-    this.relayStatuses.set(normalizedUrl, { url: normalizedUrl, status, error });
+
+    // Re-flag existing entries: a relay can move between configured and
+    // discovered when the user edits their relay list.
+    for (const [url, status] of this.relayStatuses) {
+      this.relayStatuses.set(url, {
+        ...status,
+        configured: this.configuredRelays.has(url),
+      });
+    }
+
     this.notifyStatusListeners();
   }
 

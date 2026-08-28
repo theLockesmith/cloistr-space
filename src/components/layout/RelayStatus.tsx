@@ -12,10 +12,13 @@ import { useNdk, type RelayStatus as RelayStatusType } from '@/services/nostr';
 export function RelayStatusCompact() {
   const { relayStatuses, isConnected, isConnecting, reconnect } = useNdk();
 
-  const connectedCount = Array.from(relayStatuses.values()).filter(
-    (s) => s.status === 'connected'
-  ).length;
-  const totalCount = relayStatuses.size;
+  // Count only the user's own relays. The outbox model opens sockets to whatever
+  // relays the people they follow write to, so counting everything would show a
+  // number that swings with the feed and means nothing to the reader.
+  // Discovered relays are surfaced separately in the panel.
+  const configured = Array.from(relayStatuses.values()).filter((s) => s.configured);
+  const connectedCount = configured.filter((s) => s.status === 'connected').length;
+  const totalCount = configured.length;
 
   const statusColor = isConnecting
     ? 'bg-cloistr-warning animate-pulse'
@@ -75,9 +78,12 @@ export function RelayStatusPanel({ onClose }: { onClose?: () => void }) {
   const { relayStatuses, isConnecting, reconnect } = useNdk();
   const [showDetails, setShowDetails] = useState(false);
 
-  const connectedCount = Array.from(relayStatuses.values()).filter(
-    (s) => s.status === 'connected'
-  ).length;
+  const all = Array.from(relayStatuses.values());
+  const configured = all.filter((s) => s.configured);
+  const discovered = all.filter((s) => !s.configured);
+
+  const connectedCount = configured.filter((s) => s.status === 'connected').length;
+  const discoveredConnected = discovered.filter((s) => s.status === 'connected').length;
 
   return (
     <div className="rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-4">
@@ -110,7 +116,7 @@ export function RelayStatusPanel({ onClose }: { onClose?: () => void }) {
             status={connectedCount > 0 ? 'connected' : isConnecting ? 'connecting' : 'disconnected'}
           />
           <span className="text-sm text-cloistr-light">
-            {connectedCount} of {relayStatuses.size} connected
+            {connectedCount} of {configured.length} connected
           </span>
         </div>
         <button
@@ -122,12 +128,32 @@ export function RelayStatusPanel({ onClose }: { onClose?: () => void }) {
         </button>
       </div>
 
+      {/* Discovered relays: opened by the outbox model to reach people the user
+          follows. Summarised rather than listed inline, since the count moves
+          with the feed and is not something the user configured. */}
+      {discovered.length > 0 && (
+        <div className="mb-3 -mt-1 text-xs text-cloistr-light/50">
+          {discoveredConnected} of {discovered.length} discovered via followed authors
+        </div>
+      )}
+
       {/* Relay list */}
       {showDetails && (
         <div className="space-y-2">
-          {Array.from(relayStatuses.values()).map((relay) => (
+          {configured.map((relay) => (
             <RelayItem key={relay.url} relay={relay} />
           ))}
+
+          {discovered.length > 0 && (
+            <>
+              <div className="pt-2 mt-2 border-t border-cloistr-light/10 text-xs text-cloistr-light/40">
+                Discovered
+              </div>
+              {discovered.map((relay) => (
+                <RelayItem key={relay.url} relay={relay} />
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -135,7 +161,14 @@ export function RelayStatusPanel({ onClose }: { onClose?: () => void }) {
 }
 
 function RelayItem({ relay }: { relay: RelayStatusType }) {
-  const hostname = new URL(relay.url).hostname;
+  // Discovered relay URLs come from other users' relay lists, so they are not
+  // guaranteed to parse. A throw here would take out the whole panel.
+  let hostname = relay.url;
+  try {
+    hostname = new URL(relay.url).hostname;
+  } catch {
+    // Fall back to the raw string.
+  }
 
   return (
     <div className="flex items-center justify-between py-1">
