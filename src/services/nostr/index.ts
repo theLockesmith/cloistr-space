@@ -22,5 +22,6 @@ export {
 
 export { RelayAuthPolicy, type RelayAuthPolicyState } from './authPolicy';
 
+export { subscribeOnce, type OnceHandlers, type SubscribeFn } from './subscribeOnce';
 export { resolveAndApplyRelays, type ResolveResult } from './relayPrefs';
 export { useRelayPrefsSync } from './useRelayPrefsSync';

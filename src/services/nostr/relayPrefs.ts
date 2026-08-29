@@ -18,6 +18,7 @@
 import { getRelayPrefs, type RelayPrefs } from '@cloistr/collab-common/relay';
 import type { Event as NostrEvent, Filter as NostrFilter } from 'nostr-tools';
 import type { NdkService } from './ndk';
+import { subscribeOnce } from './subscribeOnce';
 import { config, defaultRelays } from '@/config/environment';
 
 /**
@@ -35,17 +36,23 @@ function ndkPoolAdapter(service: NdkService) {
       onEvent: (event: NostrEvent) => void,
       options?: { oneose?: () => void }
     ) {
-      const sub = service.subscribe(filters as never, { closeOnEose: true });
-
-      sub.on('event', (event: { rawEvent: () => unknown }) => {
-        onEvent(event.rawEvent() as NostrEvent);
-      });
-
-      if (options?.oneose) {
-        sub.on('eose', options.oneose);
-      }
-
-      sub.start();
+      // Handlers go IN to subscribe rather than being attached after it. NDK
+      // auto-starts inside the call, and collab-common's queryForEvent resolves
+      // on oneose or otherwise waits out its 5s timeout -- so losing the eose
+      // to that window does not degrade the query, it silently converts it into
+      // "no relay list found" after a five-second stall. Both the kind:30078
+      // and kind:10002 lookups failed this way, which is why relay preferences
+      // resolved to the hardcoded default. See subscribeOnce.ts.
+      const sub = subscribeOnce(
+        service.subscribe.bind(service) as never,
+        filters as never,
+        {
+          onEvent: (event: { rawEvent: () => unknown }) => {
+            onEvent(event.rawEvent() as NostrEvent);
+          },
+          onEose: options?.oneose,
+        } as never
+      );
 
       return { close: () => sub.stop() };
     },

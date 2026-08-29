@@ -148,7 +148,7 @@ export function ProjectsView() {
                 </div>
                 <h3 className="mb-2 font-medium text-cloistr-light">Select a project</h3>
                 <p className="text-sm text-cloistr-light/60">
-                  Choose a project from the sidebar to view chat and files
+                  Choose a project to open its chat, threads, files and members
                 </p>
               </div>
             </div>

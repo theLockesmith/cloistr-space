@@ -390,10 +390,23 @@ export class NdkService {
     opts?: {
       closeOnEose?: boolean;
       groupable?: boolean;
+    },
+    /**
+     * Handlers registered AT SUBSCRIBE TIME. NDK auto-starts the subscription
+     * inside this call, so anything attached with .on() afterwards can miss a
+     * delivery that already happened -- which is only survivable for long-lived
+     * streaming subscriptions. One-shot queries must pass handlers here; see
+     * subscribeOnce.ts.
+     */
+    handlers?: {
+      onEvent?: (event: NDKEvent) => void;
+      onEose?: () => void;
     }
   ) {
     const filterArray = Array.isArray(filters) ? filters : [filters];
-    return this.ndk.subscribe(filterArray, opts);
+    return handlers
+      ? this.ndk.subscribe(filterArray, opts, handlers)
+      : this.ndk.subscribe(filterArray, opts);
   }
 
   /**

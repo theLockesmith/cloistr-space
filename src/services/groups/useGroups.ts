@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeOnce, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Group, GroupMembership, AdminPermission } from '@/types/groups';
 import { GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND } from '@/types/groups';
@@ -131,17 +131,26 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
       limit: 1,
     };
 
-    const sub = subscribe([filter], { closeOnEose: true });
-
-    sub.on('event', (event: NDKEvent) => {
-      const group = parseGroupEvent(event);
-      if (group) {
-        groupMetadataRef.current.set(groupId, group);
-        processGroups();
-      }
+    // Handlers must be registered AS PART OF subscribing, not attached
+    // afterwards. NDK auto-starts inside subscribe(), and this is a one-shot
+    // closeOnEose query with limit:1 against an event already in relay storage
+    // -- about the fastest a reply can arrive, and therefore the case most
+    // likely to be delivered before a late .on() exists.
+    //
+    // This is why groups vanished on reload. The member list (kind:39002)
+    // arrived fine on the long-lived subscription, but processGroups iterates
+    // groupMetadataRef, so a group with no metadata is dropped: the membership
+    // was known and discarded for want of a name. Create appeared to work
+    // because the publish genuinely did.
+    subscribeOnce(subscribe, [filter], {
+      onEvent: (event: NDKEvent) => {
+        const group = parseGroupEvent(event);
+        if (group) {
+          groupMetadataRef.current.set(groupId, group);
+          processGroups();
+        }
+      },
     });
-
-    sub.start();
   }, [subscribe, isConnected, processGroups]);
 
   const startSubscription = useCallback(() => {
