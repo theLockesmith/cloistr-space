@@ -136,6 +136,38 @@ describe('RelayAuthPolicy', () => {
     });
   });
 
+  describe("a relay the user owns that is NOT yet in tier 1", () => {
+    // Until relay preferences are resolved, tier 1 holds only the hardcoded
+    // default, so a user's own relay is treated as a stranger. The consequence
+    // is narrower than "auth is refused" and worth pinning precisely, because
+    // the two failure modes need different fixes.
+    const OWN_BUT_UNKNOWN = 'wss://my-personal-relay.example';
+
+    it('IS authenticated while something is being read from it', async () => {
+      const policy = new RelayAuthPolicy([OWN]);
+      // Reads survive: outbox connects, a subscription opens, the challenge
+      // arrives with that subscription live, and the demand-driven branch
+      // grants it. So feeds are not broken by the missing tier-1 entry, which
+      // is why this did not present as an obviously broken app.
+      await expect(policy.policy(fakeRelay(OWN_BUT_UNKNOWN, 1), 'challenge')).resolves.toBe(true);
+    });
+
+    it('is DECLINED when there is no open subscription, which is the publish case', async () => {
+      const policy = new RelayAuthPolicy([OWN]);
+      // This is the real damage. Publishing does not open a subscription, so a
+      // relay that requires NIP-42 to accept writes challenges, finds no active
+      // sub, and is declined -- the user's own note rejected by their own
+      // relay, with no error the policy layer can see. Fixed by resolving relay
+      // preferences into tier 1.
+      await expect(policy.policy(fakeRelay(OWN_BUT_UNKNOWN, 0), 'challenge')).resolves.toBe(false);
+    });
+
+    it('is unconditionally authenticated once it IS in tier 1', async () => {
+      const policy = new RelayAuthPolicy([OWN, OWN_BUT_UNKNOWN]);
+      await expect(policy.policy(fakeRelay(OWN_BUT_UNKNOWN, 0), 'challenge')).resolves.toBe(true);
+    });
+  });
+
   describe('hostile input', () => {
     it('does not throw on a malformed relay URL', async () => {
       const policy = new RelayAuthPolicy([OWN]);
