@@ -1,6 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ImportContactsCard, ConflictResolutionPanel } from '@/components/contacts';
+import {
+  ImportContactsCard,
+  RecoverContactsCard,
+  ConflictResolutionPanel,
+} from '@/components/contacts';
 import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/activity';
 import { useNdk } from '@/services/nostr';
 import { getDrive } from '@/services/cloistr';
@@ -57,6 +61,7 @@ export function ActivityDashboard() {
     <div className="space-y-6">
       {/* Contact sync alerts */}
       <div className="space-y-4">
+        <RecoverContactsCard />
         <ImportContactsCard />
         <ConflictResolutionPanel maxDisplay={3} />
       </div>

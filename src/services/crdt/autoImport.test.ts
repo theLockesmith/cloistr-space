@@ -18,6 +18,7 @@ function result(over: Partial<SyncResult> = {}): SyncResult {
   return {
     success: true,
     remoteEventsFound: 0,
+    remoteEntriesFound: 0,
     conflictsResolved: 0,
     published: false,
     ...over,
@@ -31,10 +32,35 @@ describe('autoImportState', () => {
     expect(autoImportState(result({ remoteEventsFound: 0 }), true)).toBe('synced-empty');
   });
 
-  it('is synced-populated when the user already has a NIP-0A list', () => {
-    // Never import over an existing list -- kind:3 is the legacy source and
-    // kind:33000 is authoritative once it exists.
-    expect(autoImportState(result({ remoteEventsFound: 1 }), true)).toBe('synced-populated');
+  it('is synced-populated when the user already has a NIP-0A list with content', () => {
+    // Never import over a real list -- kind:3 is the legacy source and
+    // kind:33000 is authoritative once it actually says something.
+    expect(
+      autoImportState(result({ remoteEventsFound: 1, remoteEntriesFound: 12 }), true)
+    ).toBe('synced-populated');
+  });
+
+  it('is synced-empty when an event EXISTS but carries no entries', () => {
+    // The trap that cost the operator their follow list. Space published a
+    // tagless kind:33000 on first sync, which superseded their real one, and
+    // from then on the gate saw an event and refused to import -- permanently,
+    // with no way for them to force it.
+    //
+    // Safe because a deliberate "I follow nobody" is never contentless:
+    // unfollowing leaves an np tombstone per removed contact. Zero entries
+    // means nothing was ever said.
+    expect(
+      autoImportState(result({ remoteEventsFound: 1, remoteEntriesFound: 0 }), true)
+    ).toBe('synced-empty');
+  });
+
+  it('counts tombstones as entries, so a fully-unfollowed list is NOT re-imported', () => {
+    // Someone who unfollowed everyone has entries (all tombstoned) and meant
+    // it. Re-importing kind:3 over that would resurrect every contact they
+    // removed. This is the case the entries-not-events rule must not break.
+    expect(
+      autoImportState(result({ remoteEventsFound: 1, remoteEntriesFound: 40 }), true)
+    ).toBe('synced-populated');
   });
 
   it('is not-synced before any sync has completed', () => {

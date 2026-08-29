@@ -17,10 +17,25 @@ import {
   getKind3Filter,
   countKind3Contacts,
 } from './nip0a';
+import {
+  selectRecoveryCandidate,
+  type RecoveryCandidate,
+  type ParsedContactEvent,
+} from './recovery';
 
 export interface SyncResult {
   success: boolean;
   remoteEventsFound: number;
+  /**
+   * Entries -- follows AND unfollow tombstones -- across the merged remote
+   * state.
+   *
+   * Distinct from remoteEventsFound on purpose. An event can exist and carry
+   * nothing, which is exactly the state Space used to create for itself by
+   * publishing an empty list when it found none. Counting events says "you have
+   * a contact list"; counting entries says whether that list means anything.
+   */
+  remoteEntriesFound: number;
   conflictsResolved: number;
   published: boolean;
   error?: string;
@@ -53,6 +68,7 @@ export class ContactsSyncService {
       return {
         success: false,
         remoteEventsFound: 0,
+        remoteEntriesFound: 0,
         conflictsResolved: 0,
         published: false,
         error: 'Sync already in progress',
@@ -70,8 +86,10 @@ export class ContactsSyncService {
 
       // Step 2: Merge remote state with local
       let conflictsResolved = 0;
+      let remoteEntriesFound = 0;
       if (remoteEvents.length > 0) {
         const mergedRemote = mergeNip0aEvents(remoteEvents);
+        remoteEntriesFound = mergedRemote.entries.size;
         const beforeConflicts = store.conflictLog.length;
         store.mergeCrdt(mergedRemote);
         conflictsResolved = useContactsStore.getState().conflictLog.length - beforeConflicts;
@@ -95,6 +113,7 @@ export class ContactsSyncService {
       return {
         success: true,
         remoteEventsFound: remoteEvents.length,
+        remoteEntriesFound,
         conflictsResolved,
         published,
       };
@@ -104,6 +123,7 @@ export class ContactsSyncService {
       return {
         success: false,
         remoteEventsFound: 0,
+        remoteEntriesFound: 0,
         conflictsResolved: 0,
         published: false,
         error: message,
@@ -124,6 +144,46 @@ export class ContactsSyncService {
   }
 
   /**
+   * Look for a contact list Space overwrote with an empty one.
+   *
+   * Returns null when there is nothing to recover, which is the normal outcome
+   * for anyone unaffected -- and also for anyone whose relay dropped the
+   * superseded version, since a relay may legitimately discard the old copy of
+   * an addressable event on replacement.
+   */
+  async findRecovery(pubkey: string): Promise<RecoveryCandidate | null> {
+    const events = await this.fetchRemoteContacts(pubkey);
+
+    const parsed: ParsedContactEvent[] = [];
+    for (const event of events) {
+      const state = parseNip0aEvent(event);
+      if (state) {
+        parsed.push({ createdAt: event.created_at ?? 0, state });
+      }
+    }
+
+    return selectRecoveryCandidate(parsed);
+  }
+
+  /**
+   * Restore a recovered contact list and republish it.
+   *
+   * Merged into the local store rather than replacing it, so anything followed
+   * since the overwrite survives the restore. The publish then supersedes the
+   * empty event the same way the empty one superseded the original.
+   */
+  async applyRecovery(candidate: RecoveryCandidate): Promise<boolean> {
+    const store = useContactsStore.getState();
+    store.mergeCrdt(candidate.state);
+
+    const published = await this.publishContacts();
+    if (published) {
+      useContactsStore.getState().markSynced();
+    }
+    return published;
+  }
+
+  /**
    * Publish current contact list to relays
    */
   async publishContacts(): Promise<boolean> {
@@ -135,10 +195,29 @@ export class ContactsSyncService {
     }
 
     // Create the NIP-0A event
+    const tags = buildNip0aTags(store.crdt);
+
+    // Never publish a contact list carrying nothing.
+    //
+    // This is the defect that cost the operator their follow list: sync() calls
+    // publishContacts when it finds no remote events, and with an empty local
+    // store that published a tagless kind:33000. Because kind:33000 is
+    // addressable on d=contacts, that empty event SUPERSEDED their real list --
+    // measured on relay.cloistr.xyz as a populated event from 2026-08-02
+    // replaced by a tagless one from 2026-08-24.
+    //
+    // A tagless list is never something a user meant: deliberately unfollowing
+    // everyone leaves np tombstones behind, so a real "I follow nobody" is full
+    // of tags. Nothing is lost by refusing, because there was nothing to say.
+    if (tags.length === 0) {
+      console.warn('[ContactsSync] Refusing to publish an empty contact list');
+      return false;
+    }
+
     const event = new NDKEvent(ndk);
     event.kind = NIP0A_KIND;
     event.content = buildNip0aContent(store.crdt);
-    event.tags = buildNip0aTags(store.crdt);
+    event.tags = tags;
 
     try {
       // Sign and publish

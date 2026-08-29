@@ -8,6 +8,7 @@ import { useNdk } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useContactsStore } from '@/stores/contactsStore';
 import { ContactsSyncService, type SyncResult, type ImportResult } from './contactsSync';
+import type { RecoveryCandidate } from './recovery';
 
 interface UseContactsSyncOptions {
   /** Auto-sync on mount and when connection established */
@@ -60,7 +61,16 @@ export function autoImportState(result: SyncResult | null, isReady: boolean): Au
   if (!isReady || !result || !result.success) {
     return 'not-synced';
   }
-  return result.remoteEventsFound > 0 ? 'synced-populated' : 'synced-empty';
+  // Entries, not events. An existing but CONTENTLESS kind:33000 is not
+  // meaningfully different from having none, and it is precisely the state
+  // Space used to manufacture for itself by publishing an empty list on first
+  // sync -- which then blocked import forever, because the gate saw an event.
+  //
+  // Safe to treat as importable because a deliberate "I follow nobody" is never
+  // contentless: NIP-0A records unfollows as np tombstones, so unfollowing
+  // everyone leaves an entry per removed contact. Zero entries means nothing was
+  // ever said, not that someone said no.
+  return result.remoteEntriesFound > 0 ? 'synced-populated' : 'synced-empty';
 }
 
 interface Kind3Status {
@@ -88,6 +98,16 @@ interface UseContactsSyncReturn {
   importFromKind3: () => Promise<ImportResult>;
   /** Whether a kind:3 auto-import is currently safe, and why. */
   autoImportState: AutoImportState;
+  /**
+   * A contact list Space overwrote with an empty one, if there is one.
+   *
+   * Null means nothing to recover. Deliberately NOT applied automatically:
+   * restoring someone's contact list is a visible act and they should be told
+   * what came back and from when.
+   */
+  recovery: RecoveryCandidate | null;
+  /** Restore the recovered list and republish it. */
+  applyRecovery: () => Promise<boolean>;
 }
 
 /**
@@ -128,6 +148,7 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
       const result: SyncResult = {
         success: false,
         remoteEventsFound: 0,
+        remoteEntriesFound: 0,
         conflictsResolved: 0,
         published: false,
         error: 'Sync service not ready',
@@ -225,6 +246,46 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
 
   const importState = autoImportState(lastSyncResult, isReady);
 
+  // Look for an overwritten contact list once the store is known to be empty.
+  // Checked at the same gate as auto-import because it is the same evidence:
+  // a confirmed-empty current list is what makes an older one worth restoring.
+  const [recovery, setRecovery] = useState<RecoveryCandidate | null>(null);
+  const [recoveryChecked, setRecoveryChecked] = useState(false);
+  const recoveryCheckedForRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (importState !== 'synced-empty' || !pubkey || !syncServiceRef.current) return;
+    if (recoveryCheckedForRef.current === pubkey) return;
+
+    recoveryCheckedForRef.current = pubkey;
+    const service = syncServiceRef.current;
+
+    const timeoutId = setTimeout(() => {
+      service
+        .findRecovery(pubkey)
+        .then((found) => {
+          setRecovery(found);
+          setRecoveryChecked(true);
+        })
+        .catch(() => {
+          // Do not block auto-import forever on a failed lookup.
+          setRecoveryChecked(true);
+          // Recovery is a bonus path. Failing to find one must not disturb
+          // normal sync, and leaves auto-import as the fallback.
+          recoveryCheckedForRef.current = null;
+        });
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [importState, pubkey]);
+
+  const applyRecovery = useCallback(async (): Promise<boolean> => {
+    if (!syncServiceRef.current || !recovery) return false;
+    const ok = await syncServiceRef.current.applyRecovery(recovery);
+    if (ok) setRecovery(null);
+    return ok;
+  }, [recovery]);
+
   // Auto-import a kind:3 list for a user who has no NIP-0A list.
   //
   // Before this, arriving with a full follow list in kind:3 -- which is what
@@ -241,6 +302,12 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
   useEffect(() => {
     if (!autoImportKind3) return;
     if (importState !== 'synced-empty') return;
+    // Recovery outranks import and must be allowed to resolve first. An older
+    // kind:33000 restores what the user actually had HERE, including NIP-0A
+    // state that never existed in kind:3. Importing first would publish a
+    // non-empty list, which hides the recovery candidate behind the same
+    // synced-populated gate that caused this whole problem.
+    if (!recoveryChecked || recovery) return;
     // Nothing to import, or we have not looked yet.
     if (!kind3Status.checked || !kind3Status.available) return;
     if (!pubkey) return;
@@ -256,7 +323,16 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
     // cascade the rule guards against. Same shape as the autoSync effect above.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void importFromKind3();
-  }, [autoImportKind3, importState, kind3Status.checked, kind3Status.available, pubkey, importFromKind3]);
+  }, [
+    autoImportKind3,
+    importState,
+    kind3Status.checked,
+    kind3Status.available,
+    pubkey,
+    importFromKind3,
+    recoveryChecked,
+    recovery,
+  ]);
 
   return {
     sync,
@@ -268,5 +344,7 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
     checkKind3,
     importFromKind3,
     autoImportState: importState,
+    recovery,
+    applyRecovery,
   };
 }
