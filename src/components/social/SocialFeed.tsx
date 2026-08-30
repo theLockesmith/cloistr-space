@@ -5,6 +5,10 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
+import { useEmojiSets } from '@/services/social/useEmojiSets';
+import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
+import { useLongPressMenu } from '@/services/social/useLongPressMenu';
+import { ReactionPicker } from './ReactionPicker';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
@@ -25,6 +29,7 @@ export function SocialFeed() {
   } = useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, canAct, blockedReason } = useNoteActions();
+  const { emoji, isLoading: emojiLoading } = useEmojiSets();
 
   // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
   // before this, so every card fell back to a truncated pubkey.
@@ -76,14 +81,20 @@ export function SocialFeed() {
   }, [composeText, isPosting, post, refresh]);
 
   const handleReact = useCallback(
-    async (note: Note) => {
-      if (!canAct || note.userReacted) return;
+    async (note: Note, entry?: EmojiEntry) => {
+      // Only the DEFAULT reaction is blocked by userReacted. Picking a specific
+      // emoji is a distinct act, and refusing it because a heart was already
+      // sent would make the picker silently do nothing.
+      if (!canAct) return;
+      if (!entry && note.userReacted) return;
 
       setActionError(null);
       markReacted(note.id, true);
 
+      const payload = entry ? reactionPayload(entry) : null;
+
       try {
-        await react(note.id, note.pubkey);
+        await react(note.id, note.pubkey, payload?.content, payload?.tags);
       } catch (err) {
         // Take it back visibly. A reverted heart is honest; a stuck-filled one
         // claims something happened that did not.
@@ -300,6 +311,9 @@ export function SocialFeed() {
             profile={authorProfiles.get(note.pubkey)}
             canAct={canAct}
             onReact={() => handleReact(note)}
+            onPickReaction={(entry) => handleReact(note, entry)}
+            emoji={emoji}
+            emojiLoading={emojiLoading}
             onRepost={() => handleRepost(note)}
           />
         ))}
@@ -329,14 +343,30 @@ function NoteCard({
   profile,
   canAct,
   onReact,
+  onPickReaction,
+  emoji,
+  emojiLoading,
   onRepost,
 }: {
   note: Note;
   profile?: AuthorProfile;
   canAct: boolean;
   onReact: () => void;
+  onPickReaction: (entry: EmojiEntry) => void;
+  emoji: EmojiEntry[];
+  emojiLoading: boolean;
   onRepost: () => void;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Plain click still sends the default heart. Hold, right-click or ArrowDown
+  // open the picker instead.
+  const { handlers: reactHandlers } = useLongPressMenu({
+    onOpen: () => setPickerOpen(true),
+    onActivate: onReact,
+    disabled: !canAct,
+  });
+
   // Prefer the resolved profile; note.authorProfile stays supported so a caller
   // that already has one is not forced through the lookup.
   const author = profile ?? note.authorProfile;
@@ -420,23 +450,42 @@ function NoteCard({
           </svg>
           {note.engagement.reposts > 0 && note.engagement.reposts}
         </button>
-        <button
-          onClick={onReact}
-          disabled={!canAct}
-          aria-disabled={!canAct}
-          className={`flex items-center gap-2 text-sm ${
-            !canAct
-              ? 'cursor-not-allowed text-cloistr-light/20'
-              : note.userReacted
-                ? 'text-cloistr-error'
-                : 'text-cloistr-light/40 hover:text-cloistr-error'
-          }`}
-        >
-          <svg className="h-5 w-5" fill={note.userReacted ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-          </svg>
-          {note.engagement.reactions > 0 && note.engagement.reactions}
-        </button>
+        {/* relative so the picker anchors to THIS button. The container must
+            not be the note or the feed, or the menu detaches on scroll. */}
+        <div className="relative">
+          <button
+            {...reactHandlers}
+            disabled={!canAct}
+            aria-disabled={!canAct}
+            aria-haspopup="menu"
+            aria-expanded={pickerOpen}
+            title={canAct ? 'Click to react. Hold or right-click to choose an emoji.' : undefined}
+            className={`flex items-center gap-2 text-sm ${
+              !canAct
+                ? 'cursor-not-allowed text-cloistr-light/20'
+                : note.userReacted
+                  ? 'text-cloistr-error'
+                  : 'text-cloistr-light/40 hover:text-cloistr-error'
+            }`}
+          >
+            <svg className="h-5 w-5" fill={note.userReacted ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+            </svg>
+            {note.engagement.reactions > 0 && note.engagement.reactions}
+          </button>
+
+          {pickerOpen && (
+            <ReactionPicker
+              emoji={emoji}
+              isLoading={emojiLoading}
+              onPick={(entry) => {
+                setPickerOpen(false);
+                onPickReaction(entry);
+              }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </div>
         {/* Zapping needs NIP-57, which is not implemented. */}
         <button
           disabled
