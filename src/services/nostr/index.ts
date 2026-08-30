@@ -32,3 +32,15 @@ export { resolveAndApplyRelays, type ResolveResult } from './relayPrefs';
 export { useRelayPrefsSync } from './useRelayPrefsSync';
 
 export { useCoalesced } from './useCoalesced';
+
+export {
+  decodeIdentifier,
+  decodeHexAs,
+  encodeProfile,
+  encodeEvent,
+  profilePath,
+  notePath,
+  abbreviate,
+  SecretKeyPastedError,
+  type Identifier,
+} from './identifiers';
