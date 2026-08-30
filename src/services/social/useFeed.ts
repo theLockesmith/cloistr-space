@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
-import { saveSnapshot, loadSnapshot, mergeSnapshot } from './feedSnapshot';
+import { saveSnapshot, loadSnapshot, shouldPersist } from './feedSnapshot';
 import {
   NOTE_KIND,
   REACTION_KIND,
@@ -317,33 +317,42 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   // of NDK, so this is a render snapshot instead. See feedSnapshot.ts for why,
   // and for what it deliberately does NOT do.
 
-  // Restore once per mode+account, not once per render. Tracked in a ref rather
-  // than derived from `notes` being empty, because notes are ALSO empty during
-  // a refresh -- and re-seeding there would resurrect the notes the user just
-  // asked to replace.
-  const restoredKeyRef = useRef<string | null>(null);
+  // Which mode/account the notes currently on screen were fetched under.
+  //
+  // Switching filters used to leave `notes` in place and MERGE the new mode's
+  // snapshot into them, so the union was then saved under the new mode's key
+  // and grew with every switch. After visiting all three filters, every key
+  // held the same union and all three rendered identically -- reported as
+  // "only showing my content (except now it's across all 3 view filters)".
+  //
+  // A feed for a different filter is a different feed. Changing mode resets it.
+  const notesOwnerRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const key = `${mode}:${pubkey ?? 'anon'}`;
-    if (restoredKeyRef.current === key) return;
-    restoredKeyRef.current = key;
+    const owner = `${mode}:${pubkey ?? 'anon'}`;
+    if (notesOwnerRef.current === owner) return;
+    notesOwnerRef.current = owner;
 
-    const restored = loadSnapshot(mode, pubkey);
-    if (restored.length === 0) return;
+    // Everything keyed to the old feed goes with it. Leaving seenIdsRef
+    // populated would silently drop notes the new filter legitimately wants,
+    // because they were already seen under the previous one.
+    seenIdsRef.current.clear();
+    engagementRef.current.clear();
+    seenEngagementRef.current.clear();
+    oldestTimestampRef.current = Math.floor(Date.now() / 1000);
 
-    // Merged, not assigned. The live subscription may already have delivered
-    // notes by the time storage is read, and overwriting those would replace
-    // fresh engagement counts with saved ones -- a reload would look like
-    // reactions had been undone.
-    setNotes((prev) => mergeSnapshot(prev, restored));
+    // REPLACE, not merge. The previous version merged to guard against the live
+    // subscription having already delivered notes -- but both effects run in
+    // the same commit, before any relay event can arrive, so that race does not
+    // exist. The defence against an impossible race created a real bug.
+    setNotes(loadSnapshot(mode, pubkey));
   }, [mode, pubkey]);
 
   // Persist on the trailing edge. Serialising 50 notes on every engagement
   // event would put a JSON.stringify on the exact per-event path that locked
   // the feed up, which is not a trade worth making for a convenience.
   const schedulePersist = useCoalesced(() => {
-    // refresh() empties notes before refilling them. Writing that through would
-    // destroy the snapshot at the moment it is most likely to be wanted.
-    if (notes.length === 0) return;
+    if (!shouldPersist(notesOwnerRef.current, `${mode}:${pubkey ?? 'anon'}`, notes.length)) return;
     saveSnapshot(notes, mode, pubkey);
   }, 1000);
 
