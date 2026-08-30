@@ -6,13 +6,14 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import { useAuthorProfiles } from '@/services/profile';
+import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
 
 export function SocialFeed() {
   const { notes, isLoading, error, hasMore, loadMore, refresh, setMode, mode, followingCount } =
     useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
-  const { react, repost, canAct } = useNoteActions();
+  const { react, repost, canAct, blockedReason } = useNoteActions();
 
   // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
   // before this, so every card fell back to a truncated pubkey.
@@ -161,6 +162,19 @@ export function SocialFeed() {
         </div>
       </div>
 
+      {/* Why actions are unavailable, stated once rather than under every note.
+          Rendered as text, not a title attribute -- this was reported from a
+          phone, where nothing hovers, and the whole reason it took a round trip
+          to locate is that a blocked button looked identical to a working one. */}
+      {blockedReason && (
+        <div
+          role="status"
+          className="rounded-lg border border-cloistr-warning/30 bg-cloistr-warning/5 px-4 py-2 text-sm text-cloistr-light/70"
+        >
+          {ACTION_BLOCKED_MESSAGE[blockedReason]}
+        </div>
+      )}
+
       {/* Error */}
       {error && (
         <div className="rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 p-4 text-center">
@@ -237,6 +251,7 @@ export function SocialFeed() {
             key={note.id}
             note={note}
             profile={authorProfiles.get(note.pubkey)}
+            canAct={canAct}
             onReact={() => handleReact(note)}
             onRepost={() => handleRepost(note)}
           />
@@ -265,11 +280,13 @@ export function SocialFeed() {
 function NoteCard({
   note,
   profile,
+  canAct,
   onReact,
   onRepost,
 }: {
   note: Note;
   profile?: AuthorProfile;
+  canAct: boolean;
   onReact: () => void;
   onRepost: () => void;
 }) {
@@ -323,9 +340,19 @@ function NoteCard({
         </div>
       )}
 
-      {/* Actions */}
+      {/* Actions.
+          Every control carries disabled AND aria-disabled, and the reason is
+          rendered as text below rather than in a title attribute: the operator
+          reported this on mobile, where there is no hover. */}
       <div className="flex items-center gap-6 border-t border-cloistr-light/10 pt-3">
-        <button className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-light">
+        {/* Replying needs a thread view, which does not exist yet. Marked
+            unavailable rather than left looking clickable. */}
+        <button
+          disabled
+          aria-disabled="true"
+          aria-label="Replies (not available yet)"
+          className="flex cursor-not-allowed items-center gap-2 text-sm text-cloistr-light/20"
+        >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
@@ -333,7 +360,13 @@ function NoteCard({
         </button>
         <button
           onClick={onRepost}
-          className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-success"
+          disabled={!canAct}
+          aria-disabled={!canAct}
+          className={`flex items-center gap-2 text-sm ${
+            canAct
+              ? 'text-cloistr-light/40 hover:text-cloistr-success'
+              : 'cursor-not-allowed text-cloistr-light/20'
+          }`}
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -342,8 +375,14 @@ function NoteCard({
         </button>
         <button
           onClick={onReact}
+          disabled={!canAct}
+          aria-disabled={!canAct}
           className={`flex items-center gap-2 text-sm ${
-            note.userReacted ? 'text-cloistr-error' : 'text-cloistr-light/40 hover:text-cloistr-error'
+            !canAct
+              ? 'cursor-not-allowed text-cloistr-light/20'
+              : note.userReacted
+                ? 'text-cloistr-error'
+                : 'text-cloistr-light/40 hover:text-cloistr-error'
           }`}
         >
           <svg className="h-5 w-5" fill={note.userReacted ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
@@ -351,18 +390,31 @@ function NoteCard({
           </svg>
           {note.engagement.reactions > 0 && note.engagement.reactions}
         </button>
-        <button className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-accent">
+        {/* Zapping needs NIP-57, which is not implemented. */}
+        <button
+          disabled
+          aria-disabled="true"
+          aria-label="Zaps (not available yet)"
+          className="flex cursor-not-allowed items-center gap-2 text-sm text-cloistr-light/20"
+        >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           {note.engagement.zapAmount > 0 && formatSats(note.engagement.zapAmount)}
         </button>
-        <button className="ml-auto text-cloistr-light/40 hover:text-cloistr-light">
+        {/* Sharing is not implemented. */}
+        <button
+          disabled
+          aria-disabled="true"
+          aria-label="Share (not available yet)"
+          className="ml-auto cursor-not-allowed text-cloistr-light/20"
+        >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
           </svg>
         </button>
       </div>
+
     </article>
   );
 }
