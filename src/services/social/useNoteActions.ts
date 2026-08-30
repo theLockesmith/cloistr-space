@@ -55,11 +55,42 @@ export function actionBlockedReason(state: {
   return null;
 }
 
+/**
+ * How a publish went.
+ *
+ * The user's relay list is mostly third-party, so "some relays took it" is the
+ * normal good outcome and must not read as failure. Only zero acceptances is an
+ * actual failure, and that is what throws.
+ */
+export interface PublishOutcome {
+  /** Relays that accepted the event. Never zero -- zero throws instead. */
+  acceptedBy: number;
+}
+
+/**
+ * Turn NDK's relay set into a success or a throw.
+ *
+ * event.publish() resolves with the relays that ACCEPTED, and does not reject
+ * when some refuse -- so a silent partial failure and a total failure are the
+ * same value shape. Zero acceptances is the only real failure; anything above
+ * zero means the event is on the network somewhere.
+ *
+ * This matters here specifically because relay.cloistr.xyz gates writes behind
+ * PoW, NIP-42 auth and a whitelist, so it can refuse an event that eleven other
+ * relays take without complaint.
+ */
+function publishOrThrow(relays: Set<unknown>): PublishOutcome {
+  if (relays.size === 0) {
+    throw new Error('No relay accepted it. Check your relay list and connection.');
+  }
+  return { acceptedBy: relays.size };
+}
+
 interface UseNoteActionsReturn {
-  /** React to a note with + or emoji */
-  react: (eventId: string, pubkey: string, content?: string) => Promise<void>;
-  /** Repost a note */
-  repost: (eventId: string, pubkey: string, relay?: string) => Promise<void>;
+  /** React to a note with + or emoji. Throws when no relay accepts it. */
+  react: (eventId: string, pubkey: string, content?: string) => Promise<PublishOutcome>;
+  /** Repost a note. Throws when no relay accepts it. */
+  repost: (eventId: string, pubkey: string, relay?: string) => Promise<PublishOutcome>;
   /** Whether connected and can act */
   canAct: boolean;
   /**
@@ -90,7 +121,7 @@ export function useNoteActions(): UseNoteActionsReturn {
 
   // React to a note (kind:7)
   const react = useCallback(
-    async (eventId: string, eventPubkey: string, content = '+') => {
+    async (eventId: string, eventPubkey: string, content = '+'): Promise<PublishOutcome> => {
       if (!publish || !createEvent || !pubkey) {
         throw new Error('Not connected');
       }
@@ -105,14 +136,14 @@ export function useNoteActions(): UseNoteActionsReturn {
         ['p', eventPubkey],
       ];
 
-      await publish(event);
+      return publishOrThrow(await publish(event));
     },
     [publish, createEvent, pubkey]
   );
 
   // Repost a note (kind:6)
   const repost = useCallback(
-    async (eventId: string, eventPubkey: string, relay?: string) => {
+    async (eventId: string, eventPubkey: string, relay?: string): Promise<PublishOutcome> => {
       if (!publish || !createEvent || !pubkey) {
         throw new Error('Not connected');
       }
@@ -127,7 +158,7 @@ export function useNoteActions(): UseNoteActionsReturn {
         ['p', eventPubkey],
       ];
 
-      await publish(event);
+      return publishOrThrow(await publish(event));
     },
     [publish, createEvent, pubkey]
   );

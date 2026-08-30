@@ -38,6 +38,16 @@ interface UseFeedReturn {
   mode: FeedMode;
   /** Number of contacts the following/wot filters are built from. */
   followingCount: number;
+  /**
+   * Set the local reacted/reposted flag for a note.
+   *
+   * Exists so the UI can show an action immediately and take it back if the
+   * publish is refused. Without it a reaction is invisible until a relay echoes
+   * it back, which is indistinguishable from the button being broken -- and is
+   * what it was.
+   */
+  markReacted: (noteId: string, reacted: boolean) => void;
+  markReposted: (noteId: string, reposted: boolean) => void;
 }
 
 /** Parse a kind:1 event into a Note */
@@ -153,6 +163,11 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const seenIdsRef = useRef(new Set<string>());
   const oldestTimestampRef = useRef<number | null>(null);
   const engagementRef = useRef(new Map<string, NoteEngagement>());
+  // Notes the CURRENT USER has reacted to / reposted, as observed in the
+  // engagement stream. userReacted used to be a hardcoded false with a TODO, so
+  // the heart could never fill no matter what happened on the network.
+  const ownReactionsRef = useRef(new Set<string>());
+  const ownRepostsRef = useRef(new Set<string>());
 
   // Get following list for filter
   const following = useMemo(() => {
@@ -160,6 +175,53 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       .filter((c) => c.isFollowing)
       .map((c) => c.pubkey);
   }, [contacts]);
+
+  // Optimistic flags. Set immediately on tap and reverted if the publish is
+  // refused, so an action is visible at once and a failure is visible too.
+  const markReacted = useCallback((noteId: string, reacted: boolean) => {
+    // Rebuild rather than mutate in place, so a revert removes exactly one id.
+    ownReactionsRef.current = reacted
+      ? new Set([...ownReactionsRef.current, noteId])
+      : new Set([...ownReactionsRef.current].filter((id) => id !== noteId));
+
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === noteId
+          ? {
+              ...note,
+              userReacted: reacted,
+              engagement: {
+                ...note.engagement,
+                // Move the count with the flag so the number and the fill do
+                // not disagree while the echo is in flight.
+                reactions: Math.max(0, note.engagement.reactions + (reacted ? 1 : -1)),
+              },
+            }
+          : note
+      )
+    );
+  }, []);
+
+  const markReposted = useCallback((noteId: string, reposted: boolean) => {
+    ownRepostsRef.current = reposted
+      ? new Set([...ownRepostsRef.current, noteId])
+      : new Set([...ownRepostsRef.current].filter((id) => id !== noteId));
+
+    setNotes((prev) =>
+      prev.map((note) =>
+        note.id === noteId
+          ? {
+              ...note,
+              userReposted: reposted,
+              engagement: {
+                ...note.engagement,
+                reposts: Math.max(0, note.engagement.reposts + (reposted ? 1 : -1)),
+              },
+            }
+          : note
+      )
+    );
+  }, []);
 
   const refresh = useCallback(() => {
     seenIdsRef.current.clear();
@@ -306,6 +368,27 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       { kinds: [NOTE_KIND], '#e': noteIds },
     ];
 
+    // Fold accumulated engagement into the rendered notes. Called on every
+    // event as well as at eose, so a reaction that lands later is visible.
+    const applyEngagement = () => {
+      setNotes((prev) =>
+        prev.map((note) => {
+          const engagement = engagementRef.current.get(note.id);
+          const reacted = ownReactionsRef.current.has(note.id);
+          const reposted = ownRepostsRef.current.has(note.id);
+          if (!engagement && !reacted && !reposted) return note;
+          return {
+            ...note,
+            engagement: engagement ?? note.engagement,
+            // Sticky: an optimistic flag set locally must not be cleared by an
+            // engagement pass that has not seen the echo yet.
+            userReacted: note.userReacted || reacted,
+            userReposted: note.userReposted || reposted,
+          };
+        })
+      );
+    };
+
     const sub = subscribeStream(subscribe, engagementFilters, {
         onEvent: (event: NDKEvent) => {
       const targetId = event.tags.find((t) => t[0] === 'e')?.[1];
@@ -321,8 +404,12 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
 
       if (event.kind === REACTION_KIND) {
         current.reactions++;
+        // Whose reaction it is decides whether the heart fills. This is the
+        // real answer to the TODO that used to sit here.
+        if (pubkey && event.pubkey === pubkey) ownReactionsRef.current.add(targetId);
       } else if (event.kind === REPOST_KIND) {
         current.reposts++;
+        if (pubkey && event.pubkey === pubkey) ownRepostsRef.current.add(targetId);
       } else if (event.kind === ZAP_RECEIPT_KIND) {
         current.zapCount++;
         // Try to parse amount from bolt11 tag
@@ -344,24 +431,15 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       }
 
       engagementRef.current.set(targetId, current);
+      applyEngagement();
     },
-        onEose: () => {
-      // Update notes with engagement data
-      setNotes((prev) =>
-        prev.map((note) => {
-          const engagement = engagementRef.current.get(note.id);
-          if (!engagement) return note;
-          return {
-            ...note,
-            engagement,
-            userReacted: false, // TODO: Check if current user reacted
-            userReposted: false,
-            userZapped: false,
-          };
-        })
-      );
-    },
-      }, { closeOnEose: true });
+        onEose: applyEngagement,
+      // NOT closeOnEose. This subscription used to close after the initial
+      // fetch, so a reaction published thirty seconds later never arrived and
+      // the count never moved. Combined with setNotes running only at eose,
+      // nothing in the UI could change after the first render -- which is why
+      // a working button looked broken.
+      }, { closeOnEose: false });
 
 
 
@@ -391,5 +469,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
      * elsewhere starts here with an empty one until they import it.
      */
     followingCount: following.length,
+    markReacted,
+    markReposted,
   };
 }

@@ -10,8 +10,19 @@ import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
 
 export function SocialFeed() {
-  const { notes, isLoading, error, hasMore, loadMore, refresh, setMode, mode, followingCount } =
-    useFeed();
+  const {
+    notes,
+    isLoading,
+    error,
+    hasMore,
+    loadMore,
+    refresh,
+    setMode,
+    mode,
+    followingCount,
+    markReacted,
+    markReposted,
+  } = useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, canAct, blockedReason } = useNoteActions();
 
@@ -21,6 +32,10 @@ export function SocialFeed() {
   const authorProfiles = useAuthorProfiles(authorPubkeys);
 
   const [composeText, setComposeText] = useState('');
+  // Publish failures were caught and console.error'd only, so a refused action
+  // was as invisible as a working one. Optimism without this would be worse
+  // than the original bug: the user would trust something that did not happen.
+  const [actionError, setActionError] = useState<string | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,26 +77,42 @@ export function SocialFeed() {
 
   const handleReact = useCallback(
     async (note: Note) => {
-      if (!canAct) return;
+      if (!canAct || note.userReacted) return;
+
+      setActionError(null);
+      markReacted(note.id, true);
+
       try {
         await react(note.id, note.pubkey);
       } catch (err) {
-        console.error('Failed to react:', err);
+        // Take it back visibly. A reverted heart is honest; a stuck-filled one
+        // claims something happened that did not.
+        markReacted(note.id, false);
+        setActionError(
+          err instanceof Error ? `Reaction not sent. ${err.message}` : 'Reaction not sent.'
+        );
       }
     },
-    [canAct, react]
+    [canAct, react, markReacted]
   );
 
   const handleRepost = useCallback(
     async (note: Note) => {
-      if (!canAct) return;
+      if (!canAct || note.userReposted) return;
+
+      setActionError(null);
+      markReposted(note.id, true);
+
       try {
         await repost(note.id, note.pubkey);
       } catch (err) {
-        console.error('Failed to repost:', err);
+        markReposted(note.id, false);
+        setActionError(
+          err instanceof Error ? `Repost not sent. ${err.message}` : 'Repost not sent.'
+        );
       }
     },
-    [canAct, repost]
+    [canAct, repost, markReposted]
   );
 
   const handleModeChange = useCallback(
@@ -172,6 +203,22 @@ export function SocialFeed() {
           className="rounded-lg border border-cloistr-warning/30 bg-cloistr-warning/5 px-4 py-2 text-sm text-cloistr-light/70"
         >
           {ACTION_BLOCKED_MESSAGE[blockedReason]}
+        </div>
+      )}
+
+      {actionError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-lg border border-cloistr-error/30 bg-cloistr-error/5 px-4 py-2 text-sm text-cloistr-light/80"
+        >
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            className="text-cloistr-light/40 hover:text-cloistr-light"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
       )}
 
