@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useNdk, subscribeStream } from '@/services/nostr';
+import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
 import {
@@ -168,6 +168,12 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   // the heart could never fill no matter what happened on the network.
   const ownReactionsRef = useRef(new Set<string>());
   const ownRepostsRef = useRef(new Set<string>());
+  // Engagement events need their OWN seen-set. seenIdsRef guards the main feed
+  // subscription only, and the engagement handler had no equivalent -- so the
+  // same reaction arriving from eleven relays was counted eleven times. Hidden
+  // until now because the subscription used to close at eose, before duplicates
+  // could accumulate.
+  const seenEngagementRef = useRef(new Set<string>());
 
   // Get following list for filter
   const following = useMemo(() => {
@@ -175,6 +181,35 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       .filter((c) => c.isFollowing)
       .map((c) => c.pubkey);
   }, [contacts]);
+
+  // Fold accumulated engagement into the rendered notes.
+  //
+  // Reads only refs, so it needs no deps and stays stable -- which matters
+  // because useCoalesced holds it and re-creating it every render would defeat
+  // the coalescing.
+  const applyEngagement = useCallback(() => {
+    setNotes((prev) =>
+      prev.map((note) => {
+        const engagement = engagementRef.current.get(note.id);
+        const reacted = ownReactionsRef.current.has(note.id);
+        const reposted = ownRepostsRef.current.has(note.id);
+        if (!engagement && !reacted && !reposted) return note;
+        return {
+          ...note,
+          engagement: engagement ?? note.engagement,
+          // Sticky: an optimistic flag set locally must not be cleared by an
+          // engagement pass that has not seen the echo yet.
+          userReacted: note.userReacted || reacted,
+          userReposted: note.userReposted || reposted,
+        };
+      })
+    );
+  }, []);
+
+  // One render per burst instead of one per event. Publishing a reaction brings
+  // the echo back from every relay that accepted it, so without this the tap
+  // itself triggered a full-feed re-render per relay and locked the UI.
+  const scheduleEngagementRender = useCoalesced(applyEngagement);
 
   // Optimistic flags. Set immediately on tap and reverted if the publish is
   // refused, so an action is visible at once and a failure is visible too.
@@ -226,6 +261,10 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const refresh = useCallback(() => {
     seenIdsRef.current.clear();
     engagementRef.current.clear();
+    // Must clear alongside the others: a refreshed feed re-receives the same
+    // engagement events, and a stale seen-set would drop every one of them,
+    // leaving counts at zero after a manual refresh.
+    seenEngagementRef.current.clear();
     oldestTimestampRef.current = Math.floor(Date.now() / 1000);
     setNotes([]);
     setHasMore(true);
@@ -368,29 +407,13 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       { kinds: [NOTE_KIND], '#e': noteIds },
     ];
 
-    // Fold accumulated engagement into the rendered notes. Called on every
-    // event as well as at eose, so a reaction that lands later is visible.
-    const applyEngagement = () => {
-      setNotes((prev) =>
-        prev.map((note) => {
-          const engagement = engagementRef.current.get(note.id);
-          const reacted = ownReactionsRef.current.has(note.id);
-          const reposted = ownRepostsRef.current.has(note.id);
-          if (!engagement && !reacted && !reposted) return note;
-          return {
-            ...note,
-            engagement: engagement ?? note.engagement,
-            // Sticky: an optimistic flag set locally must not be cleared by an
-            // engagement pass that has not seen the echo yet.
-            userReacted: note.userReacted || reacted,
-            userReposted: note.userReposted || reposted,
-          };
-        })
-      );
-    };
-
     const sub = subscribeStream(subscribe, engagementFilters, {
         onEvent: (event: NDKEvent) => {
+      // Same event, many relays. Without this the count inflates by however
+      // many relays hold it, and each copy triggers another render.
+      if (!event.id || seenEngagementRef.current.has(event.id)) return;
+      seenEngagementRef.current.add(event.id);
+
       const targetId = event.tags.find((t) => t[0] === 'e')?.[1];
       if (!targetId) return;
 
@@ -431,7 +454,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       }
 
       engagementRef.current.set(targetId, current);
-      applyEngagement();
+      scheduleEngagementRender();
     },
         onEose: applyEngagement,
       // NOT closeOnEose. This subscription used to close after the initial
@@ -447,7 +470,9 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     return () => {
       sub.stop();
     };
-  }, [subscribe, isConnected, engagementNoteIds, pubkey]);
+    // applyEngagement and scheduleEngagementRender are both stable, so listing
+    // them costs no extra subscriptions.
+  }, [subscribe, isConnected, engagementNoteIds, pubkey, applyEngagement, scheduleEngagementRender]);
 
   return {
     notes,
