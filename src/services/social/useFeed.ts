@@ -22,6 +22,35 @@ import type { NDKEvent, NDKSubscription, NDKFilter } from '@nostr-dev-kit/ndk';
 
 const DEFAULT_PAGE_SIZE = 20;
 
+/**
+ * How long to let the note list settle before resubscribing to engagement.
+ *
+ * Long enough that a burst of arriving notes produces a handful of
+ * resubscriptions rather than one per note; short enough that reaction counts
+ * still appear promptly. useCoalesced absorbs rather than extends, so a
+ * continuously streaming feed still updates every window instead of never.
+ */
+const ENGAGEMENT_SETTLE_MS = 500;
+
+/** How many notes the engagement subscription tracks. */
+const ENGAGEMENT_WINDOW = 50;
+
+/**
+ * The engagement id set for a feed, preserving array IDENTITY when the ids have
+ * not actually changed.
+ *
+ * That identity is the whole point. The returned array is an effect dependency,
+ * so a fresh array of equal contents re-runs the effect, stops the subscription
+ * and opens a new one -- which is precisely the churn this exists to remove.
+ * Returning `prev` unchanged is what makes a settle tick free when nothing
+ * moved.
+ */
+export function nextEngagementIds(prev: string[], notes: { id: string }[]): string[] {
+  const next = notes.slice(0, ENGAGEMENT_WINDOW).map((n) => n.id);
+  const same = next.length === prev.length && next.every((id, i) => id === prev[i]);
+  return same ? prev : next;
+}
+
 interface UseFeedOptions {
   mode?: FeedMode;
   pageSize?: number;
@@ -428,12 +457,34 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     };
   }, [subscribe, isConnected, mode, following, hashtag, pageSize, refreshKey]);
 
-  // Stable note IDs for engagement tracking - memoize based on first 50 note IDs
-  const engagementNoteIdsKey = notes.slice(0, 50).map((n) => n.id).join(',');
-  const engagementNoteIds = useMemo(() => {
-    return notes.slice(0, 50).map((n) => n.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engagementNoteIdsKey]);
+  // The engagement subscription's id set, settled on a trailing edge.
+  //
+  // This used to be derived straight from `notes`, so the key changed EVERY
+  // TIME A NOTE ARRIVED. It is a dependency of the engagement effect below, so
+  // each new note ran that effect's cleanup -- sub.stop() -- and NDK closed the
+  // REQ. During initial load, notes stream in one at a time, so the
+  // subscription was torn down and rebuilt up to fifty times, four filters
+  // each, every one cancelling its predecessor mid-query. The relay logged it:
+  //
+  //   failed to fetch events using query "... tagvalues && ARRAY[$2..$41] ..."
+  //     : context canceled
+  //
+  // Forty tag values is the feed at forty notes.
+  //
+  // The churn was always there. It became EXPENSIVE when the engagement
+  // subscription stopped closing at eose -- before that, a teardown usually hit
+  // an already-finished subscription and cost nothing. Fixing the reaction
+  // visibility bug is what exposed the cost of this one.
+  const engagementNoteIdsKey = notes.slice(0, ENGAGEMENT_WINDOW).map((n) => n.id).join(',');
+  const [engagementNoteIds, setEngagementNoteIds] = useState<string[]>([]);
+
+  const settleEngagementIds = useCoalesced(() => {
+    setEngagementNoteIds((prev) => nextEngagementIds(prev, notes));
+  }, ENGAGEMENT_SETTLE_MS);
+
+  useEffect(() => {
+    settleEngagementIds();
+  }, [engagementNoteIdsKey, settleEngagementIds]);
 
   // Engagement subscription (reactions, reposts, zaps for visible notes)
   useEffect(() => {
