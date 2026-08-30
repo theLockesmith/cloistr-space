@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Task, WidgetState } from '@/types/activity';
 import { TASK_KIND } from '@/types/activity';
@@ -180,9 +180,8 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
     }
 
     try {
-      const subscription = subscribe([filter], { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      const subscription = subscribeStream(subscribe, [filter], {
+        onEvent: (event: NDKEvent) => {
         const task = parseTaskEvent(event);
         if (!task) return;
 
@@ -198,17 +197,18 @@ export function useTasks(options: UseTasksOptions = {}): UseTasksReturn {
           error: null,
           lastUpdated: Date.now(),
         });
-      });
-
-      subscription.on('eose', () => {
+      },
+        onEose: () => {
         setState((prev) => ({
           ...prev,
           isLoading: false,
           lastUpdated: Date.now(),
         }));
-      });
+      },
+      }, { closeOnEose: false });
 
-      subscription.start();
+
+
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),

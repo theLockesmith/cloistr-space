@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import {
   THREAD_KIND,
@@ -77,9 +77,8 @@ export function useThreads(groupId: string): UseThreadsReturn {
     };
 
     try {
-      const subscription = subscribe([filter], { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      const subscription = subscribeStream(subscribe, [filter], {
+        onEvent: (event: NDKEvent) => {
         const parsed = parseThreadEvent(
           {
             id: event.id,
@@ -95,10 +94,11 @@ export function useThreads(groupId: string): UseThreadsReturn {
         commentsRef.current.set(parsed.id, parsed);
         setComments(Array.from(commentsRef.current.values()));
         setIsFetching(false);
-      });
+      },
+        onEose: () => setIsFetching(false),
+      }, { closeOnEose: false });
 
-      subscription.on('eose', () => setIsFetching(false));
-      subscription.start();
+
 
       subscriptionRef.current = { unsubscribe: () => subscription.stop() };
     } catch (err) {

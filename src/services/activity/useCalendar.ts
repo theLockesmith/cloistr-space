@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { CalendarEvent, WidgetState } from '@/types/activity';
 import { CALENDAR_DATE_KIND, CALENDAR_TIME_KIND } from '@/types/activity';
@@ -188,9 +188,8 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
     }
 
     try {
-      const subscription = subscribe(filters, { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      const subscription = subscribeStream(subscribe, filters, {
+        onEvent: (event: NDKEvent) => {
         const calEvent = parseCalendarEvent(event);
         if (!calEvent) return;
 
@@ -206,17 +205,18 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
           error: null,
           lastUpdated: Date.now(),
         });
-      });
-
-      subscription.on('eose', () => {
+      },
+        onEose: () => {
         setState((prev) => ({
           ...prev,
           isLoading: false,
           lastUpdated: Date.now(),
         }));
-      });
+      },
+      }, { closeOnEose: false });
 
-      subscription.start();
+
+
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),
