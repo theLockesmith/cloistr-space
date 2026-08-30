@@ -176,24 +176,35 @@ export function clearSnapshot(
  *
  * Seeding the seen-set fixes that instance. Deduping at the insert makes the
  * whole class structurally impossible, which matters because the two
- * structures will drift again otherwise.
+ * structures will drift again otherwis/**
+ * Insert a note, keyed by id, newest first.
  *
- * A later copy of the same id REPLACES the earlier one: the same event from a
- * second relay may carry data the first lacked, and the newer object is no
- * worse.
+ * Dedup lives HERE rather than only in the caller's seen-set, and that is the
+ * point. The feed kept a `seenIdsRef` beside the note list and appended
+ * unconditionally once an id passed it -- two structures that had to agree, and
+ * did not. The snapshot restore replaced the list and CLEARED the seen-set
+ * without seeding it, so every restored note was delivered again by the live
+ * subscription, passed the empty seen-set, and rendered a second time. Adjacent
+ * identical pairs, same React key.
+ *
+ * Seeding the seen-set fixes that instance. Deduping at the insert makes the
+ * whole class structurally impossible.
+ *
+ * A redelivery of the same id is IGNORED, not merged. A Nostr event id is a
+ * hash over pubkey, created_at, kind, tags and content, so a second copy is
+ * byte-identical and carries nothing new -- while the note already in the list
+ * has engagement counts and optimistic react/repost flags folded into it by
+ * applyEngagement. Replacing it would reset reaction counts to zero and un-fill
+ * a heart the user had just tapped, until the next engagement pass.
+ *
+ * Returning `prev` UNCHANGED also matters for renders: a new array on every
+ * redelivery re-renders the whole feed, and with the outbox model one note
+ * arrives from every relay that carries it.
  */
 export function upsertNote(prev: Note[], note: Note): Note[] {
-  const at = prev.findIndex((n) => n.id === note.id);
+  if (prev.some((n) => n.id === note.id)) return prev;
 
-  if (at === -1) {
-    return [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
-  }
-
-  // Already ordered; replacing in place cannot change the ordering, because
-  // createdAt is part of the event id's preimage and cannot differ.
-  const next = prev.slice();
-  next[at] = note;
-  return next;
+  return [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /**
