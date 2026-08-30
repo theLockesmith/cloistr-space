@@ -31,3 +31,5 @@ export {
 } from './subscribeOnce';
 export { resolveAndApplyRelays, type ResolveResult } from './relayPrefs';
 export { useRelayPrefsSync } from './useRelayPrefsSync';
+
+export { useCoalesced } from './useCoalesced';
