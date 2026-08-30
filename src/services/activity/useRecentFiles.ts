@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { FileMetadata, WidgetState } from '@/types/activity';
 
@@ -131,9 +131,8 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     }
 
     try {
-      const subscription = subscribe([filter], { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      const subscription = subscribeStream(subscribe, [filter], {
+        onEvent: (event: NDKEvent) => {
         const file = parseFileEvent(event);
         if (!file) return;
 
@@ -150,17 +149,18 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
           error: null,
           lastUpdated: Date.now(),
         });
-      });
-
-      subscription.on('eose', () => {
+      },
+        onEose: () => {
         setState((prev) => ({
           ...prev,
           isLoading: false,
           lastUpdated: Date.now(),
         }));
-      });
+      },
+      }, { closeOnEose: false });
 
-      subscription.start();
+
+
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),

@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { GroupMessage } from '@/types/groups';
 import { GROUP_CHAT_KIND } from '@/types/groups';
@@ -91,9 +91,15 @@ export function useGroupChat(groupId: string, options: UseGroupChatOptions = {})
     };
 
     try {
-      const subscription = subscribe([filter], { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      // ONGOING content, but the opening burst still matters: it is the group's
+      // existing message history. Attaching handlers after subscribe() drops it,
+      // and because new messages keep arriving the failure is invisible -- the
+      // chat just looks like it starts from the moment you opened it. That is
+      // why this was previously classified as safe and left alone while the
+      // group-listing bug was chased. It is the same defect, quiet instead of
+      // fatal.
+      const subscription = subscribeStream(subscribe, [filter], {
+        onEvent: (event: NDKEvent) => {
         const message = parseMessageEvent(event, groupId);
         if (!message) return;
 
@@ -106,13 +112,11 @@ export function useGroupChat(groupId: string, options: UseGroupChatOptions = {})
 
         setMessages(sortedMessages);
         setIsLoading(false);
+        },
+        onEose: () => {
+          setIsLoading(false);
+        },
       });
-
-      subscription.on('eose', () => {
-        setIsLoading(false);
-      });
-
-      subscription.start();
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),

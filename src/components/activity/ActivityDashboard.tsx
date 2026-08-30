@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ImportContactsCard,
@@ -7,6 +7,7 @@ import {
 } from '@/components/contacts';
 import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/activity';
 import { useNdk } from '@/services/nostr';
+import { useAuthorProfiles } from '@/services/profile';
 import { getDrive } from '@/services/cloistr';
 import { getFileType } from '@/types/activity';
 import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
@@ -442,6 +443,12 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
 
 function MentionsWidget() {
   const { items: mentions, isLoading, error, markAsRead, unreadCount } = useMentions({ limit: 5 });
+
+  // kind:0 for whoever mentioned you. Nothing populated mention.authorProfile,
+  // so mentions showed a truncated pubkey with no avatar.
+  const authorPubkeys = useMemo(() => mentions.map((m) => m.pubkey), [mentions]);
+  const authorProfiles = useAuthorProfiles(authorPubkeys);
+
   const navigate = useNavigate();
   const { publish, createEvent, isConnected } = useNdk();
 
@@ -504,6 +511,7 @@ function MentionsWidget() {
             <MentionRow
               key={mention.id}
               mention={mention}
+              profile={authorProfiles.get(mention.pubkey)}
               onRead={() => markAsRead(mention.id)}
               onReply={(content) => handleReply(mention, content)}
             />
@@ -516,15 +524,18 @@ function MentionsWidget() {
 
 function MentionRow({
   mention,
+  profile,
   onRead,
   onReply,
 }: {
   mention: Mention;
+  profile?: { name?: string; displayName?: string; picture?: string };
   onRead: () => void;
   onReply: (content: string) => Promise<void>;
 }) {
   const timeAgo = formatTimeAgo(mention.createdAt);
-  const displayName = mention.authorProfile?.displayName || mention.authorProfile?.name || formatPubkey(mention.pubkey);
+  const author = profile ?? mention.authorProfile;
+  const displayName = author?.displayName || author?.name || formatPubkey(mention.pubkey);
   const [isReplying, setIsReplying] = useState(false);
   const [replyContent, setReplyContent] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -554,9 +565,9 @@ function MentionRow({
     >
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {mention.authorProfile?.picture ? (
+          {author?.picture ? (
             <img
-              src={mention.authorProfile.picture}
+              src={author.picture}
               alt=""
               className="h-6 w-6 rounded-full"
             />
@@ -579,7 +590,10 @@ function MentionRow({
           </svg>
         </button>
       </div>
-      <p className="line-clamp-2 text-sm text-cloistr-light/80">{mention.content}</p>
+      {/* break-words as well as the clamp: line-clamp implies overflow:hidden,
+          so without it a long npub or URL is cut mid-string rather than
+          wrapped into the two lines available. */}
+      <p className="line-clamp-2 break-words text-sm text-cloistr-light/80">{mention.content}</p>
 
       {isReplying && (
         <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>

@@ -261,3 +261,77 @@ describe('no hover-only action visibility — all component files', () => {
     ).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Horizontal overflow from user-supplied content.
+//
+// Operator, once the feed started loading: "it's not the fixed mobile width
+// I'm expecting". Two causes, both needed to widen the page:
+//
+//   1. whitespace-pre-wrap wraps at whitespace. Nostr content is full of
+//      strings with none -- npub1..., note1..., nevent1..., bare URLs, hex
+//      event ids -- so a 63-character npub cannot break and forces the
+//      paragraph wider than its container.
+//   2. min-w-0 was absent everywhere. A flex child defaults to
+//      min-width:auto and refuses to shrink below its content, so the
+//      overflow does not stay in the paragraph: it widens the flex child,
+//      then the card, then the page.
+//
+// Fixed with break-words and min-w-0, NOT by hiding overflow -- the
+// governance doc lists clipping to mask an overflowing layout as an
+// anti-pattern, and it would hide the text rather than wrap it.
+//
+// Source-level, like the rest of this file: jsdom performs no layout, so the
+// overflow itself is not measurable here. These assert the properties that
+// prevent it and fail if they are removed.
+// ---------------------------------------------------------------------------
+
+describe('user content cannot widen the page', () => {
+  const CONTENT_SURFACES = [
+    'src/components/social/SocialFeed.tsx',
+    'src/components/projects/GroupChat.tsx',
+    'src/components/projects/GroupThreads.tsx',
+  ];
+
+  for (const file of CONTENT_SURFACES) {
+    it(`${file} pairs whitespace-pre-wrap with break-words`, () => {
+      const text = src(file);
+      const preWrapCount = (text.match(/whitespace-pre-wrap/g) ?? []).length;
+      const breakWordsCount = (text.match(/break-words/g) ?? []).length;
+
+      expect(preWrapCount, 'expected this file to render user content').toBeGreaterThan(0);
+      // Every pre-wrap surface needs a wrap rule; a bare one can be widened by
+      // any unbreakable string a user posts.
+      expect(
+        breakWordsCount,
+        'whitespace-pre-wrap without break-words: an npub or URL will widen the page'
+      ).toBeGreaterThanOrEqual(preWrapCount);
+    });
+  }
+
+  it('SocialFeed constrains the flex child holding the display name', () => {
+    // A kind:0 display_name is arbitrary text now that profiles resolve, so
+    // this stopped being hypothetical the moment avatars started working.
+    expect(src('src/components/social/SocialFeed.tsx')).toContain('min-w-0');
+  });
+
+  it('GroupChat constrains the flex child holding the message body', () => {
+    expect(src('src/components/projects/GroupChat.tsx')).toContain('min-w-0 flex-1');
+  });
+
+  it('does not mask overflow by clipping user content', () => {
+    // overflow-hidden on a content surface would make these tests pass while
+    // truncating what the user wrote. Explicitly not the fix.
+    for (const file of CONTENT_SURFACES) {
+      const text = src(file);
+      const contentBlocks = text
+        .split('\n')
+        .filter((l) => l.includes('whitespace-pre-wrap'));
+      for (const line of contentBlocks) {
+        expect(line, `${file}: content clipped rather than wrapped`).not.toContain(
+          'overflow-hidden'
+        );
+      }
+    }
+  });
+});

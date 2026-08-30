@@ -22,6 +22,7 @@ import {
   NDKEvent,
   type NDKFilter,
 } from './ndk';
+import { subscribeStream } from './subscribeOnce';
 
 interface NdkContextValue {
   /** NDK service instance */
@@ -176,12 +177,17 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
   }, [relayStatuses]);
 
   const subscribe = useCallback<NdkService['subscribe']>(
-    (filters, opts) => {
+    // `handlers` must be forwarded. Every hook in the app subscribes through
+    // this callback, so dropping the third argument here would silently discard
+    // handlers registered at subscribe time -- reintroducing the exact race the
+    // helpers exist to close, at every single call site at once, while each
+    // call site looked correct.
+    (filters, opts, handlers) => {
       const service = serviceRef.current;
       if (!service) {
         throw new Error('NDK not initialized');
       }
-      return service.subscribe(filters, opts);
+      return service.subscribe(filters, opts, handlers);
     },
     []
   );
@@ -284,21 +290,24 @@ export function useNostrSubscription(
     subscriptionActiveRef.current = true;
     setEoseReceived(false);
 
-    const sub = subscribe(filters, {
-      closeOnEose: options?.closeOnEose ?? false,
-    });
-
-    sub.on('event', (event: NDKEvent) => {
-      eventsRef.current = [...eventsRef.current, event];
-      forceUpdate({});
-    });
-
-    sub.on('eose', () => {
-      subscriptionActiveRef.current = false;
-      setEoseReceived(true);
-    });
-
-    sub.start();
+    // Generic hook, so the caller's content may be historical or ongoing and
+    // this cannot know which. Registering handlers at subscribe time is correct
+    // for both, and is the only option that is safe without knowing.
+    const sub = subscribeStream(
+      subscribe,
+      Array.isArray(filters) ? filters : [filters],
+      {
+        onEvent: (event: NDKEvent) => {
+          eventsRef.current = [...eventsRef.current, event];
+          forceUpdate({});
+        },
+        onEose: () => {
+          subscriptionActiveRef.current = false;
+          setEoseReceived(true);
+        },
+      },
+      { closeOnEose: options?.closeOnEose ?? false }
+    );
 
     return () => {
       sub.stop();

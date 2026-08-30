@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { subscribeOnce } from './subscribeOnce';
+import { subscribeOnce, subscribeStream } from './subscribeOnce';
 
 /**
  * A subscription that delivers immediately on start, the way a relay answering
@@ -90,6 +90,72 @@ describe('the attach-after-start race', () => {
     // resolving on eose returns nothing and the caller sees "no such group".
     expect(seen, 'if this now passes, NDK stopped auto-starting').toHaveLength(0);
     expect(eosed).toBe(false);
+  });
+});
+
+describe('the historical-streaming case, which the old rule called safe', () => {
+  /**
+   * This is the case that made the previous fix fail, and it is the reason the
+   * discriminator in subscribeOnce.ts had to be rewritten.
+   *
+   * The rule used to be "closeOnEose:false is safe, more events follow". That
+   * holds for chat. It does not hold for a subscription whose entire content is
+   * events written once and never again — kind:39001 and kind:39002 group
+   * membership, written at group creation. The relay sends them in the initial
+   * burst right after subscribe(), and then there is nothing else, ever. Missing
+   * that burst is exactly as fatal as missing a one-shot reply.
+   */
+  it('DEMONSTRATES THE BUG: a closeOnEose:false subscription over stored-only events loses everything', async () => {
+    const subscribe = makeEagerSubscribe([{ id: 'members-evt' }]);
+    const seen: unknown[] = [];
+
+    // Long-lived by closeOnEose, historical by content. The old rule said this
+    // shape was fine.
+    const sub = subscribe([{ kinds: [39002] }], { closeOnEose: false }) as {
+      on: (n: string, f: (a?: unknown) => void) => void;
+      start: () => void;
+    };
+    sub.on('event', (e) => seen.push(e));
+    sub.start();
+
+    await new Promise((r) => queueMicrotask(() => r(null)));
+
+    // Nothing follows to recover it. The group's membership is simply gone,
+    // and because fetchGroupMetadata is only called from this handler, the
+    // downstream metadata query never runs either — which is why fixing that
+    // query changed nothing.
+    expect(seen, 'stored events were delivered before the handler existed').toHaveLength(0);
+  });
+
+  it('subscribeStream receives that same burst', async () => {
+    const subscribe = makeEagerSubscribe([{ id: 'members-evt' }]);
+    const onEvent = vi.fn();
+
+    subscribeStream(subscribe as never, [{ kinds: [39002] }], { onEvent });
+
+    await new Promise((r) => queueMicrotask(() => r(null)));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribeStream leaves closeOnEose to the caller', () => {
+    // The distinction that matters is historical-versus-ongoing, not
+    // closeOnEose — so the helper must not decide closeOnEose for you the way
+    // subscribeOnce does. A group-membership subscription wants to stay open
+    // for later joins while still needing the initial burst.
+    const subscribe = makeEagerSubscribe([]);
+    subscribeStream(subscribe as never, [{ kinds: [9] }], {}, { closeOnEose: false });
+
+    const opts = subscribe.mock.calls[0][1] as { closeOnEose?: boolean };
+    expect(opts.closeOnEose).toBe(false);
+  });
+
+  it('subscribeStream passes handlers to subscribe, not afterwards', () => {
+    const subscribe = makeEagerSubscribe([]);
+    subscribeStream(subscribe as never, [{ kinds: [9] }], { onEvent: vi.fn() });
+
+    const third = subscribe.mock.calls[0][2] as { onEvent?: unknown } | undefined;
+    expect(third?.onEvent, 'handlers were not passed to subscribe()').toBeTypeOf('function');
   });
 });
 

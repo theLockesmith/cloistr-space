@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, subscribeOnce, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeOnce, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Group, GroupMembership, AdminPermission } from '@/types/groups';
 import { GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND } from '@/types/groups';
@@ -183,9 +183,19 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     ];
 
     try {
-      const subscription = subscribe(filters, { closeOnEose: false });
-
-      subscription.on('event', (event: NDKEvent) => {
+      // HISTORICAL content on a long-lived subscription. kind:39001 and
+      // kind:39002 are written once when a group is created and never again, so
+      // the relay's opening burst IS the entire payload -- nothing follows to
+      // recover a missed one.
+      //
+      // This was previously attach-then-start, on the reasoning that
+      // closeOnEose:false made it safe. It did not. The membership events were
+      // dropped before the handler existed, and since fetchGroupMetadata is
+      // only ever called from inside this handler, the metadata query never ran
+      // either -- so fixing that query while this one still lost its events
+      // produced no observable change at all.
+      const subscription = subscribeStream(subscribe, filters, {
+        onEvent: (event: NDKEvent) => {
         const dTag = event.tags.find((t) => t[0] === 'd')?.[1];
         if (!dTag) return;
 
@@ -226,13 +236,11 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
         }
 
         processGroups();
+        },
+        onEose: () => {
+          setIsLoading(false);
+        },
       });
-
-      subscription.on('eose', () => {
-        setIsLoading(false);
-      });
-
-      subscription.start();
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),

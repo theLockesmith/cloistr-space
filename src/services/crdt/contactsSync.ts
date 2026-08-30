@@ -3,7 +3,7 @@
  * Synchronizes local contact list with relays using NIP-0A
  */
 
-import { NDKEvent, type NdkService } from '@/services/nostr';
+import { NDKEvent, subscribeStream, type NdkService } from '@/services/nostr';
 import { useContactsStore } from '@/stores/contactsStore';
 import type { ContactsCrdtState } from '@/types/contacts';
 import {
@@ -242,19 +242,26 @@ export class ContactsSyncService {
    */
   subscribeToUpdates(pubkey: string, onUpdate: (state: ContactsCrdtState) => void): () => void {
     const filter = getNip0aFilter(pubkey);
-    const sub = this.ndkService.subscribe(filter, { closeOnEose: false });
 
-    sub.on('event', (event: NDKEvent) => {
-      // Only process events from the user (not our own publishes)
-      if (event.pubkey !== pubkey) {
-        return;
-      }
+    // Handlers at subscribe time. The user's existing kind:33000 arrives in the
+    // opening burst, and this subscription exists precisely to notice the
+    // current list -- losing it to a late .on() leaves the store looking empty
+    // while a real list sits on the relay.
+    const sub = subscribeStream(
+      this.ndkService.subscribe.bind(this.ndkService) as never,
+      [filter] as never,
+      {
+        onEvent: (event: NDKEvent) => {
+          // Only process events from the user (not our own publishes)
+          if (event.pubkey !== pubkey) {
+            return;
+          }
 
-      const remoteState = parseNip0aEvent(event);
-      onUpdate(remoteState);
-    });
-
-    sub.start();
+          const remoteState = parseNip0aEvent(event);
+          onUpdate(remoteState);
+        },
+      } as never
+    );
 
     return () => {
       sub.stop();

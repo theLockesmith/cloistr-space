@@ -267,7 +267,7 @@ function Comment({
         <span>{pubkey.slice(0, 8)}…</span>
         <span>{new Date(createdAt * 1000).toLocaleString()}</span>
       </div>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-cloistr-light">{content}</p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">{content}</p>
       {onReply && (
         <button
           onClick={onReply}

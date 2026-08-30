@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useNdk, subscribeStream } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
 import {
@@ -238,11 +238,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     }
 
     try {
-      const sub = subscribe(filters, { closeOnEose: true });
-
-      subscriptionRef.current = sub;
-
-      sub.on('event', (event: NDKEvent) => {
+      const sub = subscribeStream(subscribe, filters, {
+        onEvent: (event: NDKEvent) => {
         const id = event.id;
         if (!id || seenIdsRef.current.has(id)) return;
         seenIdsRef.current.add(id);
@@ -259,18 +256,21 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
           const newNotes = [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
           return newNotes;
         });
-      });
-
-      sub.on('eose', () => {
+      },
+        onEose: () => {
         setIsLoading(false);
         // If we got fewer notes than requested, no more to load
         const currentCount = seenIdsRef.current.size;
         if (currentCount < pageSize) {
           setHasMore(false);
         }
-      });
+      },
+      }, { closeOnEose: true });
 
-      sub.start();
+      subscriptionRef.current = sub;
+
+
+
     } catch (err) {
       // Use setTimeout to avoid synchronous setState in effect
       setTimeout(() => {
@@ -306,9 +306,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       { kinds: [NOTE_KIND], '#e': noteIds },
     ];
 
-    const sub = subscribe(engagementFilters, { closeOnEose: true });
-
-    sub.on('event', (event: NDKEvent) => {
+    const sub = subscribeStream(subscribe, engagementFilters, {
+        onEvent: (event: NDKEvent) => {
       const targetId = event.tags.find((t) => t[0] === 'e')?.[1];
       if (!targetId) return;
 
@@ -345,9 +344,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       }
 
       engagementRef.current.set(targetId, current);
-    });
-
-    sub.on('eose', () => {
+    },
+        onEose: () => {
       // Update notes with engagement data
       setNotes((prev) =>
         prev.map((note) => {
@@ -362,9 +360,11 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
           };
         })
       );
-    });
+    },
+      }, { closeOnEose: true });
 
-    sub.start();
+
+
 
     return () => {
       sub.stop();

@@ -17,3 +17,5 @@ export {
 } from './profileEvents';
 
 export { useProfile, type UseProfileReturn } from './useProfile';
+
+export { useAuthorProfiles, type AuthorProfiles } from './useAuthorProfiles';

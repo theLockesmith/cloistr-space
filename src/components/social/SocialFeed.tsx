@@ -3,15 +3,21 @@
  * Displays notes from following/WoT/global with compose and actions
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
-import type { Note, FeedMode } from '@/types/social';
+import { useAuthorProfiles } from '@/services/profile';
+import type { Note, FeedMode, AuthorProfile } from '@/types/social';
 
 export function SocialFeed() {
   const { notes, isLoading, error, hasMore, loadMore, refresh, setMode, mode, followingCount } =
     useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, canAct } = useNoteActions();
+
+  // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
+  // before this, so every card fell back to a truncated pubkey.
+  const authorPubkeys = useMemo(() => notes.map((n) => n.pubkey), [notes]);
+  const authorProfiles = useAuthorProfiles(authorPubkeys);
 
   const [composeText, setComposeText] = useState('');
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -230,6 +236,7 @@ export function SocialFeed() {
           <NoteCard
             key={note.id}
             note={note}
+            profile={authorProfiles.get(note.pubkey)}
             onReact={() => handleReact(note)}
             onRepost={() => handleRepost(note)}
           />
@@ -257,23 +264,28 @@ export function SocialFeed() {
 
 function NoteCard({
   note,
+  profile,
   onReact,
   onRepost,
 }: {
   note: Note;
+  profile?: AuthorProfile;
   onReact: () => void;
   onRepost: () => void;
 }) {
-  const displayName = note.authorProfile?.displayName || note.authorProfile?.name || formatPubkey(note.pubkey);
+  // Prefer the resolved profile; note.authorProfile stays supported so a caller
+  // that already has one is not forced through the lookup.
+  const author = profile ?? note.authorProfile;
+  const displayName = author?.displayName || author?.name || formatPubkey(note.pubkey);
   const timeStr = formatTime(note.createdAt);
 
   return (
     <article className="rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 p-4">
       {/* Author */}
       <div className="mb-3 flex items-center gap-3">
-        {note.authorProfile?.picture ? (
+        {author?.picture ? (
           <img
-            src={note.authorProfile.picture}
+            src={author.picture}
             alt=""
             className="h-10 w-10 rounded-full object-cover"
           />
@@ -282,14 +294,19 @@ function NoteCard({
             {displayName.slice(0, 2).toUpperCase()}
           </div>
         )}
-        <div>
-          <p className="font-medium text-cloistr-light">{displayName}</p>
+        {/* min-w-0: a flex child defaults to min-width:auto and will not
+            shrink below its content, so a long display name widens the card
+            and then the page. truncate keeps the name on one line. */}
+        <div className="min-w-0">
+          <p className="truncate font-medium text-cloistr-light">{displayName}</p>
           <p className="text-xs text-cloistr-light/60">{timeStr}</p>
         </div>
       </div>
 
       {/* Content */}
-      <p className="mb-4 whitespace-pre-wrap text-sm text-cloistr-light/90">{note.content}</p>
+      <p className="mb-4 whitespace-pre-wrap break-words text-sm text-cloistr-light/90">
+        {note.content}
+      </p>
 
       {/* Media */}
       {note.media.length > 0 && (

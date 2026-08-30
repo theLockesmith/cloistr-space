@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useNdk, subscribeStream } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { NDKEvent, NDKSubscription } from '@nostr-dev-kit/ndk';
 
@@ -90,19 +90,14 @@ export function useGroupFiles(groupId: string): UseGroupFilesReturn {
 
     try {
       // Subscribe to kind:1063 with h-tag for this group
-      const sub = subscribe({
-        kinds: [FILE_METADATA_KIND],
-        '#h': [groupId],
-        limit: 100,
-      });
-
-      if (!sub) {
-        throw new Error('Failed to subscribe');
-      }
-
-      subscriptionRef.current = sub;
-
-      sub.on('event', (event: NDKEvent) => {
+      const sub = subscribeStream(subscribe, [
+        {
+          kinds: [FILE_METADATA_KIND],
+          '#h': [groupId],
+          limit: 100,
+        },
+      ], {
+        onEvent: (event: NDKEvent) => {
         const id = event.id;
         if (!id || seenIdsRef.current.has(id)) return;
         seenIdsRef.current.add(id);
@@ -116,11 +111,19 @@ export function useGroupFiles(groupId: string): UseGroupFilesReturn {
           // Add and sort by creation date, newest first
           return [...prev, file].sort((a, b) => b.createdAt - a.createdAt);
         });
+      },
+        onEose: () => {
+        setIsLoading(false);
+      },
       });
 
-      sub.on('eose', () => {
-        setIsLoading(false);
-      });
+      if (!sub) {
+        throw new Error('Failed to subscribe');
+      }
+
+      subscriptionRef.current = sub;
+
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch files');
       setIsLoading(false);
