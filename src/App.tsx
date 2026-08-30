@@ -11,6 +11,7 @@ import { ActivityDashboard } from './components/activity/ActivityDashboard';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { SocialFeed } from './components/social/SocialFeed';
 import { ProfileView } from './components/profile';
+import { ThreadsView } from './components/threads';
 import { FileBrowser } from './components/integrations';
 import { LoginPage } from './components/auth/LoginPage';
 import { AuthGuard } from './components/auth/AuthGuard';
@@ -85,6 +86,14 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Files">
                     <FileBrowser />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="threads"
+                element={
+                  <ErrorBoundary context="Threads">
+                    <ThreadsView />
                   </ErrorBoundary>
                 }
               />
