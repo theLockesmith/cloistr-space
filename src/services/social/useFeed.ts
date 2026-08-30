@@ -451,7 +451,23 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
           setHasMore(false);
         }
       },
-      }, { closeOnEose: true });
+      // NOT closeOnEose, and this is the whole fix for "a post was there on
+      // one load and gone after a refresh".
+      //
+      // NDK registers a pool monitor alongside the relay query
+      // (dist/index.js:9136) which subscribes any relay that connects LATER.
+      // closeOnEose calls stop() at eose (index.js:9375), and stop() removes
+      // that monitor -- so the load snapshots whichever relays happened to be
+      // connected when eose fired and never re-queries. With eighteen relays in
+      // the user's kind:10002, one of which does not resolve at all, which
+      // relays answer in time differs on every load. Same query, different
+      // results, no change in the underlying data.
+      //
+      // Safe to leave open only because upsertNote makes a redelivery free: it
+      // returns the SAME array, so the same note arriving from all eighteen
+      // relays costs one render, not eighteen. Doing this before the dedup fix
+      // would have multiplied the duplication instead of curing it.
+      }, { closeOnEose: false });
 
       subscriptionRef.current = sub;
 
