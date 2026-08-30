@@ -590,7 +590,10 @@ function MentionRow({
           </svg>
         </button>
       </div>
-      <p className="line-clamp-2 text-sm text-cloistr-light/80">{mention.content}</p>
+      {/* break-words as well as the clamp: line-clamp implies overflow:hidden,
+          so without it a long npub or URL is cut mid-string rather than
+          wrapped into the two lines available. */}
+      <p className="line-clamp-2 break-words text-sm text-cloistr-light/80">{mention.content}</p>
 
       {isReplying && (
         <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>

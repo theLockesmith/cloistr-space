@@ -165,12 +165,16 @@ function MessageBubble({
           {displayName.slice(0, 2).toUpperCase()}
         </div>
       )}
-      <div className="flex-1">
+      {/* min-w-0 so an unbreakable string in the message body shrinks this
+          column rather than widening the whole chat pane. */}
+      <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-cloistr-light">{displayName}</span>
+          <span className="truncate text-sm font-medium text-cloistr-light">{displayName}</span>
           <span className="text-xs text-cloistr-light/60">{timeStr}</span>
         </div>
-        <p className="mt-1 text-sm text-cloistr-light/80 whitespace-pre-wrap">{message.content}</p>
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light/80">
+          {message.content}
+        </p>
       </div>
     </div>
   );

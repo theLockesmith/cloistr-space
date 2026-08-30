@@ -294,14 +294,19 @@ function NoteCard({
             {displayName.slice(0, 2).toUpperCase()}
           </div>
         )}
-        <div>
-          <p className="font-medium text-cloistr-light">{displayName}</p>
+        {/* min-w-0: a flex child defaults to min-width:auto and will not
+            shrink below its content, so a long display name widens the card
+            and then the page. truncate keeps the name on one line. */}
+        <div className="min-w-0">
+          <p className="truncate font-medium text-cloistr-light">{displayName}</p>
           <p className="text-xs text-cloistr-light/60">{timeStr}</p>
         </div>
       </div>
 
       {/* Content */}
-      <p className="mb-4 whitespace-pre-wrap text-sm text-cloistr-light/90">{note.content}</p>
+      <p className="mb-4 whitespace-pre-wrap break-words text-sm text-cloistr-light/90">
+        {note.content}
+      </p>
 
       {/* Media */}
       {note.media.length > 0 && (
