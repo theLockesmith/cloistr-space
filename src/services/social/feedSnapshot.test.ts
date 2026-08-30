@@ -12,8 +12,8 @@ import {
   saveSnapshot,
   loadSnapshot,
   clearSnapshot,
-  mergeSnapshot,
   snapshotKey,
+  shouldPersist,
   SNAPSHOT_LIMIT,
 } from './feedSnapshot';
 import type { Note } from '@/types/social';
@@ -174,34 +174,33 @@ describe('feedSnapshot', () => {
   });
 });
 
-describe('mergeSnapshot', () => {
-  it('lets live notes win on collision', () => {
-    // A restored note carries the engagement counts from whenever it was saved.
-    // Letting those overwrite fresh ones makes a reload look like reactions had
-    // been undone -- which is the exact bug class we just spent three fixes on.
-    const live = [{ ...note('same'), engagement: { ...NO_ENGAGEMENT, reactions: 7 } }];
-    const restored = [{ ...note('same'), engagement: { ...NO_ENGAGEMENT } }];
-
-    const merged = mergeSnapshot(live, restored);
-
-    expect(merged).toHaveLength(1);
-    expect(merged[0].engagement.reactions).toBe(7);
+describe('shouldPersist', () => {
+  it('refuses to write notes belonging to another filter', () => {
+    // THE regression. Switching filters left `notes` in place, the new mode's
+    // snapshot was merged into them, and the union was saved under the new
+    // mode's key -- growing with every switch until all three filters rendered
+    // the same thing. Reported as "only showing my content (except now it's
+    // across all 3 view filters)".
+    expect(shouldPersist('following:pk', 'wot:pk', 20)).toBe(false);
   });
 
-  it('appends restored notes the live feed has not reached yet', () => {
-    const merged = mergeSnapshot([note('new', 2000)], [note('old', 1000)]);
-
-    expect(merged.map((n) => n.id)).toEqual(['new', 'old']);
+  it('refuses to write notes belonging to another account', () => {
+    // Same hazard across a sign-out: the previous user's feed must not be
+    // written into the next user's snapshot.
+    expect(shouldPersist('following:pk-1', 'following:pk-2', 20)).toBe(false);
   });
 
-  it('keeps newest first after merging', () => {
-    const merged = mergeSnapshot([note('mid', 2000)], [note('newest', 3000), note('oldest', 1000)]);
-
-    expect(merged.map((n) => n.id)).toEqual(['newest', 'mid', 'oldest']);
+  it('allows a write when the notes belong where they are going', () => {
+    expect(shouldPersist('following:pk', 'following:pk', 20)).toBe(true);
   });
 
-  it('returns the live list untouched when there is nothing to restore', () => {
-    const live = [note('a')];
-    expect(mergeSnapshot(live, [])).toBe(live);
+  it('refuses an empty feed', () => {
+    // refresh() empties notes before refilling them. Writing that through would
+    // destroy the snapshot at the moment it is most likely to be wanted.
+    expect(shouldPersist('following:pk', 'following:pk', 0)).toBe(false);
+  });
+
+  it('refuses before ownership is established', () => {
+    expect(shouldPersist(null, 'following:pk', 20)).toBe(false);
   });
 });

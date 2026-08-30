@@ -164,20 +164,34 @@ export function clearSnapshot(
 }
 
 /**
- * Merge restored notes under live ones.
+ * Whether `notes` may be written to `mode`'s snapshot.
  *
- * Live wins on collision, always: a restored note carries the engagement counts
- * from whenever it was saved, and letting those overwrite fresh ones would make
- * a reload look like reactions had been undone.
+ * This exists because of a regression I shipped. Switching feed filters did not
+ * clear `notes`, and the restore MERGED the new mode's snapshot into whatever
+ * was already on screen -- so the union got saved under the new mode's key, and
+ * the next switch grew it again. After visiting all three filters, every key
+ * held the same union and all three rendered identically.
+ *
+ * The operator's report was exact: "only showing my content (except now it's
+ * across all 3 view filters)". Three DIFFERENT filters returning ONE identical
+ * result is a different shape from a feed being empty, and that parenthetical
+ * is what identified it.
+ *
+ * So notes carry the mode they were fetched under, and a write is refused when
+ * that does not match where it is going. Clearing on mode change (in useFeed)
+ * is the primary fix; this is the guard that makes the invariant checkable
+ * rather than merely intended.
  */
-export function mergeSnapshot(live: Note[], restored: Note[]): Note[] {
-  if (restored.length === 0) return live;
-
-  const seen = new Set(live.map((n) => n.id));
-  const extra = restored.filter((n) => !seen.has(n.id));
-  if (extra.length === 0) return live;
-
-  return [...live, ...extra].sort((a, b) => b.createdAt - a.createdAt);
+export function shouldPersist(
+  notesMode: string | null,
+  mode: string,
+  noteCount: number
+): boolean {
+  // refresh() empties notes before refilling them. Writing that through would
+  // destroy the snapshot at the moment it is most likely to be wanted.
+  if (noteCount === 0) return false;
+  // Notes belonging to another filter must never be written here.
+  return notesMode === mode;
 }
 
 /**
