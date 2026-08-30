@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveBuildVersion } from './buildVersion';
+import { execSync } from 'node:child_process';
+import { resolveBuildVersion, assertIdentified } from './buildVersion';
 
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -34,10 +35,31 @@ describe('resolveBuildVersion', () => {
     expect(v.pipeline).toBe('local');
   });
 
-  it('falls back to git when CI vars are absent', () => {
+  it('falls back to git when CI vars are absent and git is available', () => {
+    // Conditional on git actually existing, which is NOT a property of this
+    // code. The first version of this test asserted a 40-hex SHA
+    // unconditionally and passed locally, then failed in CI -- node:22-alpine
+    // ships no git binary, so the fallback correctly returned "unknown" and the
+    // test called correct behaviour a failure.
+    //
+    // Asserting the environment instead of the behaviour is its own bug. The
+    // environment-independent property is the test below, which passed in both.
+    const hasGit = (() => {
+      try {
+        execSync('git rev-parse HEAD', { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+
     const v = resolveBuildVersion({} as NodeJS.ProcessEnv);
 
-    expect(v.commit).toMatch(SHA);
+    if (hasGit) {
+      expect(v.commit).toMatch(SHA);
+    } else {
+      expect(v.commit).toBe('unknown');
+    }
   });
 
   it('never produces a commit that is neither a sha nor "unknown"', () => {
@@ -48,6 +70,22 @@ describe('resolveBuildVersion', () => {
     const v = resolveBuildVersion({} as NodeJS.ProcessEnv);
 
     expect(v.commit === 'unknown' || SHA.test(v.commit)).toBe(true);
+  });
+
+  it('refuses to build in CI without a resolvable commit', () => {
+    // Shipping a bundle that cannot say what it is makes the probe useless in
+    // the one place it matters. Locally that is a nuisance; in CI it is a
+    // deployable artifact with no identity, so the build fails instead.
+    expect(() => assertIdentified({ commit: 'unknown' } as never, { CI: 'true' } as never)).toThrow(
+      /identify itself/
+    );
+  });
+
+  it('allows a local build with no git to proceed', () => {
+    // Dev convenience. A local build is not a deployable artifact.
+    expect(() =>
+      assertIdentified({ commit: 'unknown' } as never, {} as never)
+    ).not.toThrow();
   });
 
   it('stamps a parseable ISO timestamp', () => {

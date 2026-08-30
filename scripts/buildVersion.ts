@@ -57,6 +57,29 @@ export function resolveBuildVersion(env: NodeJS.ProcessEnv = process.env): Build
   };
 }
 
+/**
+ * Refuse to produce a deployable artifact that cannot identify itself.
+ *
+ * A bundle whose version.json says "unknown" makes the probe useless in exactly
+ * the situation it exists for, and the failure would only surface at deploy
+ * verification time -- long after the build looked fine. Failing here is louder
+ * and cheaper.
+ *
+ * Only in CI. A local build with no git available is a nuisance, not a
+ * deployable artifact, and blocking it would just make development worse.
+ */
+export function assertIdentified(
+  version: BuildVersion,
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (env.CI && version.commit === 'unknown') {
+    throw new Error(
+      'Build refused: this bundle cannot identify itself (no CI_COMMIT_SHA and no git). ' +
+        'A deployed artifact with an unknown commit cannot be verified after rollout.'
+    );
+  }
+}
+
 /** Vite plugin: writes the build's identity to dist/version.json. */
 export function buildVersionPlugin(): Plugin {
   return {
@@ -64,6 +87,7 @@ export function buildVersionPlugin(): Plugin {
     apply: 'build',
     generateBundle() {
       const version = resolveBuildVersion();
+      assertIdentified(version);
 
       this.emitFile({
         type: 'asset',
