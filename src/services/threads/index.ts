@@ -15,3 +15,5 @@ export {
 } from './threadEvents';
 
 export { useThreads } from './useThreads';
+
+export { useAllThreads, type ThreadWithGroup, type UseAllThreadsReturn } from './useAllThreads';
