@@ -20,9 +20,7 @@ import {
   type RelayStatus,
   type NdkServiceConfig,
   NDKEvent,
-  type NDKFilter,
 } from './ndk';
-import { subscribeStream } from './subscribeOnce';
 
 interface NdkContextValue {
   /** NDK service instance */
@@ -249,76 +247,4 @@ export function useNdk() {
     throw new Error('useNdk must be used within NdkProvider');
   }
   return context;
-}
-
-/**
- * Hook for subscribing to Nostr events
- * Automatically manages subscription lifecycle
- */
-export function useNostrSubscription(
-  filters: NDKFilter | NDKFilter[] | null,
-  options?: {
-    enabled?: boolean;
-    closeOnEose?: boolean;
-  }
-) {
-  const { subscribe, isConnected } = useNdk();
-  const eventsRef = useRef<NDKEvent[]>([]);
-  const [, forceUpdate] = useState({});
-  const [eoseReceived, setEoseReceived] = useState(false);
-  const subscriptionActiveRef = useRef(false);
-
-  const enabled = options?.enabled ?? true;
-  const canSubscribe = Boolean(subscribe && filters && isConnected && enabled);
-
-  // Create stable filter key for dependency tracking
-  const filterKey = useMemo(
-    () => (filters ? JSON.stringify(filters) : null),
-    [filters]
-  );
-
-  useEffect(() => {
-    if (!canSubscribe || !subscribe || !filters) {
-      eventsRef.current = [];
-      subscriptionActiveRef.current = false;
-      setEoseReceived(false);
-      return;
-    }
-
-    // Reset for new subscription
-    eventsRef.current = [];
-    subscriptionActiveRef.current = true;
-    setEoseReceived(false);
-
-    // Generic hook, so the caller's content may be historical or ongoing and
-    // this cannot know which. Registering handlers at subscribe time is correct
-    // for both, and is the only option that is safe without knowing.
-    const sub = subscribeStream(
-      subscribe,
-      Array.isArray(filters) ? filters : [filters],
-      {
-        onEvent: (event: NDKEvent) => {
-          eventsRef.current = [...eventsRef.current, event];
-          forceUpdate({});
-        },
-        onEose: () => {
-          subscriptionActiveRef.current = false;
-          setEoseReceived(true);
-        },
-      },
-      { closeOnEose: options?.closeOnEose ?? false }
-    );
-
-    return () => {
-      sub.stop();
-      subscriptionActiveRef.current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSubscribe, filterKey, options?.closeOnEose]);
-
-  return {
-    events: eventsRef.current,
-    isLoading: subscriptionActiveRef.current && !eoseReceived,
-    eoseReceived,
-  };
 }

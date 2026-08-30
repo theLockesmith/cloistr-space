@@ -17,7 +17,6 @@ export {
 export {
   NdkProvider,
   useNdk,
-  useNostrSubscription,
 } from './NdkProvider';
 
 export { RelayAuthPolicy, type RelayAuthPolicyState } from './authPolicy';
