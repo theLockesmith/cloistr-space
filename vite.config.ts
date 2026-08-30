@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { buildVersionPlugin } from './scripts/buildVersion';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), buildVersionPlugin()],
   resolve: {
     dedupe: ['react', 'react-dom', '@cloistr/auth'],
     alias: {
