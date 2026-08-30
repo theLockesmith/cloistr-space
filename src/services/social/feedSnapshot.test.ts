@@ -14,6 +14,7 @@ import {
   clearSnapshot,
   snapshotKey,
   shouldPersist,
+  upsertNote,
   SNAPSHOT_LIMIT,
 } from './feedSnapshot';
 import type { Note } from '@/types/social';
@@ -202,5 +203,66 @@ describe('shouldPersist', () => {
 
   it('refuses before ownership is established', () => {
     expect(shouldPersist(null, 'following:pk', 20)).toBe(false);
+  });
+});
+
+describe('upsertNote', () => {
+  it('does not add the same event twice', () => {
+    // THE regression. The restore put notes on screen and cleared the seen-set
+    // without seeding it, so the live subscription redelivered every one and
+    // the feed rendered adjacent identical pairs with the same React key.
+    const first = note('same', 1000);
+    const list = upsertNote([], first);
+
+    expect(upsertNote(list, note('same', 1000))).toHaveLength(1);
+  });
+
+  it('replaces the existing copy rather than ignoring the new one', () => {
+    // The same event from a second relay may carry data the first lacked, and
+    // the newer object is no worse. Ignoring it would be safe but wasteful.
+    const list = upsertNote([], { ...note('same'), content: 'old' });
+    const next = upsertNote(list, { ...note('same'), content: 'new' });
+
+    expect(next).toHaveLength(1);
+    expect(next[0].content).toBe('new');
+  });
+
+  it('keeps newest first', () => {
+    let list: Note[] = [];
+    for (const [id, t] of [['mid', 2000], ['old', 1000], ['new', 3000]] as const) {
+      list = upsertNote(list, note(id, t));
+    }
+
+    expect(list.map((n) => n.id)).toEqual(['new', 'mid', 'old']);
+  });
+
+  it('preserves order when replacing', () => {
+    // createdAt is part of the event id's preimage, so a replacement cannot
+    // change where the note belongs -- but if that ever stopped being true,
+    // silently reordering the feed under the reader would be the symptom.
+    let list: Note[] = [];
+    list = upsertNote(list, note('a', 3000));
+    list = upsertNote(list, note('b', 2000));
+    list = upsertNote(list, note('c', 1000));
+
+    const next = upsertNote(list, { ...note('b', 2000), content: 'edited' });
+
+    expect(next.map((n) => n.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('dedups the same event arriving from many relays', () => {
+    // Enabling the outbox model means one note comes back from every relay
+    // that carries it. Deduplication that was never needed is now load-bearing.
+    let list: Note[] = [];
+    for (let i = 0; i < 11; i++) list = upsertNote(list, note('echoed', 1000));
+
+    expect(list).toHaveLength(1);
+  });
+
+  it('does not mutate the array it was given', () => {
+    const list = [note('a')];
+    upsertNote(list, note('b'));
+
+    expect(list).toHaveLength(1);
   });
 });
