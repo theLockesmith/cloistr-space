@@ -164,6 +164,39 @@ export function clearSnapshot(
 }
 
 /**
+ * Insert a note, keyed by id, newest first.
+ *
+ * Dedup lives HERE rather than only in the caller's seen-set, and that is the
+ * point. The feed kept a `seenIdsRef` beside the note list and appended
+ * unconditionally once an id passed it -- two structures that had to agree, and
+ * did not. The snapshot restore replaced the list and CLEARED the seen-set
+ * without seeding it, so every restored note was delivered again by the live
+ * subscription, passed the empty seen-set, and rendered a second time. Adjacent
+ * identical pairs, same React key.
+ *
+ * Seeding the seen-set fixes that instance. Deduping at the insert makes the
+ * whole class structurally impossible, which matters because the two
+ * structures will drift again otherwise.
+ *
+ * A later copy of the same id REPLACES the earlier one: the same event from a
+ * second relay may carry data the first lacked, and the newer object is no
+ * worse.
+ */
+export function upsertNote(prev: Note[], note: Note): Note[] {
+  const at = prev.findIndex((n) => n.id === note.id);
+
+  if (at === -1) {
+    return [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // Already ordered; replacing in place cannot change the ordering, because
+  // createdAt is part of the event id's preimage and cannot differ.
+  const next = prev.slice();
+  next[at] = note;
+  return next;
+}
+
+/**
  * Whether `notes` may be written to `mode`'s snapshot.
  *
  * This exists because of a regression I shipped. Switching feed filters did not

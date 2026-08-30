@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
-import { saveSnapshot, loadSnapshot, shouldPersist } from './feedSnapshot';
+import { saveSnapshot, loadSnapshot, shouldPersist, upsertNote } from './feedSnapshot';
 import {
   NOTE_KIND,
   REACTION_KIND,
@@ -345,7 +345,13 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     // subscription having already delivered notes -- but both effects run in
     // the same commit, before any relay event can arrive, so that race does not
     // exist. The defence against an impossible race created a real bug.
-    setNotes(loadSnapshot(mode, pubkey));
+    const restored = loadSnapshot(mode, pubkey);
+    setNotes(restored);
+
+    // SEED the seen-set with what we just put on screen. Without this the live
+    // subscription redelivers every restored note, each one passes the empty
+    // seen-set, and the feed renders every post twice.
+    for (const note of restored) seenIdsRef.current.add(note.id);
   }, [mode, pubkey]);
 
   // Persist on the trailing edge. Serialising 50 notes on every engagement
@@ -432,11 +438,10 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
           oldestTimestampRef.current = note.createdAt;
         }
 
-        setNotes((prev) => {
-          // Insert in sorted order (newest first)
-          const newNotes = [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
-          return newNotes;
-        });
+        // upsertNote rather than a bare append: the seen-set above and the note
+        // list are two structures that must agree, and when they drifted the
+        // feed showed everything twice. This makes the id the authority.
+        setNotes((prev) => upsertNote(prev, note));
       },
         onEose: () => {
         setIsLoading(false);
