@@ -10,7 +10,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { ActivityDashboard } from './components/activity/ActivityDashboard';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { SocialFeed } from './components/social/SocialFeed';
-import { ProfileView } from './components/profile';
+import { ProfileView, UserProfileView } from './components/profile';
 import { ThreadsView } from './components/threads';
 import { FileBrowser } from './components/integrations';
 import { LoginPage } from './components/auth/LoginPage';
@@ -102,6 +102,17 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Profile">
                     <ProfileView />
+                  </ErrorBoundary>
+                }
+              />
+              {/* Someone else's profile. `id` is an npub, an nprofile with
+                  relay hints, or a bare hex pubkey -- the route is what tells
+                  us a bare hex string is a pubkey rather than an event id. */}
+              <Route
+                path="p/:id"
+                element={
+                  <ErrorBoundary context="Profile">
+                    <UserProfileView />
                   </ErrorBoundary>
                 }
               />
