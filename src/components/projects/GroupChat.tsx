@@ -3,8 +3,9 @@
  * Displays chat messages and allows sending new ones
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useGroupChat } from '@/services/groups';
+import { useAuthorProfiles } from '@/services/profile';
 import type { GroupMessage } from '@/types/groups';
 
 interface GroupChatProps {
@@ -14,6 +15,12 @@ interface GroupChatProps {
 
 export function GroupChat({ groupId, groupName }: GroupChatProps) {
   const { messages, isLoading, error, sendMessage, refresh } = useGroupChat(groupId);
+
+  // kind:0 for everyone in the visible history. Nothing populated
+  // message.authorProfile, so every message showed a truncated pubkey.
+  const authorPubkeys = useMemo(() => messages.map((m) => m.pubkey), [messages]);
+  const authorProfiles = useAuthorProfiles(authorPubkeys);
+
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -87,7 +94,11 @@ export function GroupChat({ groupId, groupName }: GroupChatProps) {
         ) : (
           <div className="space-y-4">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble
+                key={message.id}
+                message={message}
+                profile={authorProfiles.get(message.pubkey)}
+              />
             ))}
             <div ref={messagesEndRef} />
           </div>
@@ -128,15 +139,24 @@ export function GroupChat({ groupId, groupName }: GroupChatProps) {
   );
 }
 
-function MessageBubble({ message }: { message: GroupMessage }) {
+function MessageBubble({
+  message,
+  profile,
+}: {
+  message: GroupMessage;
+  profile?: { name?: string; displayName?: string; picture?: string };
+}) {
   const timeStr = formatMessageTime(message.createdAt);
-  const displayName = message.authorProfile?.displayName || message.authorProfile?.name || formatPubkey(message.pubkey);
+  // Resolved profile wins; message.authorProfile stays supported for callers
+  // that already carry one.
+  const author = profile ?? message.authorProfile;
+  const displayName = author?.displayName || author?.name || formatPubkey(message.pubkey);
 
   return (
     <div className="flex gap-3">
-      {message.authorProfile?.picture ? (
+      {author?.picture ? (
         <img
-          src={message.authorProfile.picture}
+          src={author.picture}
           alt=""
           className="h-8 w-8 rounded-full object-cover"
         />
