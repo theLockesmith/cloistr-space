@@ -383,6 +383,46 @@ export class NdkService {
   }
 
   /**
+   * A relay set pinned to the user's OWN relays, bypassing the outbox model.
+   *
+   * Needed because NDK routes any filter carrying `authors` purely by the
+   * author's relay list and DOES NOT include explicitRelayUrls -- that is only
+   * the no-authors branch (ndk dist/index.js:2652-2692). A connected relay is
+   * used only when its URL appears in the author's own kind:10002, matched as
+   * an exact string (chooseRelayCombinationForPubkeys, index.js:405).
+   *
+   * That is correct for finding other people's notes and WRONG for our own
+   * app-specific kinds. A kind:33000 contact list exists only on our relay, so
+   * routing its query by a relay list resolved from third-party relays can send
+   * it everywhere except the one place it lives -- and an unreachable list is
+   * indistinguishable from an empty one at the call site.
+   *
+   * Passing an explicit relaySet skips that calculation entirely
+   * (startWithRelays, index.js:9227).
+   *
+   * Returns undefined when nothing is configured, so callers fall back to
+   * NDK's own routing rather than querying an empty set and getting silence.
+   */
+  getOwnRelaySet(): NDKRelaySet | undefined {
+    const urls = Array.from(this.configuredRelays);
+    if (urls.length === 0) return undefined;
+    return NDKRelaySet.fromRelayUrls(urls, this.ndk);
+  }
+
+  /**
+   * Fetch from the user's own relays only.
+   *
+   * For kinds that live on OUR relay by construction -- the NIP-0A contact
+   * list above all. See getOwnRelaySet for why the default routing loses them.
+   */
+  async fetchFromOwnRelays(filters: NDKFilter | NDKFilter[]): Promise<Set<NDKEvent>> {
+    const filterArray = Array.isArray(filters) ? filters : [filters];
+    const relaySet = this.getOwnRelaySet();
+    if (!relaySet) return this.ndk.fetchEvents(filterArray);
+    return this.ndk.fetchEvents(filterArray, undefined, relaySet);
+  }
+
+  /**
    * Subscribe to events matching filters
    */
   subscribe(

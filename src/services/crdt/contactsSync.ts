@@ -139,7 +139,11 @@ export class ContactsSyncService {
    */
   async fetchRemoteContacts(pubkey: string): Promise<NDKEvent[]> {
     const filter = getNip0aFilter(pubkey);
-    const events = await this.ndkService.fetchEvents(filter);
+    // Pinned to the user's own relays. This filter carries `authors`, and NDK
+    // routes those purely by the author's relay list -- so the query for a
+    // kind:33000 that exists ONLY on our relay could be sent everywhere except
+    // there. See NdkService.getOwnRelaySet.
+    const events = await this.ndkService.fetchFromOwnRelays(filter);
     return Array.from(events);
   }
 
@@ -284,6 +288,10 @@ export class ContactsSyncService {
    * Returns the count of contacts, or 0 if none found
    */
   async checkKind3Available(pubkey: string): Promise<{ available: boolean; count: number }> {
+    // NOT pinned to our own relays, unlike the kind:33000 read above. This
+    // import exists to find a LEGACY kind:3 the user made in another client,
+    // which lives on relays they used before Cloistr. Pinning would look more
+    // consistent and would defeat the entire purpose of the feature.
     const filter = getKind3Filter(pubkey);
     const events = await this.ndkService.fetchEvents(filter);
     const eventArray = Array.from(events);
