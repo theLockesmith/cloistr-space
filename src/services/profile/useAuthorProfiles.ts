@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useState, useMemo } from 'react';
-import type { NDKFilter } from '@nostr-dev-kit/ndk';
+import type { NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { METADATA_KIND, parseProfileContent } from './profileEvents';
 
@@ -43,6 +43,8 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
 
   const cacheRef = useRef<AuthorProfiles>(new Map());
   const requestedRef = useRef<Set<string>>(new Set());
+  // Live subscriptions, kept out of the effect's cleanup on purpose. See below.
+  const subsRef = useRef<NDKSubscription[]>([]);
 
   // Only authors we have not already asked about. Without this the effect
   // re-subscribes on every render where the author list changes at all, which
@@ -108,10 +110,41 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
       },
     });
 
-    return () => sub.stop();
+    // DELIBERATELY NO CLEANUP HERE. Returning () => sub.stop() looks correct
+    // and destroys the feature.
+    //
+    // This effect keys on unresolvedKey, the authors not yet requested. The
+    // moment they ARE requested, the next render recomputes that list as empty
+    // and the key changes from "a,b" to "" -- so React runs the cleanup and
+    // tears the subscription down, usually before a single kind:0 has arrived.
+    //
+    // It is self-triggering, which is what made it total rather than flaky: the
+    // first profile that does land calls setProfiles, that re-renders, the list
+    // empties again, and the subscription dies. Best case one profile resolved;
+    // in practice none, and the feature looked as though it had never been
+    // wired at all.
+    //
+    // Subscriptions are collected instead and stopped by the effect below.
+    subsRef.current.push(sub);
     // unresolvedKey is the content-identity of `unresolved`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe, isConnected, unresolvedKey]);
+
+  // Tear down on unmount, and on a connection change.
+  //
+  // A subscription bound to a previous connection will never deliver, so the
+  // requested set is cleared alongside it -- otherwise those authors stay
+  // marked as asked-about and are never queried again on the new connection,
+  // which would turn a reconnect into permanently missing avatars.
+  useEffect(() => {
+    return () => {
+      for (const sub of subsRef.current) {
+        sub.stop();
+      }
+      subsRef.current = [];
+      requestedRef.current = new Set();
+    };
+  }, [subscribe, isConnected]);
 
   return profiles;
 }
