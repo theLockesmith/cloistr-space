@@ -26,13 +26,22 @@ export default defineConfig({
     testTimeout: 30000, // 30s per test
     hookTimeout: 30000,
     reporters: process.env.CI ? ['verbose'] : ['default'],
-    // Exclude browser tests that require Playwright and E2E tests
+    // Browser tests (real Web Crypto, navigator) and Playwright E2E only.
+    //
+    // nip0a.test.ts and ndk.test.ts used to be listed here too. Neither is a
+    // browser test, both pass in jsdom in about 26ms, and nothing records why
+    // they were excluded -- so 39 tests silently did not run, and every "tests
+    // pass" claim in this repo was made without them. nip0a.test.ts covers the
+    // NIP-0A CRDT, which is the code that published an empty contact list over
+    // a real one; that suite existed the whole time and was never consulted.
+    //
+    // An excluded suite is indistinguishable from a passing one in any summary
+    // line. If something here ever needs excluding again, say why in this
+    // comment.
     exclude: [
       'node_modules/**',
       'tests/**',
       '**/*.browser.test.{ts,tsx}',
-      'src/services/crdt/nip0a.test.ts',
-      'src/services/nostr/ndk.test.ts',
       'src/test/browser-apis.test.ts',
     ],
     coverage: {
