@@ -4,6 +4,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { profilePath } from '@/services/nostr';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
 import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
@@ -375,24 +377,37 @@ function NoteCard({
 
   return (
     <article className="rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 p-4">
-      {/* Author */}
+      {/* Author.
+          A real <Link>, not an onClick div: middle-click, open-in-new-tab and
+          copy-link-address are how people actually use a name in a feed, and a
+          click handler silently breaks all three. */}
       <div className="mb-3 flex items-center gap-3">
-        {author?.picture ? (
-          <img
-            src={author.picture}
-            alt=""
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cloistr-primary/20 text-sm font-medium text-cloistr-primary">
-            {displayName.slice(0, 2).toUpperCase()}
-          </div>
-        )}
+        <Link to={profilePath(note.pubkey)} aria-label={`${displayName}'s profile`}>
+          {author?.picture ? (
+            <img
+              src={author.picture}
+              alt=""
+              className="h-10 w-10 rounded-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cloistr-primary/20 text-sm font-medium text-cloistr-primary">
+              {displayName.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+        </Link>
         {/* min-w-0: a flex child defaults to min-width:auto and will not
             shrink below its content, so a long display name widens the card
             and then the page. truncate keeps the name on one line. */}
         <div className="min-w-0">
-          <p className="truncate font-medium text-cloistr-light">{displayName}</p>
+          <Link
+            to={profilePath(note.pubkey)}
+            className="block truncate font-medium text-cloistr-light hover:underline"
+          >
+            {displayName}
+          </Link>
           <p className="text-xs text-cloistr-light/60">{timeStr}</p>
         </div>
       </div>
