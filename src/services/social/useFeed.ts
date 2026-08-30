@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
+import { saveSnapshot, loadSnapshot, mergeSnapshot } from './feedSnapshot';
 import {
   NOTE_KIND,
   REACTION_KIND,
@@ -279,6 +280,47 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     // Trigger subscription with older until timestamp
     setRefreshKey((k) => k + 1);
   }, [hasMore, isLoading]);
+
+  // --- Reload survival -------------------------------------------------
+  //
+  // Reloading the page emptied the feed until relays answered again. The
+  // obvious fix was an NDK cache adapter; both candidates bundle their own copy
+  // of NDK, so this is a render snapshot instead. See feedSnapshot.ts for why,
+  // and for what it deliberately does NOT do.
+
+  // Restore once per mode+account, not once per render. Tracked in a ref rather
+  // than derived from `notes` being empty, because notes are ALSO empty during
+  // a refresh -- and re-seeding there would resurrect the notes the user just
+  // asked to replace.
+  const restoredKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${mode}:${pubkey ?? 'anon'}`;
+    if (restoredKeyRef.current === key) return;
+    restoredKeyRef.current = key;
+
+    const restored = loadSnapshot(mode, pubkey);
+    if (restored.length === 0) return;
+
+    // Merged, not assigned. The live subscription may already have delivered
+    // notes by the time storage is read, and overwriting those would replace
+    // fresh engagement counts with saved ones -- a reload would look like
+    // reactions had been undone.
+    setNotes((prev) => mergeSnapshot(prev, restored));
+  }, [mode, pubkey]);
+
+  // Persist on the trailing edge. Serialising 50 notes on every engagement
+  // event would put a JSON.stringify on the exact per-event path that locked
+  // the feed up, which is not a trade worth making for a convenience.
+  const schedulePersist = useCoalesced(() => {
+    // refresh() empties notes before refilling them. Writing that through would
+    // destroy the snapshot at the moment it is most likely to be wanted.
+    if (notes.length === 0) return;
+    saveSnapshot(notes, mode, pubkey);
+  }, 1000);
+
+  useEffect(() => {
+    schedulePersist();
+  }, [notes, schedulePersist]);
 
   // Main subscription effect
   useEffect(() => {

@@ -88,7 +88,12 @@ function publishOrThrow(relays: Set<unknown>): PublishOutcome {
 
 interface UseNoteActionsReturn {
   /** React to a note with + or emoji. Throws when no relay accepts it. */
-  react: (eventId: string, pubkey: string, content?: string) => Promise<PublishOutcome>;
+  react: (
+    eventId: string,
+    pubkey: string,
+    content?: string,
+    extraTags?: string[][]
+  ) => Promise<PublishOutcome>;
   /** Repost a note. Throws when no relay accepts it. */
   repost: (eventId: string, pubkey: string, relay?: string) => Promise<PublishOutcome>;
   /** Whether connected and can act */
@@ -121,7 +126,12 @@ export function useNoteActions(): UseNoteActionsReturn {
 
   // React to a note (kind:7)
   const react = useCallback(
-    async (eventId: string, eventPubkey: string, content = '+'): Promise<PublishOutcome> => {
+    async (
+      eventId: string,
+      eventPubkey: string,
+      content = '+',
+      extraTags: string[][] = []
+    ): Promise<PublishOutcome> => {
       if (!publish || !createEvent || !pubkey) {
         throw new Error('Not connected');
       }
@@ -131,9 +141,14 @@ export function useNoteActions(): UseNoteActionsReturn {
 
       event.kind = REACTION_KIND;
       event.content = content;
+      // extraTags carries the NIP-25 `["emoji", shortcode, url]` for a custom
+      // reaction. We never load that image ourselves, but the receiving client
+      // needs the tag to render what the user actually picked -- so declining
+      // to fetch must not become declining to publish.
       event.tags = [
         ['e', eventId],
         ['p', eventPubkey],
+        ...extraTags,
       ];
 
       return publishOrThrow(await publish(event));
