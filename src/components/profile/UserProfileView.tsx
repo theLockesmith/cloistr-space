@@ -8,17 +8,20 @@
  */
 
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import {
   decodeIdentifier,
   decodeHexAs,
   encodeProfile,
   abbreviate,
+  notePath,
   SecretKeyPastedError,
 } from '@/services/nostr';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { useAuthorNotes } from '@/services/profile/useAuthorNotes';
 import { useFollow, FOLLOW_BLOCKED_MESSAGE } from '@/services/profile/useFollow';
+import { NoteContent } from '@/components/social/NoteContent';
 
 export function UserProfileView() {
   const { id = '' } = useParams();
@@ -90,9 +93,9 @@ function ProfileBody({ pubkey }: { pubkey: string }) {
             {abbreviate(encodeProfile(pubkey), 12)}
           </p>
           {profile?.about && (
-            <p className="mt-2 whitespace-pre-wrap break-words text-sm text-cloistr-light/80">
-              {profile.about}
-            </p>
+            <div className="mt-2">
+              <NoteContent content={profile.about} compact />
+            </div>
           )}
         </div>
 
@@ -136,15 +139,25 @@ function ProfileBody({ pubkey }: { pubkey: string }) {
           </p>
         )}
 
-        <ul className="divide-y divide-cloistr-light/5">
+        {/* Cards, not list rows. The operator could not tell where one post
+            ended and the next began -- borders and spacing are the fix, and
+            they are not decoration. */}
+        <ul className="space-y-3">
           {notes.map((note) => (
-            <li key={note.id} className="py-3">
-              <p className="whitespace-pre-wrap break-words text-sm text-cloistr-light">
-                {note.content}
-              </p>
-              <p className="mt-1 text-xs text-cloistr-light/40">
-                {new Date(note.createdAt * 1000).toLocaleString()}
-              </p>
+            <li key={note.id}>
+              <article className="relative rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 p-4">
+                <Link
+                  to={notePath(note.id, [], note.pubkey)}
+                  aria-label="Open this post"
+                  className="absolute inset-0 z-0"
+                />
+                <div className="relative z-10 pointer-events-none [&_a]:pointer-events-auto [&_img]:pointer-events-auto [&_video]:pointer-events-auto">
+                  <NoteContent content={note.content} />
+                  <p className="mt-2 text-xs text-cloistr-light/40">
+                    {new Date(note.createdAt * 1000).toLocaleString()}
+                  </p>
+                </div>
+              </article>
             </li>
           ))}
         </ul>

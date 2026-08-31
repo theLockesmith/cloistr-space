@@ -22,6 +22,7 @@ import { buildReplyTags } from '@/services/social/replyEvents';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import type { ThreadNode } from '@/services/social/replyEvents';
 import type { Note } from '@/types/social';
+import { NoteContent } from './NoteContent';
 
 export function NoteDetailView() {
   const { id = '' } = useParams();
@@ -173,7 +174,7 @@ function NoteBody({
         </span>
       </div>
 
-      <p className="whitespace-pre-wrap break-words text-sm text-cloistr-light">{note.content}</p>
+      <NoteContent content={note.content} compact={!featured} />
 
       {featured && (
         <div className="mt-3 flex gap-4 text-xs text-cloistr-light/50">

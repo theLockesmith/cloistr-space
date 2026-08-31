@@ -287,8 +287,14 @@ describe('no hover-only action visibility — all component files', () => {
 // ---------------------------------------------------------------------------
 
 describe('user content cannot widen the page', () => {
+  // NoteContent replaced SocialFeed's inline rendering: the feed, the profile
+  // page and the thread view all render posts through it now, so the property
+  // is asserted where the content actually lives rather than where it used to.
+  // SocialFeed is deliberately NOT listed -- it no longer renders raw user text
+  // directly, and asserting a pre-wrap it does not need would be a guard that
+  // fails for the wrong reason.
   const CONTENT_SURFACES = [
-    'src/components/social/SocialFeed.tsx',
+    'src/components/social/NoteContent.tsx',
     'src/components/projects/GroupChat.tsx',
     'src/components/projects/GroupThreads.tsx',
   ];
