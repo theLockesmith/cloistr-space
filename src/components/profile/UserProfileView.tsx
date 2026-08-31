@@ -19,9 +19,63 @@ import {
   SecretKeyPastedError,
 } from '@/services/nostr';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
+import { useNip05 } from '@/services/profile/useNip05';
+import type { Nip05State } from '@/services/profile/useNip05';
 import { useAuthorNotes } from '@/services/profile/useAuthorNotes';
 import { useFollow, FOLLOW_BLOCKED_MESSAGE } from '@/services/profile/useFollow';
 import { NoteContent } from '@/components/social/NoteContent';
+
+/**
+ * Return src only when it has a safe absolute URL scheme (http or https).
+ * A scheme-less value resolves relative to the current page.
+ */
+function safeImageUrl(src: string | undefined): string | null {
+  if (!src) return null;
+  const t = src.trim();
+  if (!t.startsWith('https://') && !t.startsWith('http://')) return null;
+  return t;
+}
+
+/**
+ * Verification badge for a NIP-05 address. Three distinguishable states:
+ *   VERIFIED   - green check
+ *   UNVERIFIED - amber cross (said they are X; confirmed they are not)
+ *   UNKNOWN    - grey question (network or CORS failure; could not check)
+ */
+function Nip05Badge({ state }: { state: Nip05State | null }) {
+  if (state === null) return null;
+  if (state === 'verified') {
+    return (
+      <span
+        title="NIP-05 verified"
+        className="inline-block shrink-0 text-cloistr-success"
+        aria-label="verified"
+      >
+        ✓
+      </span>
+    );
+  }
+  if (state === 'unverified') {
+    return (
+      <span
+        title="NIP-05 address does not match this pubkey"
+        className="inline-block shrink-0 text-cloistr-warning"
+        aria-label="not verified"
+      >
+        ✗
+      </span>
+    );
+  }
+  return (
+    <span
+      title="NIP-05 could not be checked (network or CORS)"
+      className="inline-block shrink-0 text-cloistr-light/30"
+      aria-label="verification unknown"
+    >
+      ?
+    </span>
+  );
+}
 
 export function UserProfileView() {
   const { id = '' } = useParams();
@@ -65,14 +119,15 @@ function ProfileBody({ pubkey }: { pubkey: string }) {
   const follow = useFollow(pubkey);
 
   const profile = profiles.get(pubkey);
+  const nip05State = useNip05(profile?.nip05, pubkey);
   const name = profile?.displayName || profile?.name || abbreviate(encodeProfile(pubkey));
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
       <header className="flex items-start gap-4">
-        {profile?.picture ? (
+        {safeImageUrl(profile?.picture) ? (
           <img
-            src={profile.picture}
+            src={safeImageUrl(profile?.picture)!}
             alt=""
             className="h-16 w-16 shrink-0 rounded-full object-cover"
             // A dead avatar host must not leave a broken-image glyph.
@@ -87,7 +142,15 @@ function ProfileBody({ pubkey }: { pubkey: string }) {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-medium text-cloistr-light">{name}</h1>
           {profile?.nip05 && (
-            <p className="truncate text-sm text-cloistr-light/60">{profile.nip05}</p>
+            <p className="flex items-center gap-1.5 text-sm text-cloistr-light/60">
+              <span className="truncate">{profile.nip05}</span>
+              <Nip05Badge state={nip05State} />
+            </p>
+          )}
+          {profile?.lud16 && (
+            <p className="truncate text-sm text-cloistr-light/50">
+              &#x26A1; {profile.lud16}
+            </p>
           )}
           <p className="mt-1 break-all font-mono text-xs text-cloistr-light/40">
             {abbreviate(encodeProfile(pubkey), 12)}

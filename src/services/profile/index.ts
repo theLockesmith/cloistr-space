@@ -19,3 +19,4 @@ export {
 export { useProfile, type UseProfileReturn } from './useProfile';
 
 export { useAuthorProfiles, type AuthorProfiles } from './useAuthorProfiles';
+export { useNip05, type Nip05State } from './useNip05';
