@@ -15,27 +15,25 @@ export function LoginPage() {
   const { isAuthenticated, isLoading } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-dvh items-center justify-center bg-cloistr-dark">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-cloistr-primary border-t-transparent" />
-          <p className="text-cloistr-light/60">Signing you in…</p>
-        </div>
-      </div>
-    );
-  }
-
   if (isAuthenticated) {
     return <Navigate to="/activity" replace />;
   }
 
   return (
     <div className="flex min-h-dvh flex-col bg-cloistr-dark">
+      {/* onSignIn is REQUIRED for the header to render anything.
+          @cloistr/ui's Header treats a supplied `auth` prop as "this app
+          manages its own session", and its signed-out branch returns null
+          specifically when onSignIn is absent (Header.js:20-24) -- a case that
+          exists for login screens, on the reasoning that the page IS the form.
+          The operator's expectation is the opposite: every other app in the
+          suite offers Sign In in the header, so its absence here reads as a
+          broken page rather than as a considered omission. Opening the same
+          modal the body button opens costs nothing and matches the suite. */}
       <UnifiedHeader
         activeServiceId="space"
-        auth={{ authenticated: false }}
-        signerUrl="https://signer.cloistr.xyz"
+        auth={{ authenticated: false, onSignIn: () => setModalOpen(true) }}
+        signerUrl={SIGNER_URL}
       />
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="max-w-2xl">
@@ -75,6 +73,26 @@ export function LoginPage() {
         onClose={() => setModalOpen(false)}
         signerUrl={SIGNER_URL}
       />
+
+      {/* An OVERLAY, not an early return.
+          This used to be `if (isLoading) return <spinner>` above every other
+          branch, which unmounted the LoginModal the instant a login began --
+          taking any in-flight NIP-46 connection state with it. When loading
+          settled without authenticating, the modal remounted FRESH, so the user
+          was dropped back to the start of the flow rather than continuing it.
+          Rendering over the top keeps the modal mounted and its flow intact. */}
+      {isLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-cloistr-dark/90"
+        >
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-cloistr-primary border-t-transparent" />
+            <p className="text-cloistr-light/60">Signing you in securely…</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
