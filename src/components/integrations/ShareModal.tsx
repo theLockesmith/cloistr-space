@@ -104,7 +104,7 @@ export function ShareModal({ isOpen, onClose, file }: ShareModalProps) {
         {/* Note about public links */}
         <div className="rounded-lg border border-cloistr-warning/20 bg-cloistr-warning/5 px-4 py-3">
           <p className="text-sm text-cloistr-warning/80">
-            Anyone with this link can download the file. For encrypted sharing, use the Nostr-based sharing feature (coming soon).
+            Anyone with this link can download the file. Treat it as public.
           </p>
         </div>
       </div>
