@@ -14,6 +14,7 @@ import { NoteDetailView } from './components/social/NoteDetailView';
 import { HashtagView } from './components/social/HashtagView';
 import { ProfileView, UserProfileView } from './components/profile';
 import { ThreadsView } from './components/threads';
+import { NotificationsView } from './components/activity/NotificationsView';
 import { FileBrowser } from './components/integrations';
 import { LoginPage } from './components/auth/LoginPage';
 import { AuthGuard } from './components/auth/AuthGuard';
@@ -104,6 +105,14 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Profile">
                     <ProfileView />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="notifications"
+                element={
+                  <ErrorBoundary context="Notifications">
+                    <NotificationsView />
                   </ErrorBoundary>
                 }
               />

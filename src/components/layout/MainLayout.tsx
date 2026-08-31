@@ -2,7 +2,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { AppShell, AppShellToggle } from '@cloistr/ui/components';
 import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { SpaceNavLinks } from './SpaceNavLinks';
-import { SubHeader } from './SubHeader';
+import { NotificationBadge } from './NotificationBadge';
 import { ToastContainer } from '@/components/common/Toast';
 import { useContactsSync } from '@/services/crdt';
 import { useRelayPrefsSync } from '@/services/nostr';
@@ -80,8 +80,12 @@ export function MainLayout() {
               // affordance for signing in.
               onSignIn: () => navigate('/login'),
             }}
-          />
-          <SubHeader />
+          >
+            {/* @cloistr/ui's Header renders `children` in its right-hand
+                cluster, so this is a Space-local element in a slot the shared
+                component already provides -- no change to @cloistr/ui. */}
+            <NotificationBadge />
+          </UnifiedHeader>
           <main id="main-content" className="flex-1 overflow-auto p-6">
             <Outlet />
           </main>
