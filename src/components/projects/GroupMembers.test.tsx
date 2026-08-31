@@ -3,21 +3,46 @@
  * Comprehensive React Testing Library tests covering all states and interactions
  */
 
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GroupMembers } from './GroupMembers';
 import { useGroupMembers, type GroupMember } from '@/services/groups/useGroupMembers';
 import type { AdminPermission } from '@/types/groups';
 
+// Member names are <Link>s to the profile route now, so every render needs a
+// router. A click handler would not have needed one -- and would have broken
+// middle-click and open-in-new-tab, which is why it is a Link.
+const render = (ui: React.ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+
 // Mock the hook
 vi.mock('@/services/groups/useGroupMembers');
+
+// The component now resolves member names and offers admin controls, both of
+// which reach NDK. These tests are about the member LIST's rendering states, so
+// the collaborators are stubbed rather than dragging an NdkProvider into every
+// case -- the profile and admin behaviour have their own tests.
+vi.mock('@/services/profile/useAuthorProfiles', () => ({
+  useAuthorProfiles: () => new Map(),
+}));
+vi.mock('@/services/groups/useGroupAdmin', () => ({
+  useGroupAdmin: () => ({
+    addMember: vi.fn(),
+    removeMember: vi.fn(),
+    updateMetadata: vi.fn(),
+    isBusy: false,
+    error: null,
+    notice: null,
+    dismiss: vi.fn(),
+  }),
+}));
 
 const mockUseGroupMembers = vi.mocked(useGroupMembers);
 
 // Test data fixtures
 const mockRegularMember: GroupMember = {
-  pubkey: 'npub1abc123def456ghi789',
+  pubkey: 'a'.repeat(64),
   isAdmin: false,
   permissions: [],
   profile: {
