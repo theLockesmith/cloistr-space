@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
+import { connectedRelayUrls, needsExplicitRelays, widenRelays } from './globalRelays';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
 import { saveSnapshot, loadSnapshot, shouldPersist, upsertNote } from './feedSnapshot';
@@ -182,7 +183,7 @@ function extractMedia(content: string, tags: string[][]): MediaAttachment[] {
  */
 export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const { pageSize = DEFAULT_PAGE_SIZE, hashtag } = options;
-  const { subscribe, isConnected } = useNdk();
+  const { subscribe, isConnected, relayStatuses, service } = useNdk();
   const { pubkey } = useAuthStore();
   const { contacts } = useContactsStore();
 
@@ -193,6 +194,20 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const [hasMore, setHasMore] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  /**
+   * The widest set of relays we have seen connected, for the global feed.
+   *
+   * Global carries no `authors`, so NDK routes it to explicitRelayUrls alone --
+   * one relay, making global a strict SUBSET of following. An explicit relay
+   * set fixes that but FREEZES the subscription, because NDK's pool monitor
+   * recomputes from the filter and a no-authors filter resolves back to
+   * explicitRelayUrls. So the set widens as relays connect and the
+   * subscription re-opens on the wider one.
+   *
+   * Monotonic, so a flapping relay does not churn re-subscriptions. Affordable
+   * because upsertNote makes redelivery free.
+   */
+  const globalRelaysRef = useRef<string[]>([]);
   const subscriptionRef = useRef<NDKSubscription | null>(null);
   const seenIdsRef = useRef(new Set<string>());
   const oldestTimestampRef = useRef<number | null>(null);
@@ -218,6 +233,11 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   // until now because the subscription used to close at eose, before duplicates
   // could accumulate.
   const seenEngagementRef = useRef(new Set<string>());
+
+  const globalRelays = needsExplicitRelays(mode)
+    ? widenRelays(globalRelaysRef.current, connectedRelayUrls(relayStatuses.values()))
+    : globalRelaysRef.current;
+  globalRelaysRef.current = globalRelays;
 
   // Get following list for filter
   const following = useMemo(() => {
@@ -487,7 +507,16 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       // returns the SAME array, so the same note arriving from all eighteen
       // relays costs one render, not eighteen. Doing this before the dedup fix
       // would have multiplied the duplication instead of curing it.
-      }, { closeOnEose: false });
+      }, {
+        closeOnEose: false,
+        // Global only. following and wot carry authors, so NDK's outbox routing
+        // already spans the relays their authors write to -- overriding it
+        // would CONFINE them to relays we happen to be connected to, making
+        // those feeds worse.
+        relaySet: needsExplicitRelays(mode)
+          ? service?.getRelaySetFor(globalRelays)
+          : undefined,
+      });
 
       subscriptionRef.current = sub;
 
@@ -505,7 +534,12 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       subscriptionRef.current?.stop();
       subscriptionRef.current = null;
     };
-  }, [subscribe, isConnected, mode, following, hashtag, pageSize, refreshKey]);
+    // globalRelays is the dependency that matters here: widenRelays returns the
+    // SAME array when nothing was added, so its identity changes exactly when
+    // the relay set widens. That is what stops an explicit relaySet freezing
+    // the feed to whatever happened to be connected at mount, and it is inert
+    // for every other mode because the ref never grows for them.
+  }, [subscribe, isConnected, mode, following, hashtag, pageSize, refreshKey, globalRelays, service]);
 
   // The engagement subscription's id set, settled on a trailing edge.
   //

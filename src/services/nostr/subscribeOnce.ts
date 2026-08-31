@@ -40,7 +40,7 @@
  * is what went wrong, and it is not a judgement worth making repeatedly.
  */
 
-import type { NDKEvent, NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
+import type { NDKEvent, NDKFilter, NDKRelaySet, NDKSubscription } from '@nostr-dev-kit/ndk';
 
 export interface OnceHandlers {
   onEvent?: (event: NDKEvent) => void;
@@ -50,6 +50,8 @@ export interface OnceHandlers {
 export interface StreamOptions {
   closeOnEose?: boolean;
   groupable?: boolean;
+  /** Override relay routing. See NdkService.getRelaySetFor. */
+  relaySet?: NDKRelaySet;
 }
 
 /**
