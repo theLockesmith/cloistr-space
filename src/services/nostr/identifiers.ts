@@ -139,8 +139,16 @@ function hints(relays: string[]): string[] {
  *
  * nprofile rather than npub whenever we have relays to name, so the link
  * resolves for someone who is not already on our relay.
+ *
+ * NEVER THROWS. The input often comes from a relay -- a `p` tag in someone
+ * else's member list or contact list -- and nip19 rejects anything that is not
+ * 64 hex characters. A malformed tag must not take down the panel rendering it,
+ * so a value we cannot encode is returned unchanged: the link will not resolve,
+ * but one bad tag degrades one row instead of crashing a surface.
  */
 export function encodeProfile(pubkey: string, relays: string[] = []): string {
+  if (!HEX_64.test(pubkey)) return pubkey;
+
   const h = hints(relays);
   return h.length > 0 ? nip19.nprofileEncode({ pubkey, relays: h }) : nip19.npubEncode(pubkey);
 }
@@ -152,9 +160,13 @@ export function encodeProfile(pubkey: string, relays: string[] = []): string {
  * model to find the event even if every relay hint is stale.
  */
 export function encodeEvent(id: string, relays: string[] = [], author?: string): string {
+  // See encodeProfile: relay-sourced ids must not be able to throw.
+  if (!HEX_64.test(id)) return id;
+
   const h = hints(relays);
-  if (h.length === 0 && !author) return nip19.noteEncode(id);
-  return nip19.neventEncode({ id, relays: h, author });
+  const validAuthor = author && HEX_64.test(author) ? author : undefined;
+  if (h.length === 0 && !validAuthor) return nip19.noteEncode(id);
+  return nip19.neventEncode({ id, relays: h, author: validAuthor });
 }
 
 /** In-app route for a profile. */

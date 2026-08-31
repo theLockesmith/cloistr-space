@@ -210,3 +210,33 @@ describe('abbreviate', () => {
     expect(abbreviate('short')).toBe('short');
   });
 });
+
+describe('encoding untrusted input', () => {
+  it('does not throw on a malformed pubkey', () => {
+    // These come from relays. A `p` tag in someone else's member list or
+    // contact list can hold anything, and nip19 rejects anything that is not
+    // 64 hex characters -- so an unguarded encode takes down the whole panel
+    // rendering that row. Found by a group fixture holding an npub-shaped
+    // string where a hex pubkey belonged.
+    expect(() => encodeProfile('npub1definitelynothex')).not.toThrow();
+    expect(encodeProfile('npub1definitelynothex')).toBe('npub1definitelynothex');
+  });
+
+  it('does not throw on a malformed event id', () => {
+    expect(() => encodeEvent('not-an-id')).not.toThrow();
+    expect(encodeEvent('not-an-id')).toBe('not-an-id');
+  });
+
+  it('drops a malformed author rather than rejecting the whole event', () => {
+    // One bad hint must degrade the link, not lose it. The id is still good.
+    const encoded = encodeEvent(ID, [], 'garbage');
+
+    expect(encoded.startsWith('note1')).toBe(true);
+  });
+
+  it('still builds a path for input it cannot encode', () => {
+    // The route accepts bare hex, so an unencodable value produces a link that
+    // will not resolve rather than a crash -- one degraded row, not a dead page.
+    expect(() => profilePath('nope')).not.toThrow();
+  });
+});
