@@ -11,6 +11,7 @@ import { GroupMembers } from './GroupMembers';
 import { GroupSettings } from './GroupSettings';
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { useAuthStore } from '@/stores/authStore';
+import { can } from '@/services/groups/permissions';
 import { useGroupActions } from '@/services/groups/useGroupActions';
 
 type Tab = 'chat' | 'threads' | 'files' | 'members' | 'settings';
@@ -24,13 +25,17 @@ interface GroupWorkspaceProps {
 export function GroupWorkspace({ groupId, groupName, onLeaveGroup }: GroupWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<Tab>('chat');
 
-  // Same derivation as GroupMembers, and it fails CLOSED: a failed or
-  // still-loading member read hides the tab rather than offering a control that
-  // will refuse. See GroupSettings for why this is an affordance, not
-  // enforcement.
+  // Gated on the permission this tab actually needs, not on a derived isAdmin.
+  // Settings edits kind:39000, so `edit-metadata` is the right and only
+  // question -- someone holding exactly that permission should get the tab, and
+  // someone holding six others but not that one should not.
+  //
+  // Fails CLOSED: a failed or still-loading read yields no permissions.
   const { pubkey } = useAuthStore();
   const { members } = useGroupMembers(groupId);
-  const canAdmin = Boolean(pubkey && members.some((m) => m.pubkey === pubkey && m.isAdmin));
+  const canAdmin = Boolean(
+    pubkey && can(members.find((m) => m.pubkey === pubkey)?.permissions ?? [], 'edit-metadata')
+  );
   const { leaveGroup, canAct } = useGroupActions();
   const [showMenu, setShowMenu] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);

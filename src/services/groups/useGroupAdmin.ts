@@ -15,7 +15,13 @@
 
 import { useCallback, useState } from 'react';
 import { useNdk } from '@/services/nostr';
-import { GROUP_MEMBERS_KIND, GROUP_METADATA_KIND } from '@/types/groups';
+import {
+  GROUP_ADMINS_KIND,
+  GROUP_MEMBERS_KIND,
+  GROUP_METADATA_KIND,
+  type AdminPermission,
+} from '@/types/groups';
+import { buildAdminTags } from './permissions';
 import {
   membersAfterAdd,
   membersAfterRemove,
@@ -32,6 +38,8 @@ export interface GroupMetadataEdit {
 
 interface UseGroupAdminReturn {
   addMember: (pubkey: string) => Promise<void>;
+  /** Replace one person's permissions, keeping everyone else's. */
+  setPermissions: (pubkey: string, permissions: AdminPermission[]) => Promise<void>;
   removeMember: (pubkey: string) => Promise<void>;
   updateMetadata: (edit: GroupMetadataEdit) => Promise<void>;
   isBusy: boolean;
@@ -128,6 +136,93 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
     [readMembers, publishMembers]
   );
 
+  /**
+   * Read the current kind:39001, reporting WHETHER THE READ WORKED separately.
+   *
+   * Same shape and same reason as readMembers: kind:39001 is addressable, so a
+   * replacement carrying one person's permissions REMOVES everyone else's. A
+   * failed read must not become a publish.
+   */
+  const readAdmins = useCallback(async (): Promise<{
+    ok: boolean;
+    entries: { pubkey: string; permissions: AdminPermission[] }[];
+  }> => {
+    if (!fetchEvents || !isConnected) return { ok: false, entries: [] };
+
+    try {
+      const events = await fetchEvents({
+        kinds: [GROUP_ADMINS_KIND as number],
+        '#d': [groupId],
+      });
+
+      const latest = Array.from(events).sort(
+        (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)
+      )[0];
+
+      // No event is a legitimate "nobody has permissions yet", not a failure.
+      if (!latest) return { ok: true, entries: [] };
+
+      return {
+        ok: true,
+        entries: latest.tags
+          .filter((t) => t[0] === 'p' && t[1])
+          .map((t) => ({ pubkey: t[1], permissions: t.slice(2) as AdminPermission[] })),
+      };
+    } catch {
+      return { ok: false, entries: [] };
+    }
+  }, [fetchEvents, isConnected, groupId]);
+
+  /**
+   * Set one person's permissions, preserving everyone else's.
+   *
+   * Read, replace that one entry, publish the WHOLE list. The caller checks
+   * permissionEditRefusal first; this checks the read, because a UI guard and a
+   * service guard fail differently and only the second survives a refactor.
+   */
+  const setPermissions = useCallback(
+    async (pubkey: string, permissions: AdminPermission[]) => {
+      if (!createEvent || !publish) {
+        setError('Not connected');
+        return;
+      }
+
+      setIsBusy(true);
+      setError(null);
+      setNotice(null);
+
+      try {
+        const read = await readAdmins();
+        if (!read.ok) {
+          setNotice(
+            'Could not read the current permissions, so nothing was changed. Publishing now would have removed everyone else\'s.'
+          );
+          return;
+        }
+
+        const others = read.entries.filter((e) => e.pubkey !== pubkey);
+        const next = [...others, { pubkey, permissions }];
+
+        const event = createEvent();
+        if (!event) throw new Error('Failed to make event');
+
+        event.kind = GROUP_ADMINS_KIND as number;
+        event.content = '';
+        event.tags = buildAdminTags(groupId, next);
+
+        const accepted = await publish(event);
+        if (accepted.size === 0) throw new Error('No relay accepted the change.');
+
+        setNotice('Permissions updated.');
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'The change was not saved.');
+      } finally {
+        setIsBusy(false);
+      }
+    },
+    [createEvent, publish, groupId, readAdmins]
+  );
+
   const addMember = useCallback(
     (pubkey: string) => runEdit((read) => membersAfterAdd(read, pubkey), 'Member added.'),
     [runEdit]
@@ -202,6 +297,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
   return {
     addMember,
     removeMember,
+    setPermissions,
     updateMetadata,
     isBusy,
     error,
