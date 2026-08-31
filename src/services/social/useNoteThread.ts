@@ -61,6 +61,20 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
   const engagementRef = useRef({ reactions: 0, reposts: 0, zapAmount: 0, zapCount: 0 });
   const reactedRef = useRef(false);
   const seenRef = useRef<Set<string>>(new Set());
+  /**
+   * Whether the ROOT query has finished, as distinct from anything else having
+   * happened.
+   *
+   * This is the whole fix for "post not found" on a note that is visibly in the
+   * feed. `settled` used to be set unconditionally inside flush, and flush runs
+   * on every event and every eose from all THREE subscriptions -- so the
+   * replies or engagement query eosing first (usually instantly, having nothing
+   * to return) marked the thread settled while the root event was still in
+   * flight. notFound then fired on a note that was moments from arriving.
+   *
+   * Only the root subscription's own eose may set this.
+   */
+  const rootSettledRef = useRef(false);
   const ownerRef = useRef<string | null>(null);
   const subsRef = useRef<NDKSubscription[]>([]);
 
@@ -88,7 +102,7 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
           }
         : null,
       replies: new Map(repliesRef.current),
-      settled: true,
+      settled: rootSettledRef.current,
     });
   }, 150);
 
@@ -104,6 +118,7 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
     engagementRef.current = { reactions: 0, reposts: 0, zapAmount: 0, zapCount: 0 };
     reactedRef.current = false;
     seenRef.current = new Set();
+    rootSettledRef.current = false;
 
     // The note itself.
     subsRef.current.push(
@@ -116,9 +131,14 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
             if (note) rootRef.current = note;
             flush();
           },
-          // Settles even when nothing came back, which is what lets the view
-          // distinguish "no such note" from "still looking".
-          onEose: settle,
+          // The ONLY place `settled` becomes true. It fires even when nothing
+          // came back, which is what lets the view distinguish "no such note"
+          // from "still looking" -- but it must be THIS query's eose, not any
+          // of the others.
+          onEose: () => {
+            rootSettledRef.current = true;
+            settle();
+          },
         },
         { closeOnEose: false }
       )
