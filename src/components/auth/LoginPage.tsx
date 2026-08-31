@@ -12,7 +12,7 @@ const FEATURES = [
 ];
 
 export function LoginPage() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, error } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
 
   if (isAuthenticated) {
@@ -37,6 +37,19 @@ export function LoginPage() {
       />
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       <div className="max-w-2xl">
+        {/* Why you are looking at a login screen you did not ask for.
+            Landing here with no explanation is only marginally better than the
+            eternal spinner it replaced: the user still does not know whether
+            something broke, and a silent redirect invites them to assume their
+            account is gone. */}
+        {error && (
+          <div
+            role="alert"
+            className="mb-6 rounded-lg border border-cloistr-warning/30 bg-cloistr-warning/5 p-3 text-sm text-cloistr-light/80"
+          >
+            {error}
+          </div>
+        )}
         <h1 className="mb-3 text-4xl font-bold text-cloistr-light">Cloistr Space</h1>
         <p className="mb-8 text-xl text-cloistr-light/60">
           Your Nostr-native workspace — activity, projects, files, and tasks, all under your own key.
