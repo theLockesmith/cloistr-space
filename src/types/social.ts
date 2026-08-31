@@ -74,6 +74,20 @@ export interface Note {
   userReposted: boolean;
   /** Whether current user has zapped */
   userZapped: boolean;
+  /**
+   * Set when this note arrived via a kind:6 repost.
+   *
+   * The reposter brought it into the viewer's feed -- the feed shows
+   * who boosted it and when (boostedAt), distinct from when the original
+   * note was posted (createdAt). Both timestamps matter: showing only one
+   * is the defect most clients have.
+   */
+  repostBy?: {
+    /** Pubkey of the person who boosted */
+    pubkey: string;
+    /** Unix timestamp of the kind:6 event (when the boost happened) */
+    boostedAt: number;
+  };
 }
 
 /** Media attachment in a note */

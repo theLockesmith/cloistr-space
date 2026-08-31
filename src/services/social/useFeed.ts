@@ -9,6 +9,7 @@ import { connectedRelayUrls, needsExplicitRelays, widenRelays } from './globalRe
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
 import { saveSnapshot, loadSnapshot, shouldPersist, upsertNote } from './feedSnapshot';
+import { tryParseEmbeddedNote } from './noteProjection';
 import {
   NOTE_KIND,
   REACTION_KIND,
@@ -214,6 +215,9 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const globalRelaysRef = useRef<string[]>([]);
   const subscriptionRef = useRef<NDKSubscription | null>(null);
   const seenIdsRef = useRef(new Set<string>());
+  // Dedup for kind:6 events specifically. seenIdsRef tracks kind:1 IDs; a
+  // repost event has a different ID and must not land in that set.
+  const seenRepostIdsRef = useRef(new Set<string>());
   const oldestTimestampRef = useRef<number | null>(null);
   const engagementRef = useRef(new Map<string, NoteEngagement>());
   // Notes the CURRENT USER has reacted to / reposted, as observed in the
@@ -380,6 +384,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
 
   const refresh = useCallback(() => {
     seenIdsRef.current.clear();
+    seenRepostIdsRef.current.clear();
     engagementRef.current.clear();
     // Must clear alongside the others: a refreshed feed re-receives the same
     // engagement events, and a stale seen-set would drop every one of them,
@@ -427,6 +432,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     // populated would silently drop notes the new filter legitimately wants,
     // because they were already seen under the previous one.
     seenIdsRef.current.clear();
+    seenRepostIdsRef.current.clear();
     engagementRef.current.clear();
     seenEngagementRef.current.clear();
     oldestTimestampRef.current = Math.floor(Date.now() / 1000);
@@ -470,7 +476,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     // Build filter based on mode
     const buildFilters = (): NDKFilter[] => {
       const baseFilter: NDKFilter = {
-        kinds: [NOTE_KIND],
+        kinds: [NOTE_KIND, REPOST_KIND],
         limit: pageSize,
         until: oldestTimestampRef.current ?? undefined,
       };
@@ -518,7 +524,44 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       const sub = subscribeStream(subscribe, filters, {
         onEvent: (event: NDKEvent) => {
         const id = event.id;
-        if (!id || seenIdsRef.current.has(id)) return;
+        if (!id) return;
+
+        // Kind:6 (repost) -- extract the embedded kind:1 and surface it with
+        // reposter attribution. The embedded event is validated before any field
+        // is used because it is stranger-authored JSON delivered by a relay.
+        if (event.kind === REPOST_KIND) {
+          if (seenRepostIdsRef.current.has(id)) return;
+          seenRepostIdsRef.current.add(id);
+
+          const embedded = tryParseEmbeddedNote(event.content ?? '');
+          if (!embedded) return; // No parseable content; skip silently.
+
+          // Track oldest timestamp for pagination using the boost time so the
+          // load-more cursor advances correctly when reposts dominate the top.
+          const boostedAt = event.created_at ?? 0;
+          if (oldestTimestampRef.current === null || boostedAt < oldestTimestampRef.current) {
+            oldestTimestampRef.current = boostedAt;
+          }
+
+          const repostNote: Note = {
+            id: embedded.id,
+            pubkey: embedded.pubkey,
+            content: embedded.content,
+            createdAt: embedded.created_at,
+            repostBy: { pubkey: event.pubkey, boostedAt },
+            mentions: embedded.tags.filter((t) => t[0] === 'p').map((t) => t[1]),
+            hashtags: embedded.tags.filter((t) => t[0] === 't').map((t) => t[1].toLowerCase()),
+            media: extractMedia(embedded.content, embedded.tags),
+            engagement: { reactions: 0, replies: 0, reposts: 0, zapAmount: 0, zapCount: 0 },
+            userReacted: false,
+            userReposted: false,
+            userZapped: false,
+          };
+          setNotes((prev) => upsertNote(prev, repostNote));
+          return;
+        }
+
+        if (seenIdsRef.current.has(id)) return;
         seenIdsRef.current.add(id);
 
         const note = parseNoteEvent(event);

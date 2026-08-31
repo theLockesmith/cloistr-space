@@ -34,7 +34,7 @@ import type { Note } from '@/types/social';
  * found rather than being restored into fields that no longer exist -- cheaper
  * and more honest than migrating a throwaway render cache.
  */
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 
 /** Roughly two screens. Enough to look restored; not enough to strain a quota. */
 export const SNAPSHOT_LIMIT = 50;
@@ -204,7 +204,15 @@ export function clearSnapshot(
 export function upsertNote(prev: Note[], note: Note): Note[] {
   if (prev.some((n) => n.id === note.id)) return prev;
 
-  return [...prev, note].sort((a, b) => b.createdAt - a.createdAt);
+  // Sort by the time the note entered the viewer\'s feed: for reposts that is
+  // boostedAt (when the boost happened), for original notes it is createdAt.
+  // Without this a repost of a 3-day-old note always sinks to the bottom even
+  // though it was just boosted a second ago.
+  return [...prev, note].sort((a, b) => {
+    const ta = a.repostBy?.boostedAt ?? a.createdAt;
+    const tb = b.repostBy?.boostedAt ?? b.createdAt;
+    return tb - ta;
+  });
 }
 
 /**
