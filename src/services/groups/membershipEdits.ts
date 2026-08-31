@@ -23,6 +23,8 @@
  * how you delete a group.
  */
 
+import { decodeIdentifier, type Identifier } from '@/services/nostr';
+
 /** What a membership read returned, including whether it can be trusted. */
 export interface MemberRead {
   /**
@@ -35,13 +37,55 @@ export interface MemberRead {
   members: string[];
 }
 
-export type EditRefusal = 'read-failed' | 'would-empty' | 'no-change';
+export type EditRefusal =
+  | 'read-failed'
+  | 'would-empty'
+  | 'no-change'
+  | 'unreadable'
+  | 'secret-key';
 
 export type EditResult =
   | { ok: true; members: string[] }
   | { ok: false; reason: EditRefusal };
 
 const HEX_64 = /^[0-9a-f]{64}$/i;
+
+/**
+ * Turn whatever the user pasted into a hex pubkey.
+ *
+ * NOBODY HAS A HEX PUBKEY TO HAND. Every Nostr UI shows npub, that is the form
+ * people are given and the form they copy, and the add-member field previously
+ * accepted only 64-char hex -- so pasting the one identifier you actually
+ * possess fell through to 'no-change' and the UI said "Nothing to change".
+ *
+ * Which is worse than silence: it asserts the input was understood and there
+ * was nothing to do, leaving no way to learn the field wanted a different
+ * encoding.
+ *
+ * Accepts hex, npub and nprofile, with surrounding whitespace and an optional
+ * `nostr:` prefix, because these arrive by paste.
+ *
+ * Returns a REASON rather than throwing. decodeIdentifier throws on an nsec by
+ * design, and that must become a specific loud refusal here -- somebody pasting
+ * a private key into a member field needs telling, not a stack trace.
+ */
+export function normalizePubkey(input: string): { ok: true; pubkey: string } | { ok: false; reason: EditRefusal } {
+  const trimmed = input.trim();
+  if (!trimmed) return { ok: false, reason: 'unreadable' };
+
+  if (HEX_64.test(trimmed)) return { ok: true, pubkey: trimmed.toLowerCase() };
+
+  let decoded: Identifier | null;
+  try {
+    decoded = decodeIdentifier(trimmed);
+  } catch {
+    // decodeIdentifier throws only for an nsec.
+    return { ok: false, reason: 'secret-key' };
+  }
+
+  if (decoded?.type !== 'profile') return { ok: false, reason: 'unreadable' };
+  return { ok: true, pubkey: decoded.pubkey };
+}
 
 /**
  * The member list after adding someone.
@@ -51,9 +95,15 @@ const HEX_64 = /^[0-9a-f]{64}$/i;
  */
 export function membersAfterAdd(read: MemberRead, pubkey: string): EditResult {
   if (!read.ok) return { ok: false, reason: 'read-failed' };
-  if (!HEX_64.test(pubkey)) return { ok: false, reason: 'no-change' };
 
-  const normalized = pubkey.toLowerCase();
+  // Input that cannot be read is NOT 'no-change'. Those are different facts --
+  // "already a member" and "I could not understand that" -- and routing the
+  // second into the first's bucket produced "Nothing to change" for a perfectly
+  // reasonable npub.
+  const normalized_ = normalizePubkey(pubkey);
+  if (!normalized_.ok) return { ok: false, reason: normalized_.reason };
+
+  const normalized = normalized_.pubkey;
   if (read.members.some((m) => m.toLowerCase() === normalized)) {
     return { ok: false, reason: 'no-change' };
   }
@@ -72,7 +122,12 @@ export function membersAfterAdd(read: MemberRead, pubkey: string): EditResult {
 export function membersAfterRemove(read: MemberRead, pubkey: string): EditResult {
   if (!read.ok) return { ok: false, reason: 'read-failed' };
 
-  const normalized = pubkey.toLowerCase();
+  // Accepts npub here too. Removal is driven by a button carrying a hex key
+  // today, but the asymmetry would be a trap for the next caller.
+  const parsed = normalizePubkey(pubkey);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+
+  const normalized = parsed.pubkey;
   const next = read.members.filter((m) => m.toLowerCase() !== normalized);
 
   if (next.length === read.members.length) return { ok: false, reason: 'no-change' };
@@ -86,7 +141,11 @@ export const REFUSAL_MESSAGE: Record<EditRefusal, string> = {
   'read-failed':
     'Could not read the current member list, so nothing was changed. Publishing now would have removed everyone else.',
   'would-empty': 'That would remove the last member. A group needs at least one.',
-  'no-change': 'Nothing to change.',
+  'no-change': 'That person is already a member.',
+  unreadable:
+    'That does not look like a Nostr public key. Paste an npub (npub1…) or a 64-character hex key.',
+  'secret-key':
+    'That is a PRIVATE key (nsec), not a public one. It has not been used or stored — treat it as compromised and rotate it.',
 };
 
 /** kind:39002 tags for a full member list. */
