@@ -158,6 +158,22 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
       setNotice(null);
 
       try {
+        // REFUSE A NAMELESS SAVE, even though the UI already blocks it.
+        //
+        // kind:39000 is addressable: publishing without a name tag REMOVES the
+        // project's name. The settings form guards this by not rendering until
+        // the project loads, but a guard that lives only in a component is one
+        // refactor away from being gone, and the cost of being wrong here is
+        // the name of somebody's project.
+        //
+        // Same family as the emptiness guard in publishContacts and the
+        // full-list read in membersAfterAdd.
+        if (!edit.name?.trim()) {
+          setNotice('A project needs a name. Nothing was changed.');
+          setIsBusy(false);
+          return;
+        }
+
         const event = createEvent();
         if (!event) throw new Error('Failed to make event');
 
