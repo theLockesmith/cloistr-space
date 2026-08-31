@@ -12,6 +12,10 @@ import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
 import { useLongPressMenu } from '@/services/social/useLongPressMenu';
 import { ReactionPicker } from './ReactionPicker';
 import { ShareMenu } from './ShareMenu';
+import { RepostMenu } from './RepostMenu';
+import { ownRelayHints } from './ShareMenu';
+import { useNdk } from '@/services/nostr';
+import { QuoteComposer } from './QuoteComposer';
 import { NoteContent } from './NoteContent';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
@@ -413,6 +417,12 @@ function NoteCard({
   onRepost: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [quoting, setQuoting] = useState(false);
+
+  // The same hints a share link carries. A quote whose nevent names no relay is
+  // unresolvable for anyone not already on ours, which is most people.
+  const { relayStatuses } = useNdk();
+  const quoteHints = useMemo(() => ownRelayHints(relayStatuses), [relayStatuses]);
 
   // Plain click still sends the default heart. Hold, right-click or ArrowDown
   // open the picker instead.
@@ -514,21 +524,13 @@ function NoteCard({
           </svg>
           {note.engagement.replies > 0 && note.engagement.replies}
         </Link>
-        <button
-          onClick={onRepost}
-          disabled={!canAct}
-          aria-disabled={!canAct}
-          className={`flex items-center gap-2 text-sm ${
-            canAct
-              ? 'text-cloistr-light/40 hover:text-cloistr-success'
-              : 'cursor-not-allowed text-cloistr-light/20'
-          }`}
-        >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          {note.engagement.reposts > 0 && note.engagement.reposts}
-        </button>
+        <RepostMenu
+          isReposted={note.userReposted}
+          canAct={canAct}
+          count={note.engagement.reposts}
+          onToggle={onRepost}
+          onQuote={() => setQuoting(true)}
+        />
         {/* relative so the picker anchors to THIS button. The container must
             not be the note or the feed, or the menu detaches on scroll. */}
         <div className="relative">
@@ -565,21 +567,33 @@ function NoteCard({
             />
           )}
         </div>
-        {/* Zapping needs NIP-57, which is not implemented. */}
-        <button
-          disabled
-          aria-disabled="true"
-          aria-label="Zaps (not available yet)"
-          className="flex cursor-not-allowed items-center gap-2 text-sm text-cloistr-light/20"
-        >
-          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          {note.engagement.zapAmount > 0 && formatSats(note.engagement.zapAmount)}
-        </button>
+        {/* Zaps are NOT implemented (NIP-57), so there is no button.
+            A permanently disabled control is worse than an absent one: it
+            advertises a capability that does not exist, and the operator has
+            twice now reported an inert control as a broken feature. The COUNT
+            still shows when a note has zaps, because that is information about
+            the note rather than an action we cannot perform. */}
+        {note.engagement.zapAmount > 0 && (
+          <span
+            className="flex items-center gap-2 text-sm text-cloistr-light/40"
+            title="Zaps received. Sending zaps is not available yet."
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            {formatSats(note.engagement.zapAmount)}
+          </span>
+        )}
         <ShareMenu noteId={note.id} authorPubkey={note.pubkey} />
       </div>
 
+      {quoting && (
+        <QuoteComposer
+          note={note}
+          relays={quoteHints}
+          onDone={() => setQuoting(false)}
+        />
+      )}
     </article>
   );
 }
