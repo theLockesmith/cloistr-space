@@ -17,3 +17,6 @@ export { useDrive } from './useDrive';
 export { DocsClient, getDocs } from './docs';
 
 export { useDocs } from './useDocs';
+
+export { useMirrorSign } from './useMirrorSign';
+export type { MirrorMap, MirrorStatus } from './useMirrorSign';
