@@ -88,15 +88,40 @@ export function useEmojiSets(): UseEmojiSetsReturn {
             const entries = parseEmojiTags(event.tags);
             if (entries.length === 0) return;
 
+            // BUILD the state when it does not exist yet, rather than
+            // returning prev and dropping the entries on the floor.
+            //
+            // fetchSets is kicked off from the kind:10030 handler, which calls
+            // setResolved just before it -- but that is a React state update,
+            // not an assignment. A kind:30030 arriving before it commits found
+            // prev === null and the custom emoji were silently discarded. The
+            // picker then showed only the fallback, which is indistinguishable
+            // from a user who has no sets: "we got rid of the custom emoji
+            // lists entirely".
+            //
+            // `owner` is captured per-fetch, so constructing here cannot
+            // attribute one account's sets to another.
             setResolved((prev) =>
-              prev && prev.owner === owner
-                ? { ...prev, fromSets: mergeEmoji(prev.fromSets, entries) }
-                : prev
+              prev && prev.owner !== owner
+                ? prev
+                : {
+                    owner,
+                    direct: prev?.direct ?? [],
+                    fromSets: mergeEmoji(prev?.fromSets ?? [], entries),
+                    settled: prev?.settled ?? false,
+                  }
             );
           },
           onEose: () =>
             setResolved((prev) =>
-              prev && prev.owner === owner ? { ...prev, settled: true } : prev
+              prev && prev.owner !== owner
+                ? prev
+                : {
+                    owner,
+                    direct: prev?.direct ?? [],
+                    fromSets: prev?.fromSets ?? [],
+                    settled: true,
+                  }
             ),
         }
       );
