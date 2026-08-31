@@ -251,6 +251,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           storeLogin(nip46Pubkey, 'nip46', auth.bunkerUrl);
           // Sync to shared session
           saveSharedSession({ method: 'nip46', pubkey: nip46Pubkey, bunkerUrl: auth.bunkerUrl });
+        } else {
+          // A SESSION WE CANNOT RESTORE FROM. This is what locked the operator
+          // out: a shared SSO session reporting method 'nip46' with no
+          // bunkerUrl, so neither branch above ran, nothing resolved the
+          // loading state, and the app sat on "Loading..." forever -- no error,
+          // no login screen, no way to act.
+          //
+          // THE SHARED SESSION IS DELIBERATELY NOT CLEARED. bunkerUrl is
+          // written into it only by a SUCCESSFUL connect (see the
+          // saveSharedSession calls below), so its absence means bootstrap has
+          // not succeeded YET -- not that the session is corrupt. The observed
+          // cause is the signer answering 409 key_locked, which is transient
+          // and resolves when the user unlocks their key. Deleting the shared
+          // session over that would sign them out of every Cloistr app to
+          // "fix" a server-side condition that was going to clear on its own.
+          //
+          // Only the local copy goes, and it is the one this function
+          // synthesised a moment ago rather than anything the user established.
+          console.warn('[Auth] Cannot restore from this session:', {
+            method: auth.method,
+            hasBunkerUrl: !!auth.bunkerUrl,
+            hasClientSecretKey: !!auth.clientSecretKey,
+          });
+          localStorage.removeItem(STORAGE_KEY);
+          setError('We could not restore your previous session. Please sign in again.');
         }
       } catch (err) {
         console.error('[Auth] Failed to restore session:', err);
@@ -273,6 +298,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem(STORAGE_KEY);
           setLoading(false);
         }
+      } finally {
+        // THE STRUCTURAL GUARANTEE. Every branch above already tries to resolve
+        // the loading state, and one of them did not -- which is not a bug you
+        // can fix by adding one more setLoading call, because the next branch
+        // somebody adds will forget too.
+        //
+        // A missed call here does not render an error. It renders an eternal
+        // spinner, which is indistinguishable from a slow network, which is why
+        // the operator waited instead of reloading. The UI must leave the
+        // loading state no matter how this function exits.
+        setLoading(false);
       }
     };
 
