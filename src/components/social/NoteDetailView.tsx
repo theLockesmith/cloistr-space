@@ -6,7 +6,7 @@
  * note1, or a hex event id.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Navigate, Link } from 'react-router-dom';
 import {
   decodeIdentifier,
@@ -15,13 +15,26 @@ import {
   abbreviate,
   encodeProfile,
   SecretKeyPastedError,
+  useNdk,
+  subscribeStream,
 } from '@/services/nostr';
 import { useNoteThread, type ThreadReply } from '@/services/social/useNoteThread';
 import { useNoteActions, ACTION_BLOCKED_MESSAGE } from '@/services/social';
 import { buildReplyTags } from '@/services/social/replyEvents';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
+import { useEmojiSets } from '@/services/social/useEmojiSets';
+import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
+import { useMirrorSign } from '@/services/cloistr/useMirrorSign';
+import { useLongPressMenu } from '@/services/social/useLongPressMenu';
+import { useAuthStore } from '@/stores/authStore';
+import { ReactionPicker } from './ReactionPicker';
+import { RepostMenu } from './RepostMenu';
+import { QuoteComposer } from './QuoteComposer';
+import { ShareMenu, ownRelayHints } from './ShareMenu';
 import type { ThreadNode } from '@/services/social/replyEvents';
 import type { Note } from '@/types/social';
+import { REACTION_KIND, REPOST_KIND } from '@/types/social';
+import type { NDKEvent } from '@nostr-dev-kit/ndk';
 import { NoteContent } from './NoteContent';
 
 export function NoteDetailView() {
@@ -176,14 +189,301 @@ function NoteBody({
 
       <NoteContent content={note.content} compact={!featured} />
 
-      {featured && (
-        <div className="mt-3 flex gap-4 text-xs text-cloistr-light/50">
-          <span>{note.engagement.reactions} reactions</span>
-          <span>{note.engagement.reposts} reposts</span>
-          {note.engagement.zapCount > 0 && <span>{note.engagement.zapCount} zaps</span>}
+      {/* The featured (root) note gets interactive action buttons. Reply
+          cards navigate to their own thread when clicked, where they become
+          the featured note and get their own action row. */}
+      {featured && <NoteActions note={note} />}
+    </article>
+  );
+}
+
+/**
+ * Track whether the current user has reacted to / reposted a specific note,
+ * and which of their events to reference in a NIP-09 retraction.
+ *
+ * Only needed in views that don't run useFeed (which carries the same
+ * tracking). The subscription is cheap: authors:[pubkey] + #e:[noteId]
+ * is at most a handful of events from the relay's perspective.
+ *
+ * The event id lives in a ref, not state, because it does not trigger a
+ * re-render on its own — the boolean flag does that. The ref is what
+ * survives into the undo handler without a stale-closure hazard.
+ */
+function useNoteOwnEngagement(noteId: string) {
+  const { subscribe, isConnected } = useNdk();
+  const { pubkey } = useAuthStore();
+
+  const [reacted, setReacted] = useState(false);
+  const [reposted, setReposted] = useState(false);
+  const ownReactionIdRef = useRef<string | undefined>(undefined);
+  const ownRepostIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!subscribe || !isConnected || !pubkey) return;
+
+    const sub = subscribeStream(
+      subscribe,
+      [{ kinds: [REACTION_KIND, REPOST_KIND], '#e': [noteId], authors: [pubkey] }],
+      {
+        onEvent: (event: NDKEvent) => {
+          if (!event.id) return;
+          if (event.kind === REACTION_KIND) {
+            setReacted(true);
+            ownReactionIdRef.current = event.id;
+          } else if (event.kind === REPOST_KIND) {
+            setReposted(true);
+            ownRepostIdRef.current = event.id;
+          }
+        },
+      }
+    );
+
+    return () => sub.stop();
+  }, [subscribe, isConnected, pubkey, noteId]);
+
+  return {
+    reacted,
+    setReacted,
+    reposted,
+    setReposted,
+    getOwnReactionId: () => ownReactionIdRef.current,
+    setOwnReactionId: (id: string | undefined) => {
+      ownReactionIdRef.current = id;
+    },
+    getOwnRepostId: () => ownRepostIdRef.current,
+    setOwnRepostId: (id: string | undefined) => {
+      ownRepostIdRef.current = id;
+    },
+  };
+}
+
+/**
+ * Action row for the featured (root) note in a thread.
+ *
+ * React with undo, repost / quote / undo-repost, and share. Same discipline
+ * as the feed: optimistic update on tap, visible revert on failure. Same
+ * "still loading" message when we know the user reacted but not with which
+ * event — that is a distinct state from "did not react" and must not look
+ * identical.
+ *
+ * NOT shown on reply cards: clicking a reply navigates to its own thread,
+ * where it becomes the featured note and gets this row.
+ */
+function NoteActions({ note }: { note: Note }) {
+  const { react, repost, undo, canAct } = useNoteActions();
+  const { relayStatuses } = useNdk();
+  const quoteHints = useMemo(() => ownRelayHints(relayStatuses), [relayStatuses]);
+  const { emoji, isLoading: emojiLoading } = useEmojiSets();
+  const { mirrorMap, isSigning } = useMirrorSign();
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [quoting, setQuoting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const {
+    reacted,
+    setReacted,
+    reposted,
+    setReposted,
+    getOwnReactionId,
+    setOwnReactionId,
+    getOwnRepostId,
+    setOwnRepostId,
+  } = useNoteOwnEngagement(note.id);
+
+  const handleReact = useCallback(
+    async (entry?: EmojiEntry) => {
+      if (!canAct) return;
+
+      // Tapping a filled heart retracts it. We need the id of our own kind:7
+      // to name in the kind:5 — a boolean "I reacted" is not enough.
+      if (!entry && reacted) {
+        const reactionId = getOwnReactionId();
+        if (!reactionId) {
+          // We know the user reacted (relay returned their kind:7) but the
+          // echo has not supplied its id yet. Saying so beats doing nothing.
+          setActionError(
+            'Cannot undo this reaction yet — still loading which one was yours.'
+          );
+          return;
+        }
+
+        setActionError(null);
+        setReacted(false);
+
+        try {
+          await undo(reactionId);
+          setOwnReactionId(undefined);
+        } catch (err) {
+          // Revert visibly. A heart left empty after a failed retraction
+          // claims something that did not happen.
+          setReacted(true);
+          setOwnReactionId(reactionId);
+          setActionError(
+            err instanceof Error
+              ? `Reaction not removed. ${err.message}`
+              : 'Reaction not removed.'
+          );
+        }
+        return;
+      }
+
+      setActionError(null);
+      setReacted(true);
+
+      const payload = entry ? reactionPayload(entry) : null;
+      try {
+        const outcome = await react(note.id, note.pubkey, payload?.content, payload?.tags);
+        // Record what we just sent so undo can reference it at once, before
+        // the relay echo comes back.
+        setOwnReactionId(outcome.eventId);
+      } catch (err) {
+        setReacted(false);
+        setActionError(
+          err instanceof Error ? `Reaction not sent. ${err.message}` : 'Reaction not sent.'
+        );
+      }
+    },
+    [canAct, react, undo, reacted, getOwnReactionId, setReacted, setOwnReactionId, note.id, note.pubkey]
+  );
+
+  const handleRepost = useCallback(async () => {
+    if (!canAct) return;
+
+    if (reposted) {
+      const repostId = getOwnRepostId();
+      if (!repostId) {
+        setActionError(
+          'Cannot undo this repost yet — still loading which one was yours.'
+        );
+        return;
+      }
+
+      setActionError(null);
+      setReposted(false);
+
+      try {
+        await undo(repostId);
+        setOwnRepostId(undefined);
+      } catch (err) {
+        setReposted(true);
+        setOwnRepostId(repostId);
+        setActionError(
+          err instanceof Error
+            ? `Repost not removed. ${err.message}`
+            : 'Repost not removed.'
+        );
+      }
+      return;
+    }
+
+    setActionError(null);
+    setReposted(true);
+
+    try {
+      const outcome = await repost(note.id, note.pubkey);
+      setOwnRepostId(outcome.eventId);
+    } catch (err) {
+      setReposted(false);
+      setActionError(
+        err instanceof Error ? `Repost not sent. ${err.message}` : 'Repost not sent.'
+      );
+    }
+  }, [canAct, repost, undo, reposted, getOwnRepostId, setReposted, setOwnRepostId, note.id, note.pubkey]);
+
+  // Plain click sends the default heart. Hold, right-click or ArrowDown
+  // open the emoji picker.
+  const { handlers: reactHandlers } = useLongPressMenu({
+    onOpen: () => setPickerOpen(true),
+    onActivate: () => void handleReact(),
+    disabled: !canAct,
+  });
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex items-center gap-5">
+        <RepostMenu
+          isReposted={reposted}
+          canAct={canAct}
+          count={note.engagement.reposts}
+          onToggle={() => void handleRepost()}
+          onQuote={() => setQuoting(true)}
+        />
+
+        <div className="relative">
+          <button
+            {...reactHandlers}
+            disabled={!canAct}
+            aria-disabled={!canAct}
+            aria-haspopup="menu"
+            aria-expanded={pickerOpen}
+            title={
+              canAct
+                ? 'Click to react. Hold or right-click to choose an emoji.'
+                : undefined
+            }
+            className={`flex items-center gap-2 text-sm ${
+              !canAct
+                ? 'cursor-not-allowed text-cloistr-light/20'
+                : reacted
+                  ? 'text-cloistr-error'
+                  : 'text-cloistr-light/40 hover:text-cloistr-error'
+            }`}
+          >
+            <svg
+              className="h-5 w-5"
+              fill={reacted ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+              />
+            </svg>
+            {note.engagement.reactions > 0 && note.engagement.reactions}
+          </button>
+
+          {pickerOpen && (
+            <ReactionPicker
+              emoji={emoji}
+              isLoading={emojiLoading}
+              mirrorMap={mirrorMap}
+              isMirroring={isSigning}
+              onPick={(entry) => {
+                setPickerOpen(false);
+                void handleReact(entry);
+              }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </div>
+
+        <ShareMenu noteId={note.id} authorPubkey={note.pubkey} />
+      </div>
+
+      {actionError && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded bg-cloistr-error/10 p-2 text-xs text-cloistr-error"
+        >
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss"
+            className="ml-auto shrink-0 opacity-60 hover:opacity-100"
+          >
+            ×
+          </button>
         </div>
       )}
-    </article>
+
+      {quoting && (
+        <QuoteComposer note={note} relays={quoteHints} onDone={() => setQuoting(false)} />
+      )}
+    </div>
   );
 }
 
