@@ -13,8 +13,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { nip19 } from 'nostr-tools';
 import {
   membersAfterAdd,
+  normalizePubkey,
   membersAfterRemove,
   buildMemberTags,
   REFUSAL_MESSAGE,
@@ -129,5 +131,80 @@ describe('REFUSAL_MESSAGE', () => {
 
   it('explains the read-failure consequence rather than just stating it', () => {
     expect(REFUSAL_MESSAGE['read-failed']).toMatch(/removed everyone/i);
+  });
+});
+
+describe('normalizePubkey', () => {
+  const HEX = 'a'.repeat(64);
+
+  it('accepts an npub, which is the only form anyone actually has', () => {
+    // THE bug. Every Nostr UI shows npub; nobody has hex to hand. Pasting the
+    // one identifier you possess fell through to 'no-change' and the UI said
+    // "Nothing to change" -- asserting the input was understood.
+    const npub = nip19.npubEncode(HEX);
+
+    expect(normalizePubkey(npub)).toEqual({ ok: true, pubkey: HEX });
+  });
+
+  it('accepts an nprofile', () => {
+    const nprofile = nip19.nprofileEncode({ pubkey: HEX, relays: ['wss://r.test'] });
+
+    expect(normalizePubkey(nprofile)).toEqual({ ok: true, pubkey: HEX });
+  });
+
+  it('accepts hex, in either case', () => {
+    expect(normalizePubkey(HEX.toUpperCase())).toEqual({ ok: true, pubkey: HEX });
+  });
+
+  it('tolerates whitespace and a nostr: prefix, because these are pasted', () => {
+    expect(normalizePubkey(`  nostr:${nip19.npubEncode(HEX)}  `)).toEqual({
+      ok: true,
+      pubkey: HEX,
+    });
+  });
+
+  it('reports unreadable input as UNREADABLE, not as no-change', () => {
+    // The generalisable half. "Already a member" and "I could not read that"
+    // are different facts, and only the first is a no-change.
+    expect(normalizePubkey('hello')).toEqual({ ok: false, reason: 'unreadable' });
+    expect(normalizePubkey('')).toEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('reports an nsec as its own refusal, loudly', () => {
+    // Somebody pasting a private key into a member field needs telling. It must
+    // not surface as "unreadable", and it must not throw.
+    const nsec = nip19.nsecEncode(new Uint8Array(32).fill(3));
+
+    expect(normalizePubkey(nsec)).toEqual({ ok: false, reason: 'secret-key' });
+  });
+
+  it('never echoes the secret back in its message', () => {
+    expect(REFUSAL_MESSAGE['secret-key']).not.toMatch(/nsec1[a-z0-9]{10}/);
+    expect(REFUSAL_MESSAGE['secret-key']).toMatch(/rotate/i);
+  });
+});
+
+describe('membersAfterAdd with real-world input', () => {
+  const HEX = 'a'.repeat(64);
+
+  it('adds a member pasted as an npub', () => {
+    const result = membersAfterAdd({ ok: true, members: [] }, nip19.npubEncode(HEX));
+
+    expect(result).toEqual({ ok: true, members: [HEX] });
+  });
+
+  it('still dedups when the same person is given in the other encoding', () => {
+    // Hex already present, npub pasted. Without normalising before the
+    // comparison this would add a duplicate p tag for one person.
+    const result = membersAfterAdd({ ok: true, members: [HEX] }, nip19.npubEncode(HEX));
+
+    expect(result).toEqual({ ok: false, reason: 'no-change' });
+  });
+
+  it('distinguishes unreadable input from an existing member', () => {
+    expect(membersAfterAdd({ ok: true, members: [HEX] }, 'not a key')).toEqual({
+      ok: false,
+      reason: 'unreadable',
+    });
   });
 });

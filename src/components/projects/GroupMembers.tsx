@@ -88,7 +88,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
                 type="text"
                 value={newPubkey}
                 onChange={(e) => setNewPubkey(e.target.value)}
-                placeholder="Member public key (64-char hex)"
+                placeholder="npub1… or 64-character hex key"
                 className="w-full rounded border border-cloistr-light/10 bg-cloistr-light/5 p-2 text-sm text-cloistr-light"
               />
               <div className="flex gap-2">
