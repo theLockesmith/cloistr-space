@@ -24,6 +24,7 @@ export interface AuthorProfile {
   displayName?: string;
   picture?: string;
   nip05?: string;
+  lud16?: string;
   about?: string;
 }
 
@@ -89,6 +90,7 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           displayName: fields.display_name,
           picture: fields.picture,
           nip05: fields.nip05,
+          lud16: fields.lud16,
           about: fields.about,
         };
 
@@ -100,7 +102,8 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           existing.name === next.name &&
           existing.displayName === next.displayName &&
           existing.picture === next.picture &&
-          existing.nip05 === next.nip05
+          existing.nip05 === next.nip05 &&
+          existing.lud16 === next.lud16
         ) {
           return;
         }

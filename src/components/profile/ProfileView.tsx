@@ -157,6 +157,8 @@ export function ProfileView() {
         banner={draft.banner}
         name={draft.display_name || draft.name}
         about={draft.about}
+        nip05={draft.nip05}
+        lud16={draft.lud16}
       />
 
       {/* Profile fields */}
@@ -308,11 +310,15 @@ function ProfilePreview({
   banner,
   name,
   about,
+  nip05,
+  lud16,
 }: {
   picture?: string;
   banner?: string;
   name?: string;
   about?: string;
+  nip05?: string;
+  lud16?: string;
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-cloistr-light/10 bg-cloistr-dark">
@@ -335,6 +341,12 @@ function ProfilePreview({
         />
         <div className="min-w-0">
           <p className="truncate font-medium text-cloistr-light">{name || 'No display name set'}</p>
+          {nip05 && (
+            <p className="truncate text-sm text-cloistr-light/60">{nip05}</p>
+          )}
+          {lud16 && (
+            <p className="truncate text-sm text-cloistr-light/50">&#x26A1; {lud16}</p>
+          )}
           {about && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light/70">
               {about}
@@ -365,6 +377,13 @@ function PreviewImage({
   // original problem because it blames a URL that now works.
   const [failed, setFailed] = useState(false);
   const trimmed = src?.trim();
+  // Reject scheme-less and non-HTTP URLs. A bare value like example.com/img
+  // resolves relative to the current page; 0x27c58b is a hex colour that
+  // one audited kind:0 carried as its banner value.
+  const safe =
+    trimmed && (trimmed.startsWith('https://') || trimmed.startsWith('http://'))
+      ? trimmed
+      : null;
 
   const placeholder = (label: string) => (
     <div
@@ -376,12 +395,12 @@ function PreviewImage({
     </div>
   );
 
-  if (!trimmed) return placeholder(emptyLabel);
+  if (!safe) return placeholder(emptyLabel);
   if (failed) return placeholder(failLabel);
 
   return (
     <img
-      src={trimmed}
+      src={safe}
       alt=""
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
