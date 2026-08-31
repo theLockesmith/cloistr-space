@@ -1,71 +1,91 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/**
- * @see https://playwright.dev/docs/test-configuration
- */
+// When PLAYWRIGHT_PRODUCTION=1, skip the local dev server entirely.
+// Authenticated production tests target https://space.cloistr.xyz directly
+// and do not need a local Vite server. On this machine, Vite hits ENOSPC
+// (inotify watch limit) frequently; that crash is fatal to the full run.
+const isProduction = !!process.env.PLAYWRIGHT_PRODUCTION;
+
 export default defineConfig({
   testDir: './tests/e2e',
-  /* Run tests in files in parallel */
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
-  use: {
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:5173',
 
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+  // global-setup runs for ALL projects. When the signer credential file is
+  // absent (local dev without test credentials) it exits cleanly without
+  // writing a fixture — unauthenticated tests don't read the fixture.
+  globalSetup: './tests/e2e/global-setup.ts',
+
+  use: {
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
   },
 
-  /* Configure projects for major browsers */
   projects: [
+    // ------------------------------------------------------------------
+    // Existing projects — local dev server, unauthenticated smoke tests.
+    // These run in CI via the existing gate. NOT CHANGED.
+    // ------------------------------------------------------------------
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      testIgnore: ['**/authenticated.spec.ts'],
     },
-
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
+      testIgnore: ['**/authenticated.spec.ts'],
     },
-
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
+      testIgnore: ['**/authenticated.spec.ts'],
     },
-
-    /* Test against mobile viewports. */
     {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 5'] },
+      testIgnore: ['**/authenticated.spec.ts'],
     },
     {
       name: 'Mobile Safari',
       use: { ...devices['iPhone 12'] },
+      testIgnore: ['**/authenticated.spec.ts'],
     },
 
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
+    // ------------------------------------------------------------------
+    // Authenticated production walkthrough
+    //
+    // Targets https://space.cloistr.xyz with a real NIP-46 session
+    // established in global-setup.ts.
+    //
+    // NOT in the existing CI gate — adding as a gate is a separate decision.
+    //
+    // Run:  PLAYWRIGHT_PRODUCTION=1 npx playwright test --project=authenticated-production
+    // Needs: ~/.credentials/cliostr-test-account (username\npassword)
+    // ------------------------------------------------------------------
+    {
+      name: 'authenticated-production',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chrome',
+        baseURL: 'https://space.cloistr.xyz',
+        screenshot: 'only-on-failure',
+        video: 'on-first-retry',
+        trace: 'on-first-retry',
+      },
+      testMatch: ['**/authenticated.spec.ts'],
+    },
   ],
 
-  /* Run your local dev server before starting the tests */
-  webServer: {
+  // Skip the dev server when running production tests. The dev server is only
+  // needed for the local smoke-test projects (chromium/firefox/webkit).
+  webServer: isProduction ? undefined : {
     command: 'pnpm dev',
     url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
+    timeout: 10000,
   },
 });
