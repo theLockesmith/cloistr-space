@@ -9,8 +9,11 @@ import { useGroupMembers, type GroupMember } from '@/services/groups/useGroupMem
 import { useGroupAdmin } from '@/services/groups/useGroupAdmin';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { profilePath } from '@/services/nostr';
+import { can } from '@/services/groups/permissions';
+import { MemberPermissions } from './MemberPermissions';
 import { useAuthStore } from '@/stores/authStore';
 import type { AuthorProfile } from '@/types/social';
+import type { AdminPermission } from '@/types/groups';
 
 interface GroupMembersProps {
   groupId: string;
@@ -21,21 +24,33 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
   const { pubkey } = useAuthStore();
 
   /**
-   * Whether to offer admin controls.
+   * OUR OWN permissions, and each control is gated on the one it needs.
    *
-   * Derived from the member list rather than passed in, because that list is
-   * the only thing that knows, and threading a prop through GroupWorkspace
-   * would just move the same lookup somewhere with less information.
+   * Deliberately NOT a derived `isAdmin` boolean. kind:39001 carries six
+   * distinct permissions, and a single flag is a lossy summary of them -- it
+   * would grant someone holding only `add-user` the remove button, or deny it
+   * to someone who legitimately has `remove-user` and nothing else. Gating on
+   * the specific permission means every control states its own reason and no
+   * definition of "admin" has to be chosen.
    *
-   * Fails CLOSED: a failed or still-loading read yields false, so the controls
-   * are hidden rather than offered and then refused.
+   * Fails CLOSED: a failed or still-loading read yields no permissions, so
+   * controls are hidden rather than offered and then refused.
    *
-   * This is a UI affordance, NOT enforcement. Our relay does not run relay29,
-   * so nothing server-side checks who may publish a kind:39002 -- any key
-   * holder can. Hiding the buttons keeps honest users from doing damage by
-   * accident; it does not stop anyone.
+   * AFFORDANCE, NOT ENFORCEMENT. Our relay does not run relay29, so nothing
+   * server-side checks who may publish a kind:39001 or 39002 -- any key holder
+   * can. This keeps honest users from doing damage by accident; it stops nobody.
    */
-  const canAdmin = Boolean(pubkey && members.some((m) => m.pubkey === pubkey && m.isAdmin));
+  const myPermissions = useMemo(
+    () => (pubkey ? (members.find((m) => m.pubkey === pubkey)?.permissions ?? []) : []),
+    [members, pubkey]
+  );
+
+  const canAddMember = can(myPermissions, 'add-user');
+  const canRemoveMember = can(myPermissions, 'remove-user');
+  const canSetPermissions =
+    can(myPermissions, 'add-permission') || can(myPermissions, 'remove-permission');
+
+  const [editing, setEditing] = useState<string | null>(null);
 
   // The member list rendered raw hex, which cannot serve its only purpose --
   // you cannot recognise anyone by it. Resolved through the same batched hook
@@ -80,7 +95,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
         </button>
       </div>
 
-      {canAdmin && (
+      {canAddMember && (
         <div className="border-b border-cloistr-light/10 px-4 py-3">
           {adding ? (
             <div className="space-y-2">
@@ -181,7 +196,20 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
                       key={member.pubkey}
                       member={member}
                       profile={profiles.get(member.pubkey) ?? member.profile}
-                      canAdmin={canAdmin}
+                      canRemove={canRemoveMember}
+                      canSetPermissions={canSetPermissions}
+                      isEditing={editing === member.pubkey}
+                      onToggleEditing={() =>
+                        setEditing((e) => (e === member.pubkey ? null : member.pubkey))
+                      }
+                      editorPubkey={pubkey}
+                      editorPermissions={myPermissions}
+                      onApplyPermissions={(perms) => {
+                        void admin.setPermissions(member.pubkey, perms).then(() => {
+                          setEditing(null);
+                          refresh();
+                        });
+                      }}
                       isBusy={admin.isBusy}
                       onRemove={() => void doRemove(member.pubkey)}
                     />
@@ -202,7 +230,20 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
                       key={member.pubkey}
                       member={member}
                       profile={profiles.get(member.pubkey) ?? member.profile}
-                      canAdmin={canAdmin}
+                      canRemove={canRemoveMember}
+                      canSetPermissions={canSetPermissions}
+                      isEditing={editing === member.pubkey}
+                      onToggleEditing={() =>
+                        setEditing((e) => (e === member.pubkey ? null : member.pubkey))
+                      }
+                      editorPubkey={pubkey}
+                      editorPermissions={myPermissions}
+                      onApplyPermissions={(perms) => {
+                        void admin.setPermissions(member.pubkey, perms).then(() => {
+                          setEditing(null);
+                          refresh();
+                        });
+                      }}
                       isBusy={admin.isBusy}
                       onRemove={() => void doRemove(member.pubkey)}
                     />
@@ -220,7 +261,13 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
 function MemberRow({
   member,
   profile,
-  canAdmin,
+  canRemove,
+  canSetPermissions,
+  isEditing,
+  onToggleEditing,
+  editorPubkey,
+  editorPermissions,
+  onApplyPermissions,
   isBusy,
   onRemove,
 }: {
@@ -231,7 +278,13 @@ function MemberRow({
    * should not be forced through a second lookup to display it.
    */
   profile?: AuthorProfile;
-  canAdmin: boolean;
+  canRemove: boolean;
+  canSetPermissions: boolean;
+  isEditing: boolean;
+  onToggleEditing: () => void;
+  editorPubkey: string | null;
+  editorPermissions: AdminPermission[];
+  onApplyPermissions: (permissions: AdminPermission[]) => void;
   isBusy: boolean;
   onRemove: () => void;
 }) {
@@ -239,7 +292,8 @@ function MemberRow({
   const initials = displayName.slice(0, 2).toUpperCase();
 
   return (
-    <div className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-cloistr-light/5">
+    <div className="rounded-lg p-1">
+      <div className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-cloistr-light/5">
       {profile?.picture ? (
         <img
           src={profile.picture}
@@ -290,7 +344,17 @@ function MemberRow({
         )}
       </div>
 
-      {canAdmin && (
+      {canSetPermissions && (
+        <button
+          onClick={onToggleEditing}
+          aria-expanded={isEditing}
+          className="shrink-0 rounded px-2 py-1 text-xs text-cloistr-light/40 hover:bg-cloistr-light/10 hover:text-cloistr-light"
+        >
+          Permissions
+        </button>
+      )}
+
+      {canRemove && (
         <button
           onClick={onRemove}
           disabled={isBusy}
@@ -299,6 +363,20 @@ function MemberRow({
         >
           Remove
         </button>
+      )}
+      </div>
+
+      {isEditing && (
+        <MemberPermissions
+          targetPubkey={member.pubkey}
+          targetName={displayName}
+          permissions={member.permissions}
+          editorPubkey={editorPubkey}
+          editorPermissions={editorPermissions}
+          isBusy={isBusy}
+          onApply={onApplyPermissions}
+          onClose={onToggleEditing}
+        />
       )}
     </div>
   );

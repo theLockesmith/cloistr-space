@@ -30,6 +30,7 @@ vi.mock('@/services/groups/useGroupAdmin', () => ({
   useGroupAdmin: () => ({
     addMember: vi.fn(),
     removeMember: vi.fn(),
+    setPermissions: vi.fn(),
     updateMetadata: vi.fn(),
     isBusy: false,
     error: null,
