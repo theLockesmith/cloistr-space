@@ -35,9 +35,19 @@ interface Edits {
 export function GroupSettings({ groupId, canAdmin }: Props) {
   const admin = useGroupAdmin(groupId);
   const { groups } = useGroups();
-  // useGroups yields GroupMembership, not Group -- the group is nested inside.
+  /**
+   * MATCH ON `identifier`, NOT `id`.
+   *
+   * Group.id is the kind:39000 EVENT id -- a 64-char hash. Group.identifier is
+   * the d-tag ("test-project-t9mn5b1"), and the d-tag is what every other part
+   * of this surface keys on: ProjectsView passes `group.identifier` as
+   * groupId, and the kind:39001/39002 filters use `#d`.
+   *
+   * Comparing id to a d-tag never matches, so `group` was ALWAYS undefined and
+   * the settings form was always blank.
+   */
   const group = useMemo(
-    () => groups.find((m) => m.group.id === groupId)?.group,
+    () => groups.find((m) => m.group.identifier === groupId)?.group,
     [groups, groupId]
   );
 
@@ -65,6 +75,31 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
     return (
       <div className="p-4 text-sm text-cloistr-light/60">
         Only project admins can change these details.
+      </div>
+    );
+  }
+
+  /**
+   * NO FORM WITHOUT THE PROJECT. This is a data-loss guard, not a display one.
+   *
+   * kind:39000 is addressable, so a save REPLACES the record. A form rendered
+   * with blank inputs because the project has not loaded does not merely look
+   * wrong -- it asserts "this project has no name", and saving from that state
+   * publishes a 39000 with no name tag and WIPES it.
+   *
+   * A blank field and an unloaded project are different facts, and only one of
+   * them is safe to save.
+   */
+  if (!group) {
+    return (
+      <div className="p-4">
+        <p className="text-sm text-cloistr-light/70">
+          Could not load this project's details.
+        </p>
+        <p className="mt-1 text-xs text-cloistr-light/50">
+          Editing is disabled until they load — saving now would replace the project's
+          details with empty ones.
+        </p>
       </div>
     );
   }
