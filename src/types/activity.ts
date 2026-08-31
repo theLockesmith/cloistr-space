@@ -141,6 +141,8 @@ export interface Mention {
   replyTo?: string;
   /** Root event of thread */
   rootEvent?: string;
+  /** Sats from a zap receipt (kind:9735), parsed from bolt11 tag. */
+  zapSats?: number;
   /** Created timestamp */
   createdAt: number;
   /** Whether user has read this mention */

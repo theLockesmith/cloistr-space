@@ -497,7 +497,7 @@ function MentionsWidget() {
           )}
         </span>
       }
-      action={{ label: 'View all', onClick: () => navigate('/social') }}
+      action={{ label: 'View all', onClick: () => navigate('/notifications') }}
     >
       {isLoading ? (
         <WidgetSkeleton count={2} />
