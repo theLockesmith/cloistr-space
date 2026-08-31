@@ -146,6 +146,19 @@ export function ProfileView() {
         </div>
       )}
 
+      {/* Live preview.
+          The fields below are URL inputs, which is correct for editing and is
+          why the operator saw "just urls" -- there was nowhere the picture was
+          ever a picture. This shows what those URLs actually resolve to, and
+          updates as they type, so a broken or wrong link is visible before it
+          is published rather than after. */}
+      <ProfilePreview
+        picture={draft.picture}
+        banner={draft.banner}
+        name={draft.display_name || draft.name}
+        about={draft.about}
+      />
+
       {/* Profile fields */}
       <section className="rounded-lg border border-cloistr-light/10 bg-cloistr-dark p-4">
         <h2 className="mb-3 text-sm font-medium text-cloistr-light">Details</h2>
@@ -279,5 +292,100 @@ export function ProfileView() {
         </label>
       </section>
     </div>
+  );
+}
+
+/**
+ * What the profile will look like to everyone else.
+ *
+ * Each image reports its own failure. A dead avatar host is ordinary, and a
+ * broken-image glyph with no explanation reads as our bug rather than as a URL
+ * that does not resolve -- which is exactly the distinction the person editing
+ * the field needs.
+ */
+function ProfilePreview({
+  picture,
+  banner,
+  name,
+  about,
+}: {
+  picture?: string;
+  banner?: string;
+  name?: string;
+  about?: string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-cloistr-light/10 bg-cloistr-dark">
+      <PreviewImage
+        key={`banner:${banner ?? ''}`}
+        src={banner}
+        className="h-28 w-full object-cover"
+        emptyLabel="No banner set"
+        failLabel="Banner URL did not load"
+      />
+
+      <div className="flex items-start gap-3 p-4">
+        <PreviewImage
+          key={`avatar:${picture ?? ''}`}
+          src={picture}
+          className="h-16 w-16 shrink-0 rounded-full object-cover"
+          emptyLabel="No avatar"
+          failLabel="Avatar URL did not load"
+          round
+        />
+        <div className="min-w-0">
+          <p className="truncate font-medium text-cloistr-light">{name || 'No display name set'}</p>
+          {about && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light/70">
+              {about}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PreviewImage({
+  src,
+  className,
+  emptyLabel,
+  failLabel,
+  round = false,
+}: {
+  src?: string;
+  className: string;
+  emptyLabel: string;
+  failLabel: string;
+  round?: boolean;
+}) {
+  // `failed` is component state, so the CALLER keys this on the URL. Keying the
+  // <img> alone would remount the image and keep the stale failure -- fix a
+  // typo'd URL and it would still read "did not load", which is worse than the
+  // original problem because it blames a URL that now works.
+  const [failed, setFailed] = useState(false);
+  const trimmed = src?.trim();
+
+  const placeholder = (label: string) => (
+    <div
+      className={`flex items-center justify-center bg-cloistr-light/5 text-xs text-cloistr-light/40 ${className} ${
+        round ? 'rounded-full' : ''
+      }`}
+    >
+      {label}
+    </div>
+  );
+
+  if (!trimmed) return placeholder(emptyLabel);
+  if (failed) return placeholder(failLabel);
+
+  return (
+    <img
+      src={trimmed}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className={className}
+    />
   );
 }

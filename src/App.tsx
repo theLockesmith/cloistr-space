@@ -11,6 +11,7 @@ import { ActivityDashboard } from './components/activity/ActivityDashboard';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { SocialFeed } from './components/social/SocialFeed';
 import { NoteDetailView } from './components/social/NoteDetailView';
+import { HashtagView } from './components/social/HashtagView';
 import { ProfileView, UserProfileView } from './components/profile';
 import { ThreadsView } from './components/threads';
 import { FileBrowser } from './components/integrations';
@@ -103,6 +104,17 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Profile">
                     <ProfileView />
+                  </ErrorBoundary>
+                }
+              />
+              {/* Hashtag results. Ships alongside the renderer that creates
+                  these links -- a rendered #tag with no destination is the
+                  inert-control problem in a new place. */}
+              <Route
+                path="t/:tag"
+                element={
+                  <ErrorBoundary context="Hashtag">
+                    <HashtagView />
                   </ErrorBoundary>
                 }
               />

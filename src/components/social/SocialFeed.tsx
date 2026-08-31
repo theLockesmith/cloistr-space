@@ -12,6 +12,7 @@ import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
 import { useLongPressMenu } from '@/services/social/useLongPressMenu';
 import { ReactionPicker } from './ReactionPicker';
 import { ShareMenu } from './ShareMenu';
+import { NoteContent } from './NoteContent';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
@@ -414,9 +415,20 @@ function NoteCard({
       </div>
 
       {/* Content */}
-      <p className="mb-4 whitespace-pre-wrap break-words text-sm text-cloistr-light/90">
-        {note.content}
-      </p>
+      {/* The whole post body is a link target, but the CONTENT is not wrapped
+          in an <a>: it contains its own links, mentions and hashtags, and
+          nesting anchors is invalid HTML that browsers resolve unpredictably.
+          A separate overlay link keeps both working. */}
+      <div className="relative mb-4">
+        <Link
+          to={notePath(note.id, [], note.pubkey)}
+          aria-label="Open this post"
+          className="absolute inset-0 z-0"
+        />
+        <div className="relative z-10 pointer-events-none [&_a]:pointer-events-auto [&_img]:pointer-events-auto [&_video]:pointer-events-auto">
+          <NoteContent content={note.content} />
+        </div>
+      </div>
 
       {/* Media */}
       {note.media.length > 0 && (
