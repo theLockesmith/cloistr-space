@@ -8,6 +8,11 @@ import type { NDKFilter } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Mention, WidgetState } from '@/types/activity';
+import {
+  NOTIFICATION_KINDS,
+  classifyNotification,
+  showsContent,
+} from './notificationKinds';
 
 /** Kind 1 - Text note */
 const NOTE_KIND = 1;
@@ -31,10 +36,17 @@ function parseMentionEvent(event: NDKEvent, readIds: Set<string>): Mention {
   const rootTag = replyTags.find((t) => t[3] === 'root') || replyTags[0];
   const rootEvent = rootTag?.[1];
 
+  const type = classifyNotification(event.kind ?? NOTE_KIND, Boolean(rootEvent || replyTo));
+
   return {
     id: event.id,
     pubkey: event.pubkey,
-    content: event.content,
+    // A kind:6's content is a JSON dump of the reposted event and a kind:9735's
+    // is a receipt. Rendering either as a message body shows a wall of JSON
+    // where the reader expected a sentence.
+    content: showsContent(type) ? event.content : '',
+    kind: event.kind ?? NOTE_KIND,
+    type,
     replyTo,
     rootEvent,
     createdAt: event.created_at || Math.floor(Date.now() / 1000),
@@ -118,7 +130,13 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
 
     // Build filter for notes that mention the user
     const filter: NDKFilter = {
-      kinds: [NOTE_KIND as number],
+      // ALL the kinds that can be addressed to you, not just kind:1.
+      //
+      // This subscribed to notes alone, so "someone replied to you" worked and
+      // "someone liked your post" appeared nowhere -- which is most of the
+      // interaction people actually receive, and probably why the feature read
+      // as missing entirely.
+      kinds: NOTIFICATION_KINDS,
       '#p': [pubkey],
       since: sinceTimestamp,
       limit: limit * 2, // Fetch extra to filter out own notes

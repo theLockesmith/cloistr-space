@@ -122,6 +122,10 @@ export const CALENDAR_TIME_KIND = 31923;
 export interface Mention {
   /** Event ID */
   id: string;
+  /** The event kind this came from (1, 6, 7 or 9735). */
+  kind: number;
+  /** What happened, for wording it. See notificationKinds.ts. */
+  type: 'reply' | 'mention' | 'reaction' | 'repost' | 'zap';
   /** Author pubkey */
   pubkey: string;
   /** Note content */
