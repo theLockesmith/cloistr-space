@@ -15,8 +15,8 @@ importers:
         specifier: ^0.2.14
         version: 0.2.14(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@cloistr/ui':
-        specifier: ^0.39.0
-        version: 0.39.0(@cloistr/auth@0.6.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: ^0.40.0
+        version: 0.40.0(@cloistr/auth@0.6.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@nostr-dev-kit/ndk':
         specifier: ^2.18.1
         version: 2.18.1(nostr-tools@2.23.3(typescript@5.9.3))
@@ -260,8 +260,8 @@ packages:
     peerDependencies:
       tailwindcss: '>=3'
 
-  '@cloistr/ui@0.39.0':
-    resolution: {integrity: sha1-BKZdAnEs1W+KctT+4rodUMVTPFg=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.39.0.tgz}
+  '@cloistr/ui@0.40.0':
+    resolution: {integrity: sha1-NS+lC00/Ho+vKGk8MyA+lWPEhFc=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.40.0.tgz}
     peerDependencies:
       '@cloistr/auth': ^0.2.0 || ^0.3.0 || ^0.4.0 || ^0.5.0 || ^0.6.0
       react: ^18.0.0 || ^19.0.0
@@ -2475,7 +2475,7 @@ snapshots:
     dependencies:
       tailwindcss: 4.2.2
 
-  '@cloistr/ui@0.39.0(@cloistr/auth@0.6.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@cloistr/ui@0.40.0(@cloistr/auth@0.6.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@cloistr/auth': 0.6.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       '@types/qrcode': 1.5.6
