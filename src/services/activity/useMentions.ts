@@ -38,6 +38,25 @@ function parseMentionEvent(event: NDKEvent, readIds: Set<string>): Mention {
 
   const type = classifyNotification(event.kind ?? NOTE_KIND, Boolean(rootEvent || replyTo));
 
+  // Parse sats from bolt11 tag on zap receipts.
+  // lnbc<amount><unit> where unit is empty=sat, m=msat/100, u=microsat, etc.
+  let zapSats: number | undefined;
+  if (type === 'zap') {
+    const bolt11 = event.tags.find((t) => t[0] === 'bolt11')?.[1];
+    if (bolt11) {
+      const m = bolt11.match(/lnbc(\d+)([munp]?)/i);
+      if (m) {
+        let sats = parseInt(m[1], 10);
+        const unit = m[2];
+        if (unit === 'm') sats *= 100000;
+        else if (unit === 'u') sats *= 100;
+        else if (unit === 'n') sats /= 10;
+        else if (unit === 'p') sats /= 10000;
+        zapSats = Math.round(sats);
+      }
+    }
+  }
+
   return {
     id: event.id,
     pubkey: event.pubkey,
@@ -49,6 +68,7 @@ function parseMentionEvent(event: NDKEvent, readIds: Set<string>): Mention {
     type,
     replyTo,
     rootEvent,
+    zapSats,
     createdAt: event.created_at || Math.floor(Date.now() / 1000),
     read: readIds.has(event.id),
   };
