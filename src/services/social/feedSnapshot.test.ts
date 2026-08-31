@@ -117,7 +117,7 @@ describe('feedSnapshot', () => {
     const s = fakeStorage();
     s.setItem(
       snapshotKey('following', 'pk'),
-      JSON.stringify({ v: 1, notes: [note('good'), { id: 'bad' }, null, 'nope'] })
+      JSON.stringify({ v: 2, notes: [note('good'), { id: 'bad' }, null, 'nope'] })
     );
 
     expect(loadSnapshot('following', 'pk', s).map((n) => n.id)).toEqual(['good']);
@@ -284,4 +284,27 @@ describe('upsertNote', () => {
 
     expect(list).toHaveLength(1);
   });
+  it('sorts a repost by boostedAt, not by the original createdAt', () => {
+    // A note posted 3 days ago, boosted 1 minute ago, must appear at the top of
+    // the feed -- the boost is the recent event that brought it here. Without
+    // this fix a repost always sinks to where the original note sits in time.
+    let list: Note[] = [];
+    list = upsertNote(list, note('recent-original', 9000));
+    list = upsertNote(list, {
+      ...note('old-original', 1000),
+      repostBy: { pubkey: 'c'.repeat(64), boostedAt: 9999 },
+    });
+
+    // The boosted note has boostedAt=9999 > recent-original createdAt=9000.
+    expect(list.map((n) => n.id)).toEqual(['old-original', 'recent-original']);
+  });
+
+  it('falls back to createdAt for a note without repostBy', () => {
+    let list: Note[] = [];
+    list = upsertNote(list, note('new', 5000));
+    list = upsertNote(list, note('old', 1000));
+
+    expect(list.map((n) => n.id)).toEqual(['new', 'old']);
+  });
+
 });

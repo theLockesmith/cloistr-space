@@ -21,6 +21,7 @@ import { OwnNoteMenu } from './OwnNoteMenu';
 import { NoteContent } from './NoteContent';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
+import { firstLinkUrl, displayUrl } from '@/services/social/noteContent';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
 
 export function SocialFeed() {
@@ -49,7 +50,16 @@ export function SocialFeed() {
 
   // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
   // before this, so every card fell back to a truncated pubkey.
-  const authorPubkeys = useMemo(() => notes.map((n) => n.pubkey), [notes]);
+  // kind:0 for everyone currently on screen -- original authors AND reposters.
+  // Without including reposter pubkeys here, the attribution row shows only a
+  // truncated key for anyone who boosted a note.
+  const authorPubkeys = useMemo(() => {
+    const keys = new Set(notes.map((n) => n.pubkey));
+    for (const n of notes) {
+      if (n.repostBy) keys.add(n.repostBy.pubkey);
+    }
+    return Array.from(keys);
+  }, [notes]);
   const authorProfiles = useAuthorProfiles(authorPubkeys);
 
   const [composeText, setComposeText] = useState('');
@@ -398,6 +408,7 @@ export function SocialFeed() {
             key={note.id}
             note={note}
             profile={authorProfiles.get(note.pubkey)}
+            reposterProfile={note.repostBy ? authorProfiles.get(note.repostBy.pubkey) : undefined}
             canAct={canAct}
             onReact={() => handleReact(note)}
             onPickReaction={(entry) => handleReact(note, entry)}
@@ -432,6 +443,7 @@ export function SocialFeed() {
 function NoteCard({
   note,
   profile,
+  reposterProfile,
   canAct,
   onReact,
   onPickReaction,
@@ -443,6 +455,8 @@ function NoteCard({
 }: {
   note: Note;
   profile?: AuthorProfile;
+  /** Only present when note.repostBy is set. */
+  reposterProfile?: AuthorProfile;
   canAct: boolean;
   onReact: () => void;
   onPickReaction: (entry: EmojiEntry) => void;
@@ -475,40 +489,126 @@ function NoteCard({
   const displayName = author?.displayName || author?.name || formatPubkey(note.pubkey);
   const timeStr = formatTime(note.createdAt);
 
+  const reposterName =
+    reposterProfile?.displayName ||
+    reposterProfile?.name ||
+    (note.repostBy ? formatPubkey(note.repostBy.pubkey) : '');
+  const boostTimeStr = note.repostBy ? formatTime(note.repostBy.boostedAt) : '';
+
+  // Extract the first non-media link URL for the link card.
+  const linkUrl = useMemo(() => firstLinkUrl(note.content), [note.content]);
+  const linkDomain = useMemo(() => {
+    if (!linkUrl) return '';
+    try { return new URL(linkUrl).hostname; } catch { return linkUrl; }
+  }, [linkUrl]);
+  const linkLabel = linkUrl ? displayUrl(linkUrl, 60) : '';
+
   return (
     <article className="rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 p-4">
-      {/* Author.
-          A real <Link>, not an onClick div: middle-click, open-in-new-tab and
-          copy-link-address are how people actually use a name in a feed, and a
-          click handler silently breaks all three. */}
-      <div className="mb-3 flex items-center gap-3">
-        <Link to={profilePath(note.pubkey)} aria-label={`${displayName}'s profile`}>
-          {author?.picture ? (
-            <img
-              src={author.picture}
-              alt=""
-              className="h-10 w-10 rounded-full object-cover"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-          ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cloistr-primary/20 text-sm font-medium text-cloistr-primary">
-              {displayName.slice(0, 2).toUpperCase()}
-            </div>
-          )}
-        </Link>
-        {/* min-w-0: a flex child defaults to min-width:auto and will not
-            shrink below its content, so a long display name widens the card
-            and then the page. truncate keeps the name on one line. */}
-        <div className="min-w-0">
+
+      {/* Repost attribution: only for kind:6-sourced notes.
+          Quieter than the author row -- smaller text, muted colour -- so it
+          reads as context for who brought the note here rather than as the
+          headline of the card.
+          The boost timestamp here + the post timestamp below = two events, two
+          times. Showing only one is the defect most Nostr clients have. */}
+      {note.repostBy && (
+        <div className="mb-2 flex items-center gap-1.5 text-xs text-cloistr-light/50">
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
           <Link
-            to={profilePath(note.pubkey)}
-            className="block truncate font-medium text-cloistr-light hover:underline"
+            to={profilePath(note.repostBy.pubkey)}
+            className="min-w-0 truncate font-medium hover:text-cloistr-light/80 hover:underline"
           >
-            {displayName}
+            {reposterName}
           </Link>
-          <p className="text-xs text-cloistr-light/60">{timeStr}</p>
+          <span className="shrink-0">boosted</span>
+          <span className="ml-auto shrink-0">&middot; {boostTimeStr}</span>
+        </div>
+      )}
+
+      {/* Author row.
+          A real Link, not an onClick div: middle-click, open-in-new-tab, and
+          copy-link-address are how people actually use a name in a feed, and a
+          click handler silently breaks all three.
+          When the note is a repost, both the reposter and the author get their
+          own link via stacked avatars. */}
+      <div className="mb-3 flex items-center gap-3">
+        {note.repostBy ? (
+          <div className="relative h-10 w-14 shrink-0">
+            {/* Reposter avatar -- upper-left, behind */}
+            <Link
+              to={profilePath(note.repostBy.pubkey)}
+              aria-label={reposterName + "'s profile (boosted this)"}
+              className="absolute left-0 top-0"
+            >
+              {reposterProfile?.picture ? (
+                <img
+                  src={reposterProfile.picture}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-7 w-7 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-cloistr-primary/20 text-xs font-medium text-cloistr-primary">
+                  {(reposterName || '??').slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </Link>
+            {/* Author avatar -- lower-right, front. ring-2 separates the circles. */}
+            <Link
+              to={profilePath(note.pubkey)}
+              aria-label={displayName + "'s profile"}
+              className="absolute bottom-0 right-0 z-10"
+            >
+              {author?.picture ? (
+                <img
+                  src={author.picture}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-9 w-9 rounded-full object-cover ring-2 ring-cloistr-dark"
+                />
+              ) : (
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cloistr-primary/20 text-sm font-medium text-cloistr-primary ring-2 ring-cloistr-dark">
+                  {displayName.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </Link>
+          </div>
+        ) : (
+          <Link to={profilePath(note.pubkey)} aria-label={displayName + "'s profile"}>
+            {author?.picture ? (
+              <img
+                src={author.picture}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="h-10 w-10 rounded-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cloistr-primary/20 text-sm font-medium text-cloistr-primary">
+                {displayName.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+          </Link>
+        )}
+
+        {/* min-w-0: flex child defaults to min-width:auto, which prevents
+            truncation of long display names. */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <Link
+              to={profilePath(note.pubkey)}
+              className="min-w-0 truncate font-medium text-cloistr-light hover:underline"
+            >
+              {displayName}
+            </Link>
+            {/* Original post time. Distinct from the boost time above. */}
+            <span className="ml-auto shrink-0 text-xs text-cloistr-light/50">
+              &middot; {timeStr}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -543,18 +643,46 @@ function NoteCard({
         </div>
       )}
 
+      {/* Link preview card (no third-party fetch).
+          Shown only when there is a non-media URL in the content. Domain and
+          path are derived entirely from the URL; no OpenGraph request is made.
+          Follow-up: proxy OG metadata through blossom.cloistr.xyz so titles
+          and thumbnails can appear without leaking the viewer's reading habits. */}
+      {linkUrl && (
+        <a
+          href={linkUrl}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          className="mb-4 flex items-center gap-3 rounded-lg border border-cloistr-light/10 bg-cloistr-light/5 px-3 py-2.5 hover:border-cloistr-primary/30 hover:bg-cloistr-light/10"
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cloistr-light/10">
+            <svg className="h-4 w-4 text-cloistr-light/40" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-cloistr-light/50">{linkDomain}</p>
+            <p className="truncate text-sm text-cloistr-light/80">{linkLabel}</p>
+          </div>
+          <svg className="h-4 w-4 shrink-0 text-cloistr-light/30" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      )}
+
       {/* Actions.
           Every control carries disabled AND aria-disabled, and the reason is
           rendered as text below rather than in a title attribute: the operator
           reported this on mobile, where there is no hover. */}
-      <div className="flex items-center gap-6 border-t border-cloistr-light/10 pt-3">
+      {/* Actions -- justify-between distributes icons evenly across the card width. */}
+      <div className="flex items-center justify-between border-t border-cloistr-light/10 pt-3">
         {/* The thread view exists now, so this navigates instead of sitting
             disabled. A Link rather than an onClick: opening a post in a new tab
             is ordinary, and a click handler breaks it silently. */}
         <Link
           to={notePath(note.id, [], note.pubkey)}
           aria-label={`Replies to this post (${note.engagement.replies})`}
-          className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-primary"
+          className="flex items-center gap-1.5 text-sm text-cloistr-light/40 hover:text-cloistr-primary"
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />

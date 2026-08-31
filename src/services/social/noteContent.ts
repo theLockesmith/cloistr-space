@@ -178,3 +178,19 @@ export function parseNoteContent(content: string): Segment[] {
 
   return segments;
 }
+
+/**
+ * Return the href of the first non-media link segment in the content, or null.
+ *
+ * Used by the note card to render a link preview without re-parsing the content
+ * a second time in the component. Only link-type segments are returned; image
+ * and video segments are rendered inline by the Media block and should not get
+ * a duplicate card.
+ */
+export function firstLinkUrl(content: string): string | null {
+  const segments = parseNoteContent(content);
+  for (const s of segments) {
+    if (s.type === 'link') return s.href;
+  }
+  return null;
+}
