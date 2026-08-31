@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNdk, subscribeStream, useCoalesced } from '@/services/nostr';
 import { NOTE_KIND, type Note } from '@/types/social';
+import { toNote } from '@/services/social/noteProjection';
 import type { NDKEvent, NDKSubscription } from '@nostr-dev-kit/ndk';
 
 const PAGE_SIZE = 30;
@@ -21,25 +22,6 @@ const PAGE_SIZE = 30;
 interface UseAuthorNotesReturn {
   notes: Note[];
   isLoading: boolean;
-}
-
-/** Minimal note projection. Engagement is not fetched here; the feed does that. */
-function toNote(event: NDKEvent): Note | null {
-  if (!event.id || !event.pubkey) return null;
-
-  return {
-    id: event.id,
-    pubkey: event.pubkey,
-    content: event.content ?? '',
-    createdAt: event.created_at ?? 0,
-    mentions: event.tags.filter((t) => t[0] === 'p').map((t) => t[1]),
-    hashtags: event.tags.filter((t) => t[0] === 't').map((t) => t[1]),
-    media: [],
-    engagement: { reactions: 0, reposts: 0, replies: 0, zapAmount: 0, zapCount: 0 },
-    userReacted: false,
-    userReposted: false,
-    userZapped: false,
-  };
 }
 
 /**

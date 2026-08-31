@@ -10,6 +10,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { ActivityDashboard } from './components/activity/ActivityDashboard';
 import { ProjectsView } from './components/projects/ProjectsView';
 import { SocialFeed } from './components/social/SocialFeed';
+import { NoteDetailView } from './components/social/NoteDetailView';
 import { ProfileView, UserProfileView } from './components/profile';
 import { ThreadsView } from './components/threads';
 import { FileBrowser } from './components/integrations';
@@ -102,6 +103,17 @@ export default function App() {
                 element={
                   <ErrorBoundary context="Profile">
                     <ProfileView />
+                  </ErrorBoundary>
+                }
+              />
+              {/* A single post with its replies. `id` is an nevent (with relay
+                  hints), a bare note1, or a hex event id -- the route is what
+                  tells us a bare hex string is an event rather than a pubkey. */}
+              <Route
+                path="e/:id"
+                element={
+                  <ErrorBoundary context="Post">
+                    <NoteDetailView />
                   </ErrorBoundary>
                 }
               />

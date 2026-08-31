@@ -6,7 +6,7 @@
 import { useCallback } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
-import { REACTION_KIND, REPOST_KIND } from '@/types/social';
+import { NOTE_KIND, REACTION_KIND, REPOST_KIND } from '@/types/social';
 
 /**
  * Why an action cannot run right now, or null when it can.
@@ -94,6 +94,14 @@ interface UseNoteActionsReturn {
     content?: string,
     extraTags?: string[][]
   ) => Promise<PublishOutcome>;
+  /**
+   * Publish a kind:1 reply.
+   *
+   * Tags are built by the CALLER (replyEvents.buildReplyTags) rather than here,
+   * because placing a reply in a thread needs the root as well as the parent,
+   * and only the thread view knows both.
+   */
+  reply: (content: string, tags: string[][]) => Promise<PublishOutcome>;
   /** Repost a note. Throws when no relay accepts it. */
   repost: (eventId: string, pubkey: string, relay?: string) => Promise<PublishOutcome>;
   /** Whether connected and can act */
@@ -156,6 +164,28 @@ export function useNoteActions(): UseNoteActionsReturn {
     [publish, createEvent, pubkey]
   );
 
+  // Reply to a note (kind:1, NIP-10 markers supplied by the caller)
+  const reply = useCallback(
+    async (content: string, tags: string[][]): Promise<PublishOutcome> => {
+      if (!publish || !createEvent || !pubkey) {
+        throw new Error('Not connected');
+      }
+      if (!content.trim()) {
+        throw new Error('A reply needs some text');
+      }
+
+      const event = createEvent();
+      if (!event) throw new Error('Failed to make event');
+
+      event.kind = NOTE_KIND;
+      event.content = content.trim();
+      event.tags = tags;
+
+      return publishOrThrow(await publish(event));
+    },
+    [publish, createEvent, pubkey]
+  );
+
   // Repost a note (kind:6)
   const repost = useCallback(
     async (eventId: string, eventPubkey: string, relay?: string): Promise<PublishOutcome> => {
@@ -180,6 +210,7 @@ export function useNoteActions(): UseNoteActionsReturn {
 
   return {
     react,
+    reply,
     repost,
     canAct,
     blockedReason,

@@ -4,5 +4,10 @@
  */
 
 export { useFeed } from './useFeed';
-export { useNoteActions } from './useNoteActions';
+export {
+  useNoteActions,
+  ACTION_BLOCKED_MESSAGE,
+  actionBlockedReason,
+  type ActionBlockedReason,
+} from './useNoteActions';
 export { useCompose } from './useCompose';

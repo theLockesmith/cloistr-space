@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { profilePath } from '@/services/nostr';
+import { profilePath, notePath } from '@/services/nostr';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
 import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
@@ -437,19 +437,19 @@ function NoteCard({
           rendered as text below rather than in a title attribute: the operator
           reported this on mobile, where there is no hover. */}
       <div className="flex items-center gap-6 border-t border-cloistr-light/10 pt-3">
-        {/* Replying needs a thread view, which does not exist yet. Marked
-            unavailable rather than left looking clickable. */}
-        <button
-          disabled
-          aria-disabled="true"
-          aria-label="Replies (not available yet)"
-          className="flex cursor-not-allowed items-center gap-2 text-sm text-cloistr-light/20"
+        {/* The thread view exists now, so this navigates instead of sitting
+            disabled. A Link rather than an onClick: opening a post in a new tab
+            is ordinary, and a click handler breaks it silently. */}
+        <Link
+          to={notePath(note.id, [], note.pubkey)}
+          aria-label={`Replies to this post (${note.engagement.replies})`}
+          className="flex items-center gap-2 text-sm text-cloistr-light/40 hover:text-cloistr-primary"
         >
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
           {note.engagement.replies > 0 && note.engagement.replies}
-        </button>
+        </Link>
         <button
           onClick={onRepost}
           disabled={!canAct}
