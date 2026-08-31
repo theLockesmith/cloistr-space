@@ -8,7 +8,8 @@ import { Link } from 'react-router-dom';
 import { profilePath, notePath } from '@/services/nostr';
 import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
-import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
+import { reactionPayload, isRenderable, type EmojiEntry } from '@/services/social/emojiSets';
+import { useMirrorSign, type MirrorMap } from '@/services/cloistr/useMirrorSign';
 import { useLongPressMenu } from '@/services/social/useLongPressMenu';
 import { ReactionPicker } from './ReactionPicker';
 import { ShareMenu } from './ShareMenu';
@@ -46,6 +47,16 @@ export function SocialFeed() {
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, undo, canAct, blockedReason } = useNoteActions();
   const { emoji, isLoading: emojiLoading } = useEmojiSets();
+  const { sign, mirrorMap, isSigning } = useMirrorSign();
+
+  // As soon as custom emoji resolve, pre-sign their image URLs so images are
+  // ready before the picker opens. Skips URLs already resolved or refused.
+  useEffect(() => {
+    const urls = emoji
+      .filter((e) => !isRenderable(e) && typeof e.url === 'string')
+      .map((e) => e.url as string);
+    if (urls.length > 0) sign(urls);
+  }, [emoji, sign]);
 
   // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
   // before this, so every card fell back to a truncated pubkey.
@@ -405,6 +416,8 @@ export function SocialFeed() {
             viewerPubkey={pubkey}
             emoji={emoji}
             emojiLoading={emojiLoading}
+            mirrorMap={mirrorMap}
+            isMirroring={isSigning}
             onRepost={() => handleRepost(note)}
           />
         ))}
@@ -439,6 +452,8 @@ function NoteCard({
   viewerPubkey,
   emoji,
   emojiLoading,
+  mirrorMap,
+  isMirroring,
   onRepost,
 }: {
   note: Note;
@@ -451,6 +466,8 @@ function NoteCard({
   viewerPubkey: string | null;
   emoji: EmojiEntry[];
   emojiLoading: boolean;
+  mirrorMap: MirrorMap;
+  isMirroring: boolean;
   onRepost: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -596,6 +613,8 @@ function NoteCard({
             <ReactionPicker
               emoji={emoji}
               isLoading={emojiLoading}
+              mirrorMap={mirrorMap}
+              isMirroring={isMirroring}
               onPick={(entry) => {
                 setPickerOpen(false);
                 onPickReaction(entry);

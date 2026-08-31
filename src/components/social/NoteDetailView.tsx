@@ -54,12 +54,12 @@ export function NoteDetailView() {
     return <Navigate to="/social" replace />;
   }
 
-  return <ThreadBody noteId={resolved.value.id} relays={resolved.value.relays} />;
+  return <ThreadBody noteId={resolved.value.id} relays={resolved.value.relays} author={resolved.value.author} />;
 }
 
-function ThreadBody({ noteId, relays }: { noteId: string; relays: string[] }) {
+function ThreadBody({ noteId, relays, author }: { noteId: string; relays: string[]; author?: string }) {
   const navigate = useNavigate();
-  const { root, replies, replyCount, isLoading, notFound } = useNoteThread(noteId, relays);
+  const { root, replies, replyCount, isLoading, notFound } = useNoteThread(noteId, relays, author);
 
   const authors = useMemo(() => {
     const set = new Set<string>();

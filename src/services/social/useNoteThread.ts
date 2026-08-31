@@ -50,7 +50,7 @@ interface ThreadState {
   settled: boolean;
 }
 
-export function useNoteThread(noteId: string | null, relayHints: string[] = []): UseNoteThreadReturn {
+export function useNoteThread(noteId: string | null, relayHints: string[] = [], author?: string): UseNoteThreadReturn {
   const { subscribe, isConnected } = useNdk();
   const { pubkey } = useAuthStore();
 
@@ -121,10 +121,16 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
     rootSettledRef.current = false;
 
     // The note itself.
+    //
+    // Including `authors` when the pubkey is known lets NDK use outbox routing
+    // to query the author's own write relays, which is where the note lives.
+    // Without it the filter has no authors, NDK routes to explicitRelayUrls
+    // alone (one relay), and a note published only to the author's relay eoses
+    // with nothing -- triggering notFound on a note that is visibly in the feed.
     subsRef.current.push(
       subscribeStream(
         subscribe,
-        [{ ids: [noteId] }],
+        [{ ids: [noteId], ...(author ? { authors: [author] } : {}) }],
         {
           onEvent: (event: NDKEvent) => {
             const note = toNote(event);
@@ -210,7 +216,7 @@ export function useNoteThread(noteId: string | null, relayHints: string[] = []):
     );
     // No cleanup here on purpose -- stopping on a dependency change kills the
     // subscription before its opening burst arrives. See useAuthorProfiles.
-  }, [subscribe, isConnected, noteId, pubkey, flush, settle, relayHints]);
+  }, [subscribe, isConnected, noteId, pubkey, flush, settle, relayHints, author]);
 
   useEffect(() => {
     return () => {

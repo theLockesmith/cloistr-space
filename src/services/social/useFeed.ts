@@ -243,6 +243,29 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     : globalRelaysRef.current;
   globalRelaysRef.current = globalRelays;
 
+  /**
+   * The widest relay set for the engagement subscription, always growing
+   * regardless of feed mode.
+   *
+   * The engagement subscription has no `authors` filter, so NDK routes it to
+   * explicitRelayUrls only (one relay). Reactions/reposts to notes that arrived
+   * via outbox routing (from author write relays) are not on explicitRelayUrls,
+   * so the engagement subscription found nothing and every note showed zero
+   * counts -- even when reactions existed.
+   *
+   * The fix mirrors the global feed relay fix: track all ever-connected relays
+   * monotonically and pass them as an explicit relaySet. Monotonic because a
+   * relay that drops is kept (reaching it costs nothing; removing and re-adding
+   * it on reconnect churns re-subscriptions). seenEngagementRef deduplicates
+   * events that arrive from multiple relays.
+   */
+  const engagementRelaysRef = useRef<string[]>([]);
+  const engagementRelays = widenRelays(
+    engagementRelaysRef.current,
+    connectedRelayUrls(relayStatuses.values())
+  );
+  engagementRelaysRef.current = engagementRelays;
+
   // Get following list for filter
   const following = useMemo(() => {
     return Array.from(contacts.values())
@@ -672,7 +695,20 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
       // the count never moved. Combined with setNotes running only at eose,
       // nothing in the UI could change after the first render -- which is why
       // a working button looked broken.
-      }, { closeOnEose: false });
+      }, {
+        closeOnEose: false,
+        // Span all ever-connected relays, not just explicitRelayUrls.
+        //
+        // Without authors in the filter, NDK routes to explicitRelayUrls alone
+        // (one relay). Notes that arrived via outbox routing from author write
+        // relays have their engagement on THOSE relays, not on explicitRelayUrls
+        // -- so every note showed zero counts regardless of what the relay had.
+        //
+        // engagementRelays widens monotonically as relays connect (same pattern
+        // as the global feed relay fix). Each widen re-opens this subscription;
+        // seenEngagementRef deduplicates events from relays we already queried.
+        relaySet: service?.getRelaySetFor(engagementRelays),
+      });
 
 
 
@@ -682,7 +718,10 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     };
     // applyEngagement and scheduleEngagementRender are both stable, so listing
     // them costs no extra subscriptions.
-  }, [subscribe, isConnected, engagementNoteIds, pubkey, applyEngagement, scheduleEngagementRender]);
+    // engagementRelays and service: same pattern as the global feed's globalRelays
+    // dependency -- widenRelays returns the SAME array when nothing was added,
+    // so this re-runs only when a new relay connects, not on every status change.
+  }, [subscribe, isConnected, engagementNoteIds, pubkey, applyEngagement, scheduleEngagementRender, engagementRelays, service]);
 
   return {
     notes,
