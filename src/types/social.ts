@@ -16,6 +16,15 @@ export const REACTION_KIND = 7;
 /** Repost (kind:6) */
 export const REPOST_KIND = 6;
 
+/**
+ * NIP-09 deletion request.
+ *
+ * A REQUEST, not a delete: relays may ignore it and other clients may keep
+ * showing the event. Used here to retract our own kind:7 reactions and kind:6
+ * reposts, which is the only mechanism the protocol offers for undoing them.
+ */
+export const DELETE_KIND = 5;
+
 /** Zap receipt (kind:9735) */
 export const ZAP_RECEIPT_KIND = 9735;
 

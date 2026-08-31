@@ -6,7 +6,7 @@
 import { useCallback } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
-import { NOTE_KIND, REACTION_KIND, REPOST_KIND } from '@/types/social';
+import { DELETE_KIND, NOTE_KIND, REACTION_KIND, REPOST_KIND } from '@/types/social';
 
 /**
  * Why an action cannot run right now, or null when it can.
@@ -65,6 +65,15 @@ export function actionBlockedReason(state: {
 export interface PublishOutcome {
   /** Relays that accepted the event. Never zero -- zero throws instead. */
   acceptedBy: number;
+  /**
+   * The id of the event we just published.
+   *
+   * Needed so a reaction or repost can be UNDONE without waiting for the relay
+   * echo to come back and tell us what we just sent. Undo is a NIP-09 kind:5
+   * referencing this id, and a user who taps a heart and immediately taps it
+   * again should not have to wait on a round trip to change their mind.
+   */
+  eventId: string;
 }
 
 /**
@@ -79,11 +88,11 @@ export interface PublishOutcome {
  * PoW, NIP-42 auth and a whitelist, so it can refuse an event that eleven other
  * relays take without complaint.
  */
-function publishOrThrow(relays: Set<unknown>): PublishOutcome {
+function publishOrThrow(relays: Set<unknown>, eventId: string): PublishOutcome {
   if (relays.size === 0) {
     throw new Error('No relay accepted it. Check your relay list and connection.');
   }
-  return { acceptedBy: relays.size };
+  return { acceptedBy: relays.size, eventId };
 }
 
 interface UseNoteActionsReturn {
@@ -102,6 +111,15 @@ interface UseNoteActionsReturn {
    * and only the thread view knows both.
    */
   reply: (content: string, tags: string[][]) => Promise<PublishOutcome>;
+  /**
+   * Retract an event you published, via NIP-09 kind:5.
+   *
+   * Used to un-heart and un-repost. A deletion request is a REQUEST: relays are
+   * not obliged to honour it and other clients may keep showing the event. That
+   * is the protocol's shape, not a bug in this call, and the UI should not
+   * promise more than it can deliver.
+   */
+  undo: (eventId: string) => Promise<PublishOutcome>;
   /** Repost a note. Throws when no relay accepts it. */
   repost: (eventId: string, pubkey: string, relay?: string) => Promise<PublishOutcome>;
   /** Whether connected and can act */
@@ -159,7 +177,8 @@ export function useNoteActions(): UseNoteActionsReturn {
         ...extraTags,
       ];
 
-      return publishOrThrow(await publish(event));
+      const accepted = await publish(event);
+      return publishOrThrow(accepted, event.id);
     },
     [publish, createEvent, pubkey]
   );
@@ -181,7 +200,28 @@ export function useNoteActions(): UseNoteActionsReturn {
       event.content = content.trim();
       event.tags = tags;
 
-      return publishOrThrow(await publish(event));
+      const accepted = await publish(event);
+      return publishOrThrow(accepted, event.id);
+    },
+    [publish, createEvent, pubkey]
+  );
+
+  // Retract one of our own events (kind:5, NIP-09)
+  const undo = useCallback(
+    async (eventId: string): Promise<PublishOutcome> => {
+      if (!publish || !createEvent || !pubkey) {
+        throw new Error('Not connected');
+      }
+
+      const event = createEvent();
+      if (!event) throw new Error('Failed to make event');
+
+      event.kind = DELETE_KIND;
+      event.content = '';
+      event.tags = [['e', eventId]];
+
+      const accepted = await publish(event);
+      return publishOrThrow(accepted, event.id);
     },
     [publish, createEvent, pubkey]
   );
@@ -203,7 +243,8 @@ export function useNoteActions(): UseNoteActionsReturn {
         ['p', eventPubkey],
       ];
 
-      return publishOrThrow(await publish(event));
+      const accepted = await publish(event);
+      return publishOrThrow(accepted, event.id);
     },
     [publish, createEvent, pubkey]
   );
@@ -211,6 +252,7 @@ export function useNoteActions(): UseNoteActionsReturn {
   return {
     react,
     reply,
+    undo,
     repost,
     canAct,
     blockedReason,

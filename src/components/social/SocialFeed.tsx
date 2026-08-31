@@ -29,10 +29,12 @@ export function SocialFeed() {
     mode,
     followingCount,
     markReacted,
+    getOwnReactionId,
+    getOwnRepostId,
     markReposted,
   } = useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
-  const { react, repost, canAct, blockedReason } = useNoteActions();
+  const { react, repost, undo, canAct, blockedReason } = useNoteActions();
   const { emoji, isLoading: emojiLoading } = useEmojiSets();
 
   // kind:0 for everyone currently on screen. Nothing populated note.authorProfile
@@ -86,11 +88,35 @@ export function SocialFeed() {
 
   const handleReact = useCallback(
     async (note: Note, entry?: EmojiEntry) => {
-      // Only the DEFAULT reaction is blocked by userReacted. Picking a specific
-      // emoji is a distinct act, and refusing it because a heart was already
-      // sent would make the picker silently do nothing.
       if (!canAct) return;
-      if (!entry && note.userReacted) return;
+
+      // Tapping a filled heart RETRACTS it. Until now this returned early, so
+      // the control was inert once used -- "I can no longer un-heart posts".
+      // It never worked; it only became reachable when reactions started
+      // persisting, so the operator met it as a regression.
+      if (!entry && note.userReacted) {
+        const reactionId = getOwnReactionId(note.id);
+        if (!reactionId) {
+          // We know they reacted but not with which event, so there is nothing
+          // to reference in a kind:5. Saying so beats doing nothing.
+          setActionError(
+            'Cannot undo this reaction yet — still loading which one was yours.'
+          );
+          return;
+        }
+
+        setActionError(null);
+        markReacted(note.id, false);
+        try {
+          await undo(reactionId);
+        } catch (err) {
+          markReacted(note.id, true, reactionId);
+          setActionError(
+            err instanceof Error ? `Reaction not removed. ${err.message}` : 'Reaction not removed.'
+          );
+        }
+        return;
+      }
 
       setActionError(null);
       markReacted(note.id, true);
@@ -98,7 +124,10 @@ export function SocialFeed() {
       const payload = entry ? reactionPayload(entry) : null;
 
       try {
-        await react(note.id, note.pubkey, payload?.content, payload?.tags);
+        const outcome = await react(note.id, note.pubkey, payload?.content, payload?.tags);
+        // Record what we just sent so it can be undone immediately, rather than
+        // only once the relay echo comes back.
+        markReacted(note.id, true, outcome.eventId);
       } catch (err) {
         // Take it back visibly. A reverted heart is honest; a stuck-filled one
         // claims something happened that did not.
@@ -108,18 +137,40 @@ export function SocialFeed() {
         );
       }
     },
-    [canAct, react, markReacted]
+    [canAct, react, undo, markReacted, getOwnReactionId]
   );
 
   const handleRepost = useCallback(
     async (note: Note) => {
-      if (!canAct || note.userReposted) return;
+      if (!canAct) return;
+
+      // Same as the heart: tapping an active repost retracts it.
+      if (note.userReposted) {
+        const repostId = getOwnRepostId(note.id);
+        if (!repostId) {
+          setActionError('Cannot undo this repost yet — still loading which one was yours.');
+          return;
+        }
+
+        setActionError(null);
+        markReposted(note.id, false);
+        try {
+          await undo(repostId);
+        } catch (err) {
+          markReposted(note.id, true, repostId);
+          setActionError(
+            err instanceof Error ? `Repost not removed. ${err.message}` : 'Repost not removed.'
+          );
+        }
+        return;
+      }
 
       setActionError(null);
       markReposted(note.id, true);
 
       try {
-        await repost(note.id, note.pubkey);
+        const outcome = await repost(note.id, note.pubkey);
+        markReposted(note.id, true, outcome.eventId);
       } catch (err) {
         markReposted(note.id, false);
         setActionError(
@@ -127,7 +178,7 @@ export function SocialFeed() {
         );
       }
     },
-    [canAct, repost, markReposted]
+    [canAct, repost, undo, markReposted, getOwnRepostId]
   );
 
   const handleModeChange = useCallback(

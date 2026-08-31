@@ -76,8 +76,12 @@ interface UseFeedReturn {
    * it back, which is indistinguishable from the button being broken -- and is
    * what it was.
    */
-  markReacted: (noteId: string, reacted: boolean) => void;
-  markReposted: (noteId: string, reposted: boolean) => void;
+  markReacted: (noteId: string, reacted: boolean, eventId?: string) => void;
+  markReposted: (noteId: string, reposted: boolean, eventId?: string) => void;
+  /** Id of our own kind:7 on this note, when known. See the implementation. */
+  getOwnReactionId: (noteId: string) => string | undefined;
+  /** Id of our own kind:6 on this note, when known. */
+  getOwnRepostId: (noteId: string) => string | undefined;
 }
 
 /** Parse a kind:1 event into a Note */
@@ -197,6 +201,16 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   // engagement stream. userReacted used to be a hardcoded false with a TODO, so
   // the heart could never fill no matter what happened on the network.
   const ownReactionsRef = useRef(new Set<string>());
+  /**
+   * noteId -> the id of OUR kind:7 / kind:6 on it.
+   *
+   * A NIP-09 retraction references the reaction event, not the note, so
+   * knowing "I reacted to this" is not enough to undo it. Populated from the
+   * relay echo AND from the publish itself, because a user who taps a heart
+   * and immediately changes their mind should not wait on a round trip.
+   */
+  const ownReactionEventRef = useRef(new Map<string, string>());
+  const ownRepostEventRef = useRef(new Map<string, string>());
   const ownRepostsRef = useRef(new Set<string>());
   // Engagement events need their OWN seen-set. seenIdsRef guards the main feed
   // subscription only, and the engagement handler had no equivalent -- so the
@@ -243,7 +257,10 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
 
   // Optimistic flags. Set immediately on tap and reverted if the publish is
   // refused, so an action is visible at once and a failure is visible too.
-  const markReacted = useCallback((noteId: string, reacted: boolean) => {
+  const markReacted = useCallback((noteId: string, reacted: boolean, eventId?: string) => {
+    if (reacted && eventId) ownReactionEventRef.current.set(noteId, eventId);
+    if (!reacted) ownReactionEventRef.current.delete(noteId);
+
     // Rebuild rather than mutate in place, so a revert removes exactly one id.
     ownReactionsRef.current = reacted
       ? new Set([...ownReactionsRef.current, noteId])
@@ -267,7 +284,10 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     );
   }, []);
 
-  const markReposted = useCallback((noteId: string, reposted: boolean) => {
+  const markReposted = useCallback((noteId: string, reposted: boolean, eventId?: string) => {
+    if (reposted && eventId) ownRepostEventRef.current.set(noteId, eventId);
+    if (!reposted) ownRepostEventRef.current.delete(noteId);
+
     ownRepostsRef.current = reposted
       ? new Set([...ownRepostsRef.current, noteId])
       : new Set([...ownRepostsRef.current].filter((id) => id !== noteId));
@@ -552,10 +572,16 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
         current.reactions++;
         // Whose reaction it is decides whether the heart fills. This is the
         // real answer to the TODO that used to sit here.
-        if (pubkey && event.pubkey === pubkey) ownReactionsRef.current.add(targetId);
+        if (pubkey && event.pubkey === pubkey) {
+          ownReactionsRef.current.add(targetId);
+          if (event.id) ownReactionEventRef.current.set(targetId, event.id);
+        }
       } else if (event.kind === REPOST_KIND) {
         current.reposts++;
-        if (pubkey && event.pubkey === pubkey) ownRepostsRef.current.add(targetId);
+        if (pubkey && event.pubkey === pubkey) {
+          ownRepostsRef.current.add(targetId);
+          if (event.id) ownRepostEventRef.current.set(targetId, event.id);
+        }
       } else if (event.kind === ZAP_RECEIPT_KIND) {
         current.zapCount++;
         // Try to parse amount from bolt11 tag
@@ -619,5 +645,15 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     followingCount: following.length,
     markReacted,
     markReposted,
+    /**
+     * The id of our own reaction/repost on a note, if we know it.
+     *
+     * Returns undefined when the note was reacted to in a previous session and
+     * the echo has not arrived yet -- the caller must treat that as "cannot
+     * undo right now" rather than as "was not reacted to", because those are
+     * different and only one of them is worth telling the user about.
+     */
+    getOwnReactionId: (noteId: string) => ownReactionEventRef.current.get(noteId),
+    getOwnRepostId: (noteId: string) => ownRepostEventRef.current.get(noteId),
   };
 }
