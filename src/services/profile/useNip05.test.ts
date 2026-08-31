@@ -3,6 +3,11 @@
  *
  * Tests cover all three outcome states (verified/unverified/unknown) and
  * confirm that network failures surface as UNKNOWN, not UNVERIFIED.
+ *
+ * The hook never calls setState synchronously in an effect body. All state
+ * transitions happen in async continuations (Promise.then or fetch.then).
+ * Even the 'unknown' result for an unparseable address fires via
+ * Promise.resolve().then() rather than synchronously.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -36,6 +41,23 @@ describe('useNip05', () => {
 
   it('returns null when nip05 is undefined', () => {
     const { result } = renderHook(() => useNip05(undefined, PUBKEY));
+    expect(result.current).toBe(null);
+  });
+
+  it('returns null while a fetch is in flight (no stale state from prior inputs)', async () => {
+    // The hook derives null rather than storing it, so switching from one
+    // profile to another immediately returns null rather than showing
+    // the previous profile's verification state.
+    mockFetch({ names: { lockesmith: PUBKEY } });
+    const { result, rerender } = renderHook(
+      ({ n, p }: { n?: string; p?: string }) => useNip05(n, p),
+      { initialProps: { n: NIP05, p: PUBKEY } }
+    );
+    await waitFor(() => expect(result.current).toBe('verified'));
+
+    // Rerender with different inputs: immediately null, never shows
+    // the previous verified state.
+    rerender({ n: 'other@domain.xyz', p: 'aabbcc' });
     expect(result.current).toBe(null);
   });
 
@@ -91,8 +113,11 @@ describe('useNip05', () => {
     await waitFor(() => expect(result.current).toBe('unknown'));
   });
 
-  it('returns unknown synchronously when address has no @ sign', () => {
+  it('returns unknown (via microtask) when address has no @ sign', async () => {
+    // The unparseable-address path resolves via Promise.resolve().then()
+    // rather than synchronously, to avoid calling setState in the effect
+    // body. waitFor handles the microtask flush.
     const { result } = renderHook(() => useNip05('notanaddress', PUBKEY));
-    expect(result.current).toBe('unknown');
+    await waitFor(() => expect(result.current).toBe('unknown'));
   });
 });
