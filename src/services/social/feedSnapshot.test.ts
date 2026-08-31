@@ -217,14 +217,33 @@ describe('upsertNote', () => {
     expect(upsertNote(list, note('same', 1000))).toHaveLength(1);
   });
 
-  it('replaces the existing copy rather than ignoring the new one', () => {
-    // The same event from a second relay may carry data the first lacked, and
-    // the newer object is no worse. Ignoring it would be safe but wasteful.
-    const list = upsertNote([], { ...note('same'), content: 'old' });
-    const next = upsertNote(list, { ...note('same'), content: 'new' });
+  it('IGNORES a redelivery rather than replacing the note in place', () => {
+    // An event id is a hash over pubkey, created_at, kind, tags and content, so
+    // a second copy is byte-identical and carries nothing new. The note already
+    // in the list, however, has engagement counts and optimistic react flags
+    // folded into it by applyEngagement -- replacing it would reset reaction
+    // counts to zero and un-fill a heart the user had just tapped.
+    const withEngagement = {
+      ...note('same'),
+      engagement: { ...NO_ENGAGEMENT, reactions: 7 },
+      userReacted: true,
+    };
+    const list = upsertNote([], withEngagement);
+    const next = upsertNote(list, note('same'));
 
     expect(next).toHaveLength(1);
-    expect(next[0].content).toBe('new');
+    expect(next[0].engagement.reactions).toBe(7);
+    expect(next[0].userReacted).toBe(true);
+  });
+
+  it('returns the SAME array on a redelivery', () => {
+    // toBe, not toEqual. A new array of equal contents re-renders the whole
+    // feed, and with the outbox model one note arrives from every relay that
+    // carries it -- so this is the difference between a quiet feed and a
+    // render storm once the subscription stays open past eose.
+    const list = upsertNote([], note('same'));
+
+    expect(upsertNote(list, note('same'))).toBe(list);
   });
 
   it('keeps newest first', () => {
