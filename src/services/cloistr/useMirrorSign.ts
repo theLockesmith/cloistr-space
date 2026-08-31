@@ -25,7 +25,9 @@
  *   415  MIRROR_REFUSED     permanent — will never load; do not retry
  *   502  MIRROR_UNREACHABLE transient — retry after Retry-After header
  *   403  MIRROR_UNSIGNED    link expired — re-sign
- *   501  MIRROR_DISABLED    mirroring off on this server — degrade to text
+ *   501  MIRROR_DISABLED    mirroring off on this server -- degrade to text
+ *   404                     endpoint absent (pre-mirror server, deploy window,
+ *                           or third-party Blossom) -- same as 501
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -41,7 +43,7 @@ export type MirrorStatus =
   | { state: 'ok'; url: string; expiresAt: number }
   | { state: 'refused' }       // 415 — permanent, do not retry
   | { state: 'unreachable'; retryAfter: number }  // 502 — transient
-  | { state: 'disabled' };     // 501 — feature off on this server
+  | { state: 'disabled' };     // 501/404 — feature off or absent on this server
 
 /** Map from original URL to its mirror result. */
 export type MirrorMap = Map<string, MirrorStatus>;
@@ -132,7 +134,7 @@ export function useMirrorSign(): UseMirrorSignReturn {
           body: JSON.stringify({ urls: pending }),
         });
 
-        if (res.status === 501) {
+        if (res.status === 501 || res.status === 404) {
           disabledRef.current = true;
           setMirrorMap((prev) => {
             const next = new Map(prev);
