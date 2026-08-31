@@ -410,6 +410,22 @@ export class NdkService {
   }
 
   /**
+   * A relay set for specific URLs, for callers that must override NDK's routing.
+   *
+   * The global feed needs this: a filter carrying no `authors` is routed to
+   * explicitRelayUrls alone (index.js:2652-2692), which for us is one relay --
+   * so "global" asked strictly FEWER relays than "following". See
+   * services/social/globalRelays.ts.
+   *
+   * Returns undefined for an empty list rather than an empty set, so a caller
+   * falls back to NDK's routing instead of querying nothing and getting silence.
+   */
+  getRelaySetFor(urls: string[]): NDKRelaySet | undefined {
+    if (urls.length === 0) return undefined;
+    return NDKRelaySet.fromRelayUrls(urls, this.ndk);
+  }
+
+  /**
    * Fetch from the user's own relays only.
    *
    * For kinds that live on OUR relay by construction -- the NIP-0A contact
@@ -430,6 +446,15 @@ export class NdkService {
     opts?: {
       closeOnEose?: boolean;
       groupable?: boolean;
+      /**
+       * Override NDK's relay routing for this subscription.
+       *
+       * Added to the OPTIONS OBJECT deliberately rather than as another
+       * positional argument: this call already lost a third argument silently
+       * once, and opts is forwarded wholesale to ndk.subscribe, which accepts
+       * relaySet. No arity change, nothing to drop.
+       */
+      relaySet?: NDKRelaySet;
     },
     /**
      * Handlers registered AT SUBSCRIBE TIME. NDK auto-starts the subscription
