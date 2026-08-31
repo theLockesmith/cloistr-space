@@ -15,13 +15,17 @@ import { ShareMenu } from './ShareMenu';
 import { RepostMenu } from './RepostMenu';
 import { ownRelayHints } from './ShareMenu';
 import { useNdk } from '@/services/nostr';
+import { useAuthStore } from '@/stores/authStore';
 import { QuoteComposer } from './QuoteComposer';
+import { OwnNoteMenu } from './OwnNoteMenu';
 import { NoteContent } from './NoteContent';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
 import type { Note, FeedMode, AuthorProfile } from '@/types/social';
 
 export function SocialFeed() {
+  // Whose posts are ours, so a delete control only appears where it can act.
+  const { pubkey } = useAuthStore();
   const {
     notes,
     isLoading,
@@ -33,6 +37,8 @@ export function SocialFeed() {
     mode,
     followingCount,
     markReacted,
+    removeNote,
+    restoreNote,
     getOwnReactionId,
     getOwnRepostId,
     markReposted,
@@ -183,6 +189,30 @@ export function SocialFeed() {
       }
     },
     [canAct, repost, undo, markReposted, getOwnRepostId]
+  );
+
+  const handleDelete = useCallback(
+    async (note: Note) => {
+      if (!canAct) return;
+
+      setActionError(null);
+      // Optimistic: the post goes at once, because a delete that waits looks
+      // like it did not work and invites a second press.
+      removeNote(note.id);
+
+      try {
+        await undo(note.id);
+      } catch (err) {
+        // Put it back visibly. A post that stays gone after a failed retraction
+        // tells the user it was deleted when it was not -- and this is the one
+        // action where believing a false success is worst.
+        restoreNote(note);
+        setActionError(
+          err instanceof Error ? `Post not deleted. ${err.message}` : 'Post not deleted.'
+        );
+      }
+    },
+    [canAct, undo, removeNote, restoreNote]
   );
 
   const handleModeChange = useCallback(
@@ -371,6 +401,8 @@ export function SocialFeed() {
             canAct={canAct}
             onReact={() => handleReact(note)}
             onPickReaction={(entry) => handleReact(note, entry)}
+            onDelete={() => handleDelete(note)}
+            viewerPubkey={pubkey}
             emoji={emoji}
             emojiLoading={emojiLoading}
             onRepost={() => handleRepost(note)}
@@ -403,6 +435,8 @@ function NoteCard({
   canAct,
   onReact,
   onPickReaction,
+  onDelete,
+  viewerPubkey,
   emoji,
   emojiLoading,
   onRepost,
@@ -412,6 +446,9 @@ function NoteCard({
   canAct: boolean;
   onReact: () => void;
   onPickReaction: (entry: EmojiEntry) => void;
+  onDelete: () => void;
+  /** The signed-in user, so the card knows whether this post is theirs. */
+  viewerPubkey: string | null;
   emoji: EmojiEntry[];
   emojiLoading: boolean;
   onRepost: () => void;
@@ -585,6 +622,11 @@ function NoteCard({
           </span>
         )}
         <ShareMenu noteId={note.id} authorPubkey={note.pubkey} />
+        {/* Only on your own posts. NIP-09 retracts only events you signed, so
+            offering this on someone else's note would be an inert control. */}
+        {viewerPubkey === note.pubkey && (
+          <OwnNoteMenu onDelete={onDelete} isBusy={false} />
+        )}
       </div>
 
       {quoting && (

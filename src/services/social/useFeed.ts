@@ -79,6 +79,10 @@ interface UseFeedReturn {
    */
   markReacted: (noteId: string, reacted: boolean, eventId?: string) => void;
   markReposted: (noteId: string, reposted: boolean, eventId?: string) => void;
+  /** Take a deleted note off the feed. */
+  removeNote: (noteId: string) => void;
+  /** Put it back when the retraction was refused. */
+  restoreNote: (note: Note) => void;
   /** Id of our own kind:7 on this note, when known. See the implementation. */
   getOwnReactionId: (noteId: string) => string | undefined;
   /** Id of our own kind:6 on this note, when known. */
@@ -301,6 +305,29 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
             }
           : note
       )
+    );
+  }, []);
+
+  /**
+   * Take a note off the feed, and put it back if the retraction failed.
+   *
+   * The id STAYS in seenIdsRef on removal, deliberately. A kind:5 is a request:
+   * relays may keep serving the event, and our subscription is open, so the
+   * note would otherwise be redelivered and reappear seconds after the user
+   * deleted it. Keeping it "seen" makes the removal stick for this session.
+   *
+   * Restoring re-adds the note AND leaves the seen-set alone, since the id was
+   * never taken out of it.
+   */
+  const removeNote = useCallback((noteId: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+  }, []);
+
+  const restoreNote = useCallback((note: Note) => {
+    setNotes((prev) =>
+      prev.some((n) => n.id === note.id)
+        ? prev
+        : [...prev, note].sort((a, b) => b.createdAt - a.createdAt)
     );
   }, []);
 
@@ -687,6 +714,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
      * undo right now" rather than as "was not reacted to", because those are
      * different and only one of them is worth telling the user about.
      */
+    removeNote,
+    restoreNote,
     getOwnReactionId: (noteId: string) => ownReactionEventRef.current.get(noteId),
     getOwnRepostId: (noteId: string) => ownRepostEventRef.current.get(noteId),
   };
