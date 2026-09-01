@@ -13,6 +13,7 @@ import {
   GROUP_JOIN_REQUEST_KIND,
   GROUP_LEAVE_REQUEST_KIND,
 } from '@/types/groups';
+import { buildGroupIdentifier } from './ownership';
 
 interface UseGroupActionsReturn {
   /** Request to join a group */
@@ -91,9 +92,14 @@ export function useGroupActions(): UseGroupActionsReturn {
 
     const { name, description, picture, isPublic = true, isOpen = false } = options;
 
-    // Generate unique group identifier
-    const random = Math.random().toString(36).slice(2, 9);
-    const identifier = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20) + '-' + random;
+    // Generate a pubkey-aware group identifier.
+    //
+    // The creator's pubkey (first 16 hex chars) is embedded in the d-tag so
+    // ownership is verifiable from the identifier itself — no event history
+    // query, no reliance on created_at (which authors control). See ownership.ts
+    // for the full reasoning and for why the earlier "earliest kind:39000 wins"
+    // scheme failed.
+    const identifier = buildGroupIdentifier(name, pubkey);
 
     // Create group metadata event (kind:39000)
     const metadataEvent = createEvent();

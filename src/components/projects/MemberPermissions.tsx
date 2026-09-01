@@ -30,6 +30,11 @@ interface Props {
   permissions: AdminPermission[];
   editorPubkey: string | null;
   editorPermissions: AdminPermission[];
+  /**
+   * The group's current owner pubkey, derived from the creation event.
+   * When provided, the owner's permissions cannot be changed by non-owners.
+   */
+  ownerPubkey?: string;
   isBusy: boolean;
   onApply: (permissions: AdminPermission[]) => void;
   onClose: () => void;
@@ -41,6 +46,7 @@ export function MemberPermissions({
   permissions,
   editorPubkey,
   editorPermissions,
+  ownerPubkey,
   isBusy,
   onApply,
   onClose,
@@ -48,7 +54,7 @@ export function MemberPermissions({
   const [draft, setDraft] = useState<AdminPermission[]>(permissions);
   const role = roleFor(draft);
 
-  const refusal = permissionEditRefusal(editorPubkey, editorPermissions, targetPubkey, draft);
+  const refusal = permissionEditRefusal(editorPubkey, editorPermissions, targetPubkey, draft, ownerPubkey);
   const changed =
     draft.length !== permissions.length || draft.some((p) => !permissions.includes(p));
 

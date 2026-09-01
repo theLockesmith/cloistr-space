@@ -110,7 +110,7 @@ export function togglePermission(
   return ALL_PERMISSIONS.filter((p) => held.has(p));
 }
 
-export type PermissionRefusal = 'self-lockout' | 'not-permitted';
+export type PermissionRefusal = 'self-lockout' | 'not-permitted' | 'owner-protected';
 
 export const PERMISSION_REFUSAL_MESSAGE: Record<PermissionRefusal, string> = {
   // Careful wording. With NIP-29 off, this is NOT a lockout: anyone can publish
@@ -119,6 +119,13 @@ export const PERMISSION_REFUSAL_MESSAGE: Record<PermissionRefusal, string> = {
   // would overstate what we can promise.
   'self-lockout': 'You cannot remove your own ability to manage permissions.',
   'not-permitted': 'You do not have permission to change this.',
+  // Careful wording again. "Only the owner can do this" would overstate what
+  // we can promise with NIP-29 off — a hostile client can publish a
+  // replacement kind:39001 from any key. What we CAN say: this client, and
+  // any client that checks the group's creation event, derives ownership from
+  // the event record and will reject a contradictory claim.
+  'owner-protected':
+    'This client, and any client that checks the creation event, recognises this person as the group owner. Their permissions can only be changed through an ownership transfer.',
 };
 
 /**
@@ -127,14 +134,28 @@ export const PERMISSION_REFUSAL_MESSAGE: Record<PermissionRefusal, string> = {
  * The self-check exists because a user removing their own permission-management
  * rights leaves themselves unable to undo it FROM THIS UI. It is recoverable
  * from any other client, which is why the message does not claim permanence.
+ *
+ * ownerPubkey, when provided, activates the owner-protection check: the owner's
+ * permissions cannot be changed by anyone other than the owner themselves (via
+ * an ownership transfer, not a permission edit). The check is checked before
+ * any other so it cannot be bypassed by an editor with permission-management
+ * rights.
  */
 export function permissionEditRefusal(
   editorPubkey: string | null,
   editorPermissions: AdminPermission[],
   targetPubkey: string,
-  next: AdminPermission[]
+  next: AdminPermission[],
+  ownerPubkey?: string
 ): PermissionRefusal | null {
   if (!editorPubkey) return 'not-permitted';
+
+  // Owner protection: checked first, before permission checks. An editor with
+  // full permissions still cannot demote the owner through this control.
+  if (ownerPubkey && targetPubkey === ownerPubkey && editorPubkey !== ownerPubkey) {
+    return 'owner-protected';
+  }
+
   if (!can(editorPermissions, 'add-permission') && !can(editorPermissions, 'remove-permission')) {
     return 'not-permitted';
   }

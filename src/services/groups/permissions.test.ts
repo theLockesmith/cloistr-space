@@ -125,6 +125,38 @@ describe('permissionEditRefusal', () => {
     // and wording it as a lockout would overstate what we can promise.
     expect(PERMISSION_REFUSAL_MESSAGE['self-lockout']).not.toMatch(/permanent|forever|cannot be undone/i);
   });
+
+  it('refuses editing the owner\'s permissions when editorPubkey != ownerPubkey', () => {
+    // The owner is protected at the permission-edit layer: no admin, regardless
+    // of their permission set, can demote the owner through a permission edit.
+    expect(permissionEditRefusal(ME, ALL_PERMISSIONS, THEM, [], THEM)).toBe('owner-protected');
+  });
+
+  it('owner-protection fires before the not-permitted check', () => {
+    // ME has no permission-management rights but tries to edit the owner (THEM).
+    // Should get owner-protected, not not-permitted — the owner protection is
+    // checked first and takes precedence.
+    expect(permissionEditRefusal(ME, [], THEM, [], THEM)).toBe('owner-protected');
+  });
+
+  it('the owner CAN edit their own permissions', () => {
+    // The owner editing themselves: no owner-protection (they are the owner),
+    // falls through to the self-lockout check instead.
+    expect(permissionEditRefusal(ME, ALL_PERMISSIONS, ME, [], ME)).toBe('self-lockout');
+  });
+
+  it('owner-protection is absent when ownerPubkey is not provided', () => {
+    // Backward compatibility: callers that do not pass ownerPubkey get the
+    // original behaviour.
+    expect(permissionEditRefusal(ME, ALL_PERMISSIONS, THEM, [])).toBeNull();
+  });
+
+  it('does not claim the owner-protection is irreversible', () => {
+    // With NIP-29 off, a hostile client can still publish a contradictory
+    // kind:39001. The message should reflect what we CAN promise, not more.
+    expect(PERMISSION_REFUSAL_MESSAGE['owner-protected']).not.toMatch(/permanent|forever|cannot be undone/i);
+    expect(PERMISSION_REFUSAL_MESSAGE['owner-protected']).toMatch(/creation event/i);
+  });
 });
 
 describe('buildAdminTags', () => {
