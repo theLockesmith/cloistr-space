@@ -8,7 +8,9 @@
  *      created_at is author-controlled, so "earliest" is forgeable.
  *
  *   2. Ownership is derived from the d-tag's embedded pubkey prefix, not from
- *      event timestamps. The prefix requires 2^64 brute-force to forge.
+ *      event timestamps. Finding a pubkey matching a 16-char prefix requires
+ *      ~2^64 secp256k1 scalar multiplications — expensive, sized to the threat
+ *      model rather than cryptographically infeasible.
  *
  *   3. A transfer chain is followed only when signed by the current owner. An
  *      outsider's transfer-to tag is ignored.

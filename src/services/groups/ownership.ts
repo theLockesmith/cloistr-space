@@ -32,10 +32,17 @@
  *
  * Format:  {name-slug}-{16-hex-pubkey-prefix}-{8-hex-random}
  *
- * The 16-char (8-byte, 64-bit) pubkey prefix requires 2^64 SHA-256 operations
- * to find a keypair with a matching prefix, which is infeasible with current
- * hardware. The 8-char random suffix prevents duplicate identifiers from the
- * same creator. See IDENTIFIER_FORMAT for the full justification.
+ * The 16-char (8-byte, 64-bit) pubkey prefix is sized as a deliberate
+ * tradeoff, not a cryptographic guarantee. Finding a keypair whose pubkey
+ * starts with a given 16-char prefix requires ~2^64 secp256k1 scalar
+ * multiplications — NOT hash operations (GPU hashrate figures do not apply
+ * here). GPU vanity-key generators reach roughly 10^9 derivations per second,
+ * so ~2^64 costs on the order of 585 GPU-years: expensive, but reachable for
+ * a well-funded attacker. That is the right tradeoff for a productivity-suite
+ * group where nobody spends thousands of GPU-years to hijack a project. If
+ * that assumption ever stops holding, the prefix length is the dial — 20 chars
+ * doubles the work factor. The 8-char random suffix prevents duplicate
+ * identifiers from the same creator.
  *
  * ## Privacy disclosure
  *
@@ -165,9 +172,10 @@ export function resolveOwnership(
   if (!prefix) return { status: 'legacy' };
 
   // Find the creator's events: pubkeys starting with the embedded prefix.
-  // 2^64 brute-force is required to find a collision, so any match is the
-  // creator. Multiple matches indicate a collision attack — handled by taking
-  // the first, since the attacker already spent 2^64 operations.
+  // ~2^64 secp256k1 scalar multiplications are needed to find a pubkey sharing
+  // the embedded 16-char prefix, so any match is the creator. Multiple matches
+  // indicate a collision attack; take the first — the attacker already bore
+  // that cost.
   const creatorEvents = events.filter((e) => e.pubkey.startsWith(prefix));
   if (creatorEvents.length === 0) return { status: 'legacy' };
 
