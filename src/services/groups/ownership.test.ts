@@ -1,45 +1,63 @@
 /**
  * @fileoverview Tests for group ownership derivation.
  *
- * The load-bearing properties are:
+ * The load-bearing properties:
  *
- *   1. The earliest kind:39000 determines the genesis owner, not any declared
- *      field in kind:39001.
- *   2. A transfer chain is followed only when signed by the current owner.
- *      An event from an outsider claiming ownership is rejected.
- *   3. A non-owner cannot transfer.
+ *   1. A BACKDATED event from a non-creator does NOT become the owner. This is
+ *      the exact attack that broke the original "earliest wins" scheme —
+ *      created_at is author-controlled, so "earliest" is forgeable.
  *
- * These are the regressions that matter: a client that naively trusts kind:39001
- * entries or that fails to walk the chain would pass most tests and still let an
- * attacker claim ownership.
+ *   2. Ownership is derived from the d-tag's embedded pubkey prefix, not from
+ *      event timestamps. The prefix requires 2^64 brute-force to forge.
+ *
+ *   3. A transfer chain is followed only when signed by the current owner. An
+ *      outsider's transfer-to tag is ignored.
+ *
+ *   4. Legacy groups (no pubkey in d-tag) report 'legacy', not a guess.
+ *      Falling back to earliest-wins for them would reintroduce attack 1 for
+ *      exactly the groups that cannot defend against it.
+ *
+ * The genesisEvent() tests are kept as documentation of the broken mechanism.
+ * genesisEvent() is no longer used for ownership; it is exported only to serve
+ * as a named regression fixture.
  */
 
 import { describe, it, expect } from 'vitest';
 import type { NDKEvent } from '@nostr-dev-kit/ndk';
 import {
   genesisEvent,
+  extractOwnerPrefix,
+  buildGroupIdentifier,
   resolveOwnership,
   ownershipClaimIsValid,
   buildTransferTags,
   TRANSFER_TAG,
 } from './ownership';
 
-// Helpers to build minimal NDKEvent stand-ins.
-function evt(
-  pubkey: string,
-  created_at: number,
-  id: string,
-  tags: string[][] = []
-): NDKEvent {
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function evt(pubkey: string, created_at: number, id: string, tags: string[][] = []): NDKEvent {
   return { pubkey, created_at, id, tags } as unknown as NDKEvent;
 }
 
 const ALICE = 'a'.repeat(64);
 const BOB = 'b'.repeat(64);
 const CAROL = 'c'.repeat(64);
-const EVE = 'e'.repeat(64); // potential attacker
+const EVE = 'e'.repeat(64); // attacker
 
-describe('genesisEvent', () => {
+/** A pubkey-aware identifier for the given creator pubkey. */
+function makeIdentifier(pubkey: string): string {
+  // Deterministic for tests; we use a fixed random suffix.
+  return `test-group-${pubkey.slice(0, 16)}-deadbeef`;
+}
+
+// ---------------------------------------------------------------------------
+// genesisEvent — documented negative example; NOT used for ownership
+// ---------------------------------------------------------------------------
+
+describe('genesisEvent (documented negative example)', () => {
   it('returns null for an empty list', () => {
     expect(genesisEvent([])).toBeNull();
   });
@@ -56,7 +74,6 @@ describe('genesisEvent', () => {
   });
 
   it('tiebreaks same created_at by lower event id (lexicographic)', () => {
-    // Lower id wins. 'aaa...' < 'bbb...' lexicographically.
     const lower = evt(ALICE, 100, 'a'.repeat(64));
     const higher = evt(BOB, 100, 'b'.repeat(64));
     expect(genesisEvent([higher, lower])).toBe(lower);
@@ -65,132 +82,233 @@ describe('genesisEvent', () => {
   it('tiebreak is deterministic regardless of input order', () => {
     const lower = evt(ALICE, 100, 'a'.repeat(64));
     const higher = evt(BOB, 100, 'b'.repeat(64));
-
     expect(genesisEvent([lower, higher])).toBe(lower);
     expect(genesisEvent([higher, lower])).toBe(lower);
   });
+
+  /**
+   * THIS IS THE ATTACK that broke the original scheme.
+   *
+   * genesisEvent picks the smallest created_at. EVE sets created_at = 0 and
+   * instantly becomes the "genesis". This is why genesisEvent is not used for
+   * ownership and ownership is anchored in the d-tag instead.
+   */
+  it('a backdated event from an attacker becomes the "genesis" — WHY THIS FUNCTION IS WRONG', () => {
+    const aliceCreates = evt(ALICE, 100, 'id-alice');
+    const eveBackdates = evt(EVE, 0, 'id-eve-backdated');
+
+    // genesisEvent says EVE created the group. That is why it is not the oracle.
+    expect(genesisEvent([aliceCreates, eveBackdates])).toBe(eveBackdates);
+  });
 });
 
+// ---------------------------------------------------------------------------
+// extractOwnerPrefix
+// ---------------------------------------------------------------------------
+
+describe('extractOwnerPrefix', () => {
+  it('extracts the 16-char hex prefix from a well-formed identifier', () => {
+    expect(extractOwnerPrefix(`test-group-${'a'.repeat(16)}-deadbeef`)).toBe('a'.repeat(16));
+  });
+
+  it('returns null for a legacy identifier (no pubkey segment)', () => {
+    expect(extractOwnerPrefix('old-group-abc1234')).toBeNull();
+    expect(extractOwnerPrefix('test-7k8n2q3')).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(extractOwnerPrefix('')).toBeNull();
+  });
+
+  it('handles a slug that is itself 16 hex chars', () => {
+    // The regex always extracts the second-to-last segment, so an ambiguous
+    // slug does not displace the pubkey prefix.
+    const id = `${'a'.repeat(16)}-${'b'.repeat(16)}-deadbeef`;
+    expect(extractOwnerPrefix(id)).toBe('b'.repeat(16));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveOwnership — the corrected scheme
+// ---------------------------------------------------------------------------
+
 describe('resolveOwnership', () => {
-  it('returns null for an empty event list', () => {
-    expect(resolveOwnership([])).toBeNull();
+  it('returns { status: "legacy" } for an identifier without a pubkey prefix', () => {
+    const events = [evt(ALICE, 100, 'id1')];
+    expect(resolveOwnership('old-group-abc1234', events)).toEqual({ status: 'legacy' });
   });
 
-  it('returns the genesis author as owner when there is no transfer', () => {
-    const events = [evt(ALICE, 100, 'id1'), evt(BOB, 200, 'id2')];
-    const result = resolveOwnership(events);
-
-    expect(result?.ownerPubkey).toBe(ALICE);
-    expect(result?.fromTransfer).toBe(false);
+  it('returns { status: "legacy" } for an empty event list even with a valid identifier', () => {
+    // The creator's event is not on the relay — treated as unresolvable.
+    expect(resolveOwnership(makeIdentifier(ALICE), [])).toEqual({ status: 'legacy' });
   });
 
-  it('the earliest kind:39000 wins, regardless of author', () => {
-    // Bob publishes a kind:39000 BEFORE Alice. Bob is genesis, not Alice.
-    const events = [evt(ALICE, 200, 'id2'), evt(BOB, 100, 'id1')];
-    const result = resolveOwnership(events);
+  it('returns the creator as owner when there is no transfer', () => {
+    const events = [evt(ALICE, 100, 'id1')];
+    expect(resolveOwnership(makeIdentifier(ALICE), events)).toEqual({
+      status: 'owner',
+      ownerPubkey: ALICE,
+      fromTransfer: false,
+    });
+  });
 
-    expect(result?.ownerPubkey).toBe(BOB);
+  it('a BACKDATED event from a non-creator does NOT become the owner', () => {
+    // This is the primary regression. EVE sets created_at: 0. Under "earliest
+    // wins" she would be genesis. Under this scheme she is ignored because her
+    // pubkey does not start with ALICE's prefix, which is in the d-tag.
+    const events = [
+      evt(ALICE, 100, 'id-alice'),
+      evt(EVE, 0, 'id-eve-backdated'), // earlier timestamp — does not matter
+    ];
+    const result = resolveOwnership(makeIdentifier(ALICE), events);
+
+    expect(result).toEqual({ status: 'owner', ownerPubkey: ALICE, fromTransfer: false });
+  });
+
+  it('ignores events from pubkeys that do not match the d-tag prefix', () => {
+    const events = [
+      evt(ALICE, 100, 'id-alice'),
+      evt(BOB, 50, 'id-bob'), // BOB tries to claim group with ALICE prefix
+      evt(EVE, 200, 'id-eve'),
+    ];
+    const result = resolveOwnership(makeIdentifier(ALICE), events);
+
+    expect(result).toEqual({ status: 'owner', ownerPubkey: ALICE, fromTransfer: false });
   });
 
   it('follows a single valid transfer', () => {
     const events = [
-      // Genesis: Alice
       evt(ALICE, 100, 'id-genesis'),
-      // Alice later publishes a transfer to Bob
       evt(ALICE, 200, 'id-transfer', [[TRANSFER_TAG, BOB]]),
     ];
-    const result = resolveOwnership(events);
-
-    expect(result?.ownerPubkey).toBe(BOB);
-    expect(result?.fromTransfer).toBe(true);
+    expect(resolveOwnership(makeIdentifier(ALICE), events)).toEqual({
+      status: 'owner',
+      ownerPubkey: BOB,
+      fromTransfer: true,
+    });
   });
 
-  it('follows a transfer chain: genesis → A → B → C', () => {
+  it('follows a transfer chain: creator → A → B → C', () => {
     const events = [
       evt(ALICE, 100, 'id1'),
       evt(ALICE, 200, 'id2', [[TRANSFER_TAG, BOB]]),
       evt(BOB, 300, 'id3', [[TRANSFER_TAG, CAROL]]),
     ];
-    const result = resolveOwnership(events);
-
-    expect(result?.ownerPubkey).toBe(CAROL);
+    expect(resolveOwnership(makeIdentifier(ALICE), events)).toEqual({
+      status: 'owner',
+      ownerPubkey: CAROL,
+      fromTransfer: true,
+    });
   });
 
-  it('REJECTS an ownership claim contradicting the creation event', () => {
-    // Eve publishes a kind:39000 claiming to transfer to herself.
-    // She is not in the chain, so her event is ignored.
+  it('a non-chain participant publishing a transfer-to tag is ignored', () => {
+    // EVE publishes a transfer-to for herself. She is not in the chain
+    // (ALICE never transferred to her), so the chain walk never visits her.
     const events = [
-      evt(ALICE, 100, 'id1'), // Genesis: Alice is owner
-      evt(EVE, 200, 'id2', [[TRANSFER_TAG, EVE]]), // Eve tries to hijack
+      evt(ALICE, 100, 'id-alice'),
+      evt(EVE, 200, 'id-eve', [[TRANSFER_TAG, EVE]]), // EVE tries to hijack
     ];
-    const result = resolveOwnership(events);
+    const result = resolveOwnership(makeIdentifier(ALICE), events);
 
-    // Eve is not in the chain — Alice never transferred to her.
-    // The chain walk only follows events from the current owner.
-    expect(result?.ownerPubkey).toBe(ALICE);
-    expect(result?.fromTransfer).toBe(false);
+    expect(result).toEqual({ status: 'owner', ownerPubkey: ALICE, fromTransfer: false });
   });
 
   it('stops at a cycle and does not loop forever', () => {
-    // Alice transfers to Bob, Bob transfers back to Alice. Should terminate.
+    // ALICE → BOB → ALICE: should terminate without throwing.
     const events = [
       evt(ALICE, 100, 'id1'),
       evt(ALICE, 200, 'id2', [[TRANSFER_TAG, BOB]]),
       evt(BOB, 300, 'id3', [[TRANSFER_TAG, ALICE]]),
     ];
-    // Should not throw and should return something — Alice or Bob depending
-    // on which is detected as the cycle start.
-    expect(() => resolveOwnership(events)).not.toThrow();
-    const result = resolveOwnership(events);
-    expect(result).not.toBeNull();
+    expect(() => resolveOwnership(makeIdentifier(ALICE), events)).not.toThrow();
+    const result = resolveOwnership(makeIdentifier(ALICE), events);
+    expect(result.status).toBe('owner');
   });
 
-  it('uses the LATEST event from each owner to determine transfer', () => {
-    // Alice has two events: the earlier one has no transfer, the later one does.
-    // The later one should win for the transfer check.
+  it('uses the LATEST event from each owner for the transfer check', () => {
+    // ALICE's earlier event has no transfer; her later one does.
+    // The later one wins.
     const events = [
-      evt(ALICE, 100, 'id1'), // Genesis — no transfer
-      evt(ALICE, 300, 'id3', [[TRANSFER_TAG, BOB]]), // Later — transfer to Bob
+      evt(ALICE, 100, 'id1'),
+      evt(ALICE, 300, 'id3', [[TRANSFER_TAG, BOB]]),
     ];
-    const result = resolveOwnership(events);
-
-    expect(result?.ownerPubkey).toBe(BOB);
-  });
-
-  it('records the genesis id correctly', () => {
-    const genesisId = 'genesis-event-id-' + '0'.repeat(46);
-    const events = [evt(ALICE, 100, genesisId)];
-    const result = resolveOwnership(events);
-
-    expect(result?.genesisId).toBe(genesisId);
+    expect(resolveOwnership(makeIdentifier(ALICE), events)).toEqual({
+      status: 'owner',
+      ownerPubkey: BOB,
+      fromTransfer: true,
+    });
   });
 });
 
+// ---------------------------------------------------------------------------
+// ownershipClaimIsValid
+// ---------------------------------------------------------------------------
+
 describe('ownershipClaimIsValid', () => {
-  it('returns false for an empty event list', () => {
-    expect(ownershipClaimIsValid([], ALICE)).toBe(false);
+  it('returns false for a legacy identifier', () => {
+    expect(ownershipClaimIsValid('old-group-abc1234', [], ALICE)).toBe(false);
   });
 
-  it('accepts a valid claim matching the genesis owner', () => {
+  it('accepts a valid claim matching the creator', () => {
     const events = [evt(ALICE, 100, 'id1')];
-    expect(ownershipClaimIsValid(events, ALICE)).toBe(true);
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, ALICE)).toBe(true);
   });
 
-  it('rejects a claim that contradicts the creation event', () => {
-    // Alice created the group. Bob claims to own it. Rejected.
-    const events = [evt(ALICE, 100, 'id1'), evt(BOB, 200, 'id2')];
-    expect(ownershipClaimIsValid(events, BOB)).toBe(false);
+  it('rejects a claim from a pubkey not in the chain', () => {
+    const events = [evt(ALICE, 100, 'id1')];
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, BOB)).toBe(false);
   });
 
-  it('accepts a claim that is valid after a transfer', () => {
+  it('a backdated event from an attacker does not make their claim valid', () => {
+    // EVE backdates her event. ALICE still owns the group because ALICE's
+    // pubkey is in the d-tag, not EVE's.
+    const events = [evt(ALICE, 100, 'id1'), evt(EVE, 0, 'id-eve')];
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, EVE)).toBe(false);
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, ALICE)).toBe(true);
+  });
+
+  it('accepts a claim valid after a transfer', () => {
     const events = [
       evt(ALICE, 100, 'id1'),
       evt(ALICE, 200, 'id2', [[TRANSFER_TAG, BOB]]),
     ];
-    expect(ownershipClaimIsValid(events, BOB)).toBe(true);
-    expect(ownershipClaimIsValid(events, ALICE)).toBe(false); // Alice transferred away
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, BOB)).toBe(true);
+    expect(ownershipClaimIsValid(makeIdentifier(ALICE), events, ALICE)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildGroupIdentifier
+// ---------------------------------------------------------------------------
+
+describe('buildGroupIdentifier', () => {
+  it('embeds the first 16 chars of the creator pubkey', () => {
+    const id = buildGroupIdentifier('My Project', ALICE);
+    expect(id).toContain(ALICE.slice(0, 16));
+  });
+
+  it('slugifies the name', () => {
+    const id = buildGroupIdentifier('Hello World!', ALICE);
+    expect(id).toMatch(/^hello-world-/);
+  });
+
+  it('matches the OWNER_PATTERN (extractOwnerPrefix returns the prefix)', () => {
+    const id = buildGroupIdentifier('test', ALICE);
+    expect(extractOwnerPrefix(id)).toBe(ALICE.slice(0, 16));
+  });
+
+  it('two calls produce different identifiers (random suffix)', () => {
+    // This test is non-deterministic in theory but passes with overwhelming
+    // probability since the suffix is 32 bits of crypto randomness.
+    const a = buildGroupIdentifier('same', ALICE);
+    const b = buildGroupIdentifier('same', ALICE);
+    expect(a).not.toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTransferTags
+// ---------------------------------------------------------------------------
 
 describe('buildTransferTags', () => {
   it('includes the d-tag and transfer-to tag', () => {
@@ -213,40 +331,17 @@ describe('buildTransferTags', () => {
   it('omits metadata tags for absent or blank fields', () => {
     const tags = buildTransferTags('g', BOB, { name: 'N', about: '  ', picture: '' });
     expect(tags).toContainEqual(['name', 'N']);
-    // Blank about and empty picture are omitted, not written as empty strings.
     expect(tags).not.toContainEqual(['about', '  ']);
     expect(tags).not.toContainEqual(['picture', '']);
   });
 });
 
-describe('transfer design notes (doc tests)', () => {
-  it('the TRANSFER_TAG constant is "transfer-to"', () => {
-    // Pinned so any rename is a deliberate decision, not an accident.
-    expect(TRANSFER_TAG).toBe('transfer-to');
-  });
+// ---------------------------------------------------------------------------
+// TRANSFER_TAG constant
+// ---------------------------------------------------------------------------
 
-  it('"earliest wins" and "follow the chain" do not conflict', () => {
-    // The tension described in the fileoverview:
-    // - Genesis uses earliest-wins to find WHO created the group.
-    // - Transfers use the chain FROM the genesis owner, not earliest-wins again.
-    // This test makes the property concrete: a LATER event from a non-chain
-    // participant cannot claim to be the genesis.
-    const events = [
-      evt(ALICE, 100, 'id1'), // Alice: earliest, is genesis
-      evt(EVE, 50, 'id0'), // Eve: even earlier timestamp!
-    ];
-    // Eve is earlier — but she is not the genesis owner for the purposes of
-    // transfer-chain resolution. Wait, actually she IS: 50 < 100.
-    // This tests that "earliest wins" applies to ALL events, including attackers.
-    const result = resolveOwnership(events);
-    // Eve's event at t=50 is earlier than Alice's at t=100.
-    // So Eve IS the genesis owner. This is correct — whoever publishes the
-    // FIRST kind:39000 for the d-tag is the creator.
-    expect(result?.ownerPubkey).toBe(EVE);
-    // The point: "earliest wins" is honest and global. You cannot retroactively
-    // become the creator. But you ALSO cannot forge a transfer — because Eve has
-    // no transfer-to tag, Alice is not in the chain, so Alice cannot claim
-    // ownership either.
-    expect(ownershipClaimIsValid(events, ALICE)).toBe(false);
+describe('TRANSFER_TAG', () => {
+  it('is "transfer-to" — pinned so any rename is a deliberate decision', () => {
+    expect(TRANSFER_TAG).toBe('transfer-to');
   });
 });

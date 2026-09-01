@@ -24,7 +24,8 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
   const { members, isLoading, error, refresh } = useGroupMembers(groupId);
   const { pubkey } = useAuthStore();
   const { ownership } = useGroupOwner(groupId);
-  const ownerPubkey = ownership?.ownerPubkey;
+  // Legacy groups return { status: 'legacy' } — no badge, no disabled Remove.
+  const ownerPubkey = ownership?.status === 'owner' ? ownership.ownerPubkey : undefined;
 
   /**
    * OUR OWN permissions, and each control is gated on the one it needs.

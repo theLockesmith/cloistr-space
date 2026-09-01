@@ -149,7 +149,7 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
         {admin.isBusy ? 'Saving…' : 'Save details'}
       </button>
 
-      {/* Ownership transfer — only shown to the current owner. */}
+      {/* Ownership section — transfer for current owner, notice for legacy groups. */}
       {owner.isOwner && (
         <OwnershipTransfer
           onTransfer={(successor) => void owner.transferOwnership(successor)}
@@ -158,6 +158,15 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
           notice={owner.notice}
           onDismiss={owner.dismiss}
         />
+      )}
+      {!owner.isLoading && owner.ownership?.status === 'legacy' && (
+        <div className="border-t border-cloistr-light/10 pt-4">
+          <p className="text-xs font-medium text-cloistr-light/60">Ownership</p>
+          <p className="mt-1 text-xs text-cloistr-light/40">
+            This group was created before ownership verification was introduced. No client
+            can determine the owner from the group identifier alone.
+          </p>
+        </div>
       )}
     </div>
   );

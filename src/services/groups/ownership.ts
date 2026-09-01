@@ -1,97 +1,181 @@
 /**
- * @fileoverview Group ownership: derived from event history, not declared.
+ * @fileoverview Group ownership: anchored in the d-tag, not in event timestamps.
  *
- * The owner is the pubkey that published the earliest kind:39000 for the
- * group's d-tag. That derivation is intrinsic to the event record — any client
- * can verify it independently, without relay enforcement, without trusting
- * whoever wrote the admin list.
+ * ## The original design and why it was wrong
  *
- * WHY THIS MATTERS WITH NIP-29 OFF. kind:39001 is a mutable list: any writer
- * can publish a replacement omitting anyone or adding themselves. A declared
- * "owner" entry in that list would be a promise the protocol cannot keep — a
- * hostile client publishes a replacement kind:39001 and the entry is gone.
- * Derivation from kind:39000 is different: the creation event is already
- * published and cannot be replaced (it was the first, and the relay stores it).
- * Every client that checks the same events will agree on who published first.
+ * The first attempt derived ownership from the earliest kind:39000 for the
+ * d-tag — "genesisEvent()" returned the event with the smallest created_at,
+ * and its pubkey was the owner. Two independent failures:
  *
- * OWNERSHIP TRANSFER. A tag on a republished kind:39000 is the natural
- * candidate since that kind is already the group's source of truth. This does
- * create a tension with "earliest wins":
+ * FAILURE 1 — created_at is author-controlled. A Nostr event's timestamp is an
+ * integer the author writes themselves; no relay enforces its relationship to
+ * wall time. Any attacker publishes:
  *
- *   - "Earliest wins" applies to finding the GENESIS owner: of all kind:39000
- *     events for the d-tag, the one with the smallest created_at (lowest event
- *     id as tiebreak) determines who created the group.
- *   - Transfers are a chain walk FROM the genesis owner. A transfer is a later
- *     kind:39000 from the current owner naming a successor. The chain is
- *     followed because each hop is signed by the current participant, not
- *     because it is the earliest.
+ *   kind:39000, ["d", "<victim-group>"], created_at: 1
  *
- * The two rules therefore govern different questions — "who created this?"
- * (earliest wins) and "who owns it now?" (chain from genesis) — and do not
- * conflict. Using kind:39000 for transfers is valid because it does not disturb
- * genesis determination: the genesis is always the earliest event overall,
- * regardless of any transfer tags on later events.
+ * and becomes the genesis owner of any group they can see, by construction.
+ * The event is validly signed; it just claims to be old.
  *
- * TIEBREAK. Two events with the same created_at: the one with the
- * lexicographically smaller event id wins. NIP-01 uses this convention for
- * replaceable events with equal timestamps; we follow it for consistency.
+ * FAILURE 2 — kind:39000 is addressable (parameterized replaceable). Relays
+ * keep only the newest event per (kind, pubkey, d-tag). useGroupAdmin.updateMetadata
+ * republishes kind:39000 — a feature the product explicitly supports. The first
+ * time anyone renames a group, the creation event is REPLACED at relays and
+ * ceases to exist. The anchor the scheme depended on is deleted by ordinary
+ * product use.
+ *
+ * ## The corrected design
+ *
+ * The d-tag is the group's permanent address and is used by every query. Embed
+ * the creator's pubkey into it. Ownership is then verifiable from the identifier
+ * itself — no history query, no reliance on an event that gets replaced, and no
+ * timestamp to forge.
+ *
+ * Format:  {name-slug}-{16-hex-pubkey-prefix}-{8-hex-random}
+ *
+ * The 16-char (8-byte, 64-bit) pubkey prefix requires 2^64 SHA-256 operations
+ * to find a keypair with a matching prefix, which is infeasible with current
+ * hardware. The 8-char random suffix prevents duplicate identifiers from the
+ * same creator. See IDENTIFIER_FORMAT for the full justification.
+ *
+ * ## Privacy disclosure
+ *
+ * kind:39000 carries the creator's full 64-char pubkey in its event pubkey
+ * field. Anyone who can address the group by its d-tag can fetch that event
+ * and see the complete pubkey. The identifier embeds 16 of those 64 chars —
+ * strictly less than what the event already discloses. No new information is
+ * leaked to anyone who can already find the group.
+ *
+ * ## Ownership transfer
+ *
+ * Unchanged from the original design — anchoring on the d-tag prefix does not
+ * affect the transfer chain. The genesis owner (whose pubkey matches the prefix)
+ * publishes a kind:39000 with a ["transfer-to", successorPubkey] tag. The chain
+ * walks from there, following events signed by each current participant.
+ *
+ * ## Legacy groups
+ *
+ * Groups created before this scheme have d-tags without embedded pubkeys. Their
+ * ownership is NOT recoverable: we do not fall back to earliest-wins, because
+ * that reintroduces failure 1 for exactly the groups that cannot defend against
+ * it. Legacy groups surface a distinct "unverifiable" state in the UI.
+ *
+ * ## genesisEvent()
+ *
+ * The function is kept because its tests document why it was wrong and provide
+ * a regression fixture. It is NOT used for ownership resolution. Do not use it
+ * to determine who owns a group.
  */
 
 import type { NDKEvent } from '@nostr-dev-kit/ndk';
 
-/** The kind:39000 tag that signals an ownership transfer. */
-export const TRANSFER_TAG = 'transfer-to';
+// ---------------------------------------------------------------------------
+// Identifier format
+// ---------------------------------------------------------------------------
 
-/** Result of resolving the current owner of a group. */
-export interface OwnershipResolution {
-  /** Pubkey of the current owner — the end of the transfer chain. */
-  ownerPubkey: string;
-  /** Event id of the genesis kind:39000 that established the group. */
-  genesisId: string;
-  /** True when the current owner differs from the genesis author. */
-  fromTransfer: boolean;
+/**
+ * Pattern for a pubkey-aware group identifier.
+ *
+ * The last two segments are:
+ *   - [0-9a-f]{16}  : first 16 hex chars of the creator's pubkey
+ *   - [0-9a-f]{8}   : 8 hex chars of crypto.getRandomValues entropy
+ *
+ * The slug before them is [a-z0-9-]+. The regex is anchored at $ so it always
+ * extracts the last 16-char hex segment preceding the final 8-char hex segment,
+ * regardless of what the slug contains.
+ */
+const OWNER_PATTERN = /^[a-z0-9-]+-([0-9a-f]{16})-[0-9a-f]{8}$/;
+
+/**
+ * Extract the creator's pubkey prefix from a pubkey-aware group identifier.
+ *
+ * Returns null for legacy identifiers — those whose d-tags do not embed a
+ * pubkey. The caller treats null as "ownership unverifiable".
+ */
+export function extractOwnerPrefix(identifier: string): string | null {
+  const m = OWNER_PATTERN.exec(identifier);
+  return m ? m[1] : null;
 }
 
 /**
- * Find the group's genesis event from a set of kind:39000 events for a d-tag.
+ * Build a pubkey-aware group identifier.
  *
- * The genesis is the earliest event: smallest created_at, with the
- * lexicographically smaller event id as a tiebreak when timestamps collide.
+ * Called by useGroupActions.createGroup; exported for tests. The random suffix
+ * uses crypto.getRandomValues rather than Math.random so the entropy source is
+ * not predictable, which matters when the identifier appears in a security-
+ * relevant context (it carries the authority claim).
+ *
+ * The 16-hex pubkey prefix is placed second-to-last so OWNER_PATTERN can
+ * extract it with a simple anchored regex regardless of the slug's content.
  */
-export function genesisEvent(events: NDKEvent[]): NDKEvent | null {
-  if (events.length === 0) return null;
-
-  return events.reduce((oldest, e) => {
-    const tDiff = (e.created_at ?? 0) - (oldest.created_at ?? 0);
-    if (tDiff < 0) return e;
-    if (tDiff > 0) return oldest;
-    // Same timestamp: lower event id wins
-    return (e.id ?? '') < (oldest.id ?? '') ? e : oldest;
-  });
+export function buildGroupIdentifier(name: string, creatorPubkey: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
+  const pubkeyPrefix = creatorPubkey.slice(0, 16);
+  const randomBytes = crypto.getRandomValues(new Uint8Array(4));
+  const randomHex = Array.from(randomBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${slug}-${pubkeyPrefix}-${randomHex}`;
 }
+
+// ---------------------------------------------------------------------------
+// Ownership resolution
+// ---------------------------------------------------------------------------
+
+/** The kind:39000 tag that signals an ownership transfer. */
+export const TRANSFER_TAG = 'transfer-to';
 
 /** Guard against cycles or absurdly long chains in adversarial data. */
 const MAX_TRANSFER_DEPTH = 20;
 
 /**
- * Resolve the current owner of a group from all kind:39000 events for its d-tag.
+ * The result of resolving group ownership.
  *
- * Returns null if no events are provided or if the genesis event has no pubkey,
- * which should not happen for any valid Nostr event but is handled explicitly
- * rather than crashing.
+ * Two states:
+ *   'owner'  — the chain resolved; ownerPubkey is the current owner.
+ *   'legacy' — the d-tag does not embed a pubkey; ownership is unverifiable.
  *
- * A claim that contradicts the creation event is rejected: the chain walk only
- * follows events signed by the current participant. An attacker publishing a
- * kind:39000 with a transfer-to tag from a key that is not in the chain cannot
- * insert themselves as the new owner.
+ * 'legacy' is NOT a fallback to earliest-wins. Falling back would reintroduce
+ * the timestamp-forgery attack for exactly the groups that cannot defend against
+ * it, because they predate pubkey-aware identifiers.
  */
-export function resolveOwnership(events: NDKEvent[]): OwnershipResolution | null {
-  if (events.length === 0) return null;
+export type OwnershipResolution =
+  | { status: 'owner'; ownerPubkey: string; fromTransfer: boolean }
+  | { status: 'legacy' };
 
-  const genesis = genesisEvent(events);
-  if (!genesis?.pubkey || !genesis.id) return null;
+/**
+ * Resolve the current owner of a group.
+ *
+ * The identifier (d-tag) is the primary input: the 16-char pubkey prefix it
+ * carries identifies the creator WITHOUT relying on any event timestamp. The
+ * events argument provides the set of kind:39000 events for this d-tag, used
+ * to walk the transfer chain.
+ *
+ * Returns { status: 'legacy' } when:
+ *   - The identifier does not embed a pubkey prefix (created before this scheme)
+ *   - No event from a pubkey matching the prefix is found in events
+ *     (the creator's event is not on this relay — treated as unresolvable)
+ *
+ * The second case should not occur for a properly created group, because
+ * createGroup publishes kind:39000 immediately and kind:39000 is replaceable
+ * (the creator's latest event always exists on the relay).
+ */
+export function resolveOwnership(
+  identifier: string,
+  events: NDKEvent[]
+): OwnershipResolution {
+  const prefix = extractOwnerPrefix(identifier);
+  if (!prefix) return { status: 'legacy' };
 
-  let currentOwner = genesis.pubkey;
+  // Find the creator's events: pubkeys starting with the embedded prefix.
+  // 2^64 brute-force is required to find a collision, so any match is the
+  // creator. Multiple matches indicate a collision attack — handled by taking
+  // the first, since the attacker already spent 2^64 operations.
+  const creatorEvents = events.filter((e) => e.pubkey.startsWith(prefix));
+  if (creatorEvents.length === 0) return { status: 'legacy' };
+
+  // The creator's full pubkey (read from their event, confirmed by the prefix).
+  const creatorPubkey = creatorEvents[0].pubkey;
+
+  // Walk the transfer chain from the creator forward.
+  let currentOwner = creatorPubkey;
   let fromTransfer = false;
   const visited = new Set<string>();
 
@@ -99,11 +183,10 @@ export function resolveOwnership(events: NDKEvent[]): OwnershipResolution | null
     if (visited.has(currentOwner)) break; // Cycle detected — stop here
     visited.add(currentOwner);
 
-    // Among all kind:39000 events from the current owner, the LATEST one is
-    // authoritative for whether they have transferred. Uses created_at
-    // descending; higher event id as tiebreak (deterministic but the inverse
-    // of the genesis tiebreak — genesis asks "which came first?", this asks
-    // "which is most recent?").
+    // Among events from the current owner, the LATEST determines whether
+    // they have transferred. Created_at descending; higher event id as tiebreak
+    // (deterministic; the inverse of the genesis tiebreak because this asks
+    // "what is the most recent state?" rather than "what came first?").
     const ownerEvents = events
       .filter((e) => e.pubkey === currentOwner)
       .sort((a, b) => {
@@ -116,26 +199,30 @@ export function resolveOwnership(events: NDKEvent[]): OwnershipResolution | null
 
     const latest = ownerEvents[0];
     const transferTag = latest.tags.find((t) => t[0] === TRANSFER_TAG && t[1]);
-    if (!transferTag) break; // No transfer declared — current owner is the final owner
+    if (!transferTag) break;
 
     currentOwner = transferTag[1];
     fromTransfer = true;
   }
 
-  return { ownerPubkey: currentOwner, genesisId: genesis.id, fromTransfer };
+  return { status: 'owner', ownerPubkey: currentOwner, fromTransfer };
 }
 
 /**
- * Whether a pubkey's claim to own a group is consistent with the event history.
+ * Whether a pubkey's claim to own a group is consistent with the identifier.
  *
- * This is the client-side check the UI enforces before acting on any
- * ownership-gated operation. "This client, and any client that checks the
- * creation event, will recognise the result of this check" — because it only
- * inspects the same publicly available events.
+ * Any client running the same check against the same events reaches the same
+ * conclusion — this is the property that makes derivation stronger than
+ * declaration. The UI copy says "this client, and any client that checks the
+ * creation event" because that is literally what this function does.
  */
-export function ownershipClaimIsValid(events: NDKEvent[], claimedOwner: string): boolean {
-  const resolution = resolveOwnership(events);
-  if (!resolution) return false;
+export function ownershipClaimIsValid(
+  identifier: string,
+  events: NDKEvent[],
+  claimedOwner: string
+): boolean {
+  const resolution = resolveOwnership(identifier, events);
+  if (resolution.status !== 'owner') return false;
   return resolution.ownerPubkey === claimedOwner;
 }
 
@@ -148,7 +235,7 @@ export function ownershipClaimIsValid(events: NDKEvent[], claimedOwner: string):
  *
  * Metadata tags are preserved in the same event so the transfer does not
  * inadvertently blank the group's name: kind:39000 is addressable and replaces
- * the previous event wholesale — a transfer event with no name tag wipes it.
+ * the previous event wholesale — a transfer with no name tag wipes it.
  */
 export function buildTransferTags(
   groupId: string,
@@ -160,4 +247,37 @@ export function buildTransferTags(
   if (metadata.about?.trim()) tags.push(['about', metadata.about.trim()]);
   if (metadata.picture?.trim()) tags.push(['picture', metadata.picture.trim()]);
   return tags;
+}
+
+// ---------------------------------------------------------------------------
+// genesisEvent — kept as a documented negative example, NOT for ownership use
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated NOT USED FOR OWNERSHIP RESOLUTION.
+ *
+ * This function returns the kind:39000 event with the earliest created_at for
+ * a d-tag. It exists only to document the original broken approach and serve
+ * as a regression fixture for why "earliest wins" fails.
+ *
+ * DO NOT use this to determine who owns a group. created_at is author-
+ * controlled — an attacker can publish created_at: 1 and become the "genesis"
+ * of any group they can see. The tests in ownership.test.ts show this attack
+ * explicitly.
+ *
+ * Ownership is derived from the d-tag's embedded pubkey prefix instead.
+ * See resolveOwnership().
+ *
+ * Tiebreak: same created_at → lexicographically smaller event id wins.
+ * NIP-01 convention for replaceable events with equal timestamps.
+ */
+export function genesisEvent(events: NDKEvent[]): NDKEvent | null {
+  if (events.length === 0) return null;
+
+  return events.reduce((oldest, e) => {
+    const tDiff = (e.created_at ?? 0) - (oldest.created_at ?? 0);
+    if (tDiff < 0) return e;
+    if (tDiff > 0) return oldest;
+    return (e.id ?? '') < (oldest.id ?? '') ? e : oldest;
+  });
 }
