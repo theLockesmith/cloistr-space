@@ -19,6 +19,7 @@
 
 import { useMemo, useState } from 'react';
 import { useGroupAdmin } from '@/services/groups/useGroupAdmin';
+import { useGroupOwner } from '@/services/groups/useGroupOwner';
 import { useGroups } from '@/services/groups/useGroups';
 
 interface Props {
@@ -34,6 +35,7 @@ interface Edits {
 
 export function GroupSettings({ groupId, canAdmin }: Props) {
   const admin = useGroupAdmin(groupId);
+  const owner = useGroupOwner(groupId);
   const { groups } = useGroups();
   /**
    * MATCH ON `identifier`, NOT `id`.
@@ -146,6 +148,17 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
       >
         {admin.isBusy ? 'Saving…' : 'Save details'}
       </button>
+
+      {/* Ownership transfer — only shown to the current owner. */}
+      {owner.isOwner && (
+        <OwnershipTransfer
+          onTransfer={(successor) => void owner.transferOwnership(successor)}
+          isBusy={owner.isBusy}
+          error={owner.error}
+          notice={owner.notice}
+          onDismiss={owner.dismiss}
+        />
+      )}
     </div>
   );
 }
@@ -175,5 +188,95 @@ function Field({
         <input type="text" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={className} />
       )}
     </label>
+  );
+}
+
+/**
+ * Ownership transfer panel, visible only to the current owner.
+ *
+ * Careful wording. "Only the owner can do this" would overstate what we can
+ * promise with NIP-29 off — any key can publish a kind:39000. What we CAN say:
+ * this client, and any client that checks the creation event, walks the transfer
+ * chain and recognises the result. That is verifiable authority without relay
+ * enforcement.
+ */
+function OwnershipTransfer({
+  onTransfer,
+  isBusy,
+  error,
+  notice,
+  onDismiss,
+}: {
+  onTransfer: (successorPubkey: string) => void;
+  isBusy: boolean;
+  error: string | null;
+  notice: string | null;
+  onDismiss: () => void;
+}) {
+  const [successor, setSuccessor] = useState('');
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="border-t border-cloistr-light/10 pt-4">
+      <p className="mb-2 text-xs font-medium text-cloistr-light/60">Ownership</p>
+
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-sm text-cloistr-error/80 hover:text-cloistr-error hover:underline"
+        >
+          Transfer ownership…
+        </button>
+      ) : (
+        <div className="space-y-3 rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 p-3">
+          <p className="text-xs text-cloistr-light/70">
+            Ownership is derived from this group's creation event. This client, and
+            any client that checks that event, will walk the transfer chain to
+            recognise the new owner.
+          </p>
+          <p className="text-xs text-cloistr-warning">
+            Once transferred, reversing this requires the new owner's cooperation.
+          </p>
+          <Field
+            label="New owner (npub or hex pubkey)"
+            value={successor}
+            onChange={setSuccessor}
+            placeholder="npub1… or 64-character hex"
+          />
+          {notice && (
+            <p role="status" className="text-xs text-cloistr-light/70">
+              {notice}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="text-xs text-cloistr-error">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                onDismiss();
+                onTransfer(successor.trim());
+              }}
+              disabled={isBusy || !successor.trim()}
+              className="rounded bg-cloistr-error px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            >
+              {isBusy ? 'Transferring…' : 'Transfer ownership'}
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                setSuccessor('');
+                onDismiss();
+              }}
+              className="rounded px-3 py-1.5 text-sm text-cloistr-light/60"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

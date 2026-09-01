@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useGroupMembers, type GroupMember } from '@/services/groups/useGroupMembers';
 import { useGroupAdmin } from '@/services/groups/useGroupAdmin';
+import { useGroupOwner } from '@/services/groups/useGroupOwner';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { profilePath } from '@/services/nostr';
 import { can } from '@/services/groups/permissions';
@@ -22,6 +23,8 @@ interface GroupMembersProps {
 export function GroupMembers({ groupId }: GroupMembersProps) {
   const { members, isLoading, error, refresh } = useGroupMembers(groupId);
   const { pubkey } = useAuthStore();
+  const { ownership } = useGroupOwner(groupId);
+  const ownerPubkey = ownership?.ownerPubkey;
 
   /**
    * OUR OWN permissions, and each control is gated on the one it needs.
@@ -204,6 +207,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
                       }
                       editorPubkey={pubkey}
                       editorPermissions={myPermissions}
+                      ownerPubkey={ownerPubkey}
                       onApplyPermissions={(perms) => {
                         void admin.setPermissions(member.pubkey, perms).then(() => {
                           setEditing(null);
@@ -238,6 +242,7 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
                       }
                       editorPubkey={pubkey}
                       editorPermissions={myPermissions}
+                      ownerPubkey={ownerPubkey}
                       onApplyPermissions={(perms) => {
                         void admin.setPermissions(member.pubkey, perms).then(() => {
                           setEditing(null);
@@ -267,6 +272,7 @@ function MemberRow({
   onToggleEditing,
   editorPubkey,
   editorPermissions,
+  ownerPubkey,
   onApplyPermissions,
   isBusy,
   onRemove,
@@ -284,10 +290,16 @@ function MemberRow({
   onToggleEditing: () => void;
   editorPubkey: string | null;
   editorPermissions: AdminPermission[];
+  /** The current group owner's pubkey, derived from the creation event. */
+  ownerPubkey?: string;
   onApplyPermissions: (permissions: AdminPermission[]) => void;
   isBusy: boolean;
   onRemove: () => void;
 }) {
+  const isOwner = !!ownerPubkey && member.pubkey === ownerPubkey;
+  // The owner cannot be removed by anyone else. A non-owner attempting to remove
+  // the owner gets a disabled button, not an absent one — affordance, not silence.
+  const removeBlocked = isOwner && editorPubkey !== ownerPubkey;
   const displayName = profile?.displayName || profile?.name || formatPubkey(member.pubkey);
   const initials = displayName.slice(0, 2).toUpperCase();
 
@@ -316,7 +328,15 @@ function MemberRow({
           >
             {displayName}
           </Link>
-          {member.isAdmin && (
+          {isOwner && (
+            <span
+              className="rounded bg-cloistr-accent/20 px-1.5 py-0.5 text-xs text-cloistr-accent"
+              title="Group owner — derived from the creation event"
+            >
+              Owner
+            </span>
+          )}
+          {member.isAdmin && !isOwner && (
             <span className="rounded bg-cloistr-primary/20 px-1.5 py-0.5 text-xs text-cloistr-primary">
               Admin
             </span>
@@ -356,10 +376,15 @@ function MemberRow({
 
       {canRemove && (
         <button
-          onClick={onRemove}
-          disabled={isBusy}
+          onClick={removeBlocked ? undefined : onRemove}
+          disabled={isBusy || removeBlocked}
           aria-label={`Remove ${displayName}`}
-          className="shrink-0 rounded px-2 py-1 text-xs text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error disabled:opacity-40"
+          title={
+            removeBlocked
+              ? 'The group owner cannot be removed. Transfer ownership first.'
+              : undefined
+          }
+          className="shrink-0 rounded px-2 py-1 text-xs text-cloistr-light/40 hover:bg-cloistr-error/10 hover:text-cloistr-error disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Remove
         </button>
@@ -373,6 +398,7 @@ function MemberRow({
           permissions={member.permissions}
           editorPubkey={editorPubkey}
           editorPermissions={editorPermissions}
+          ownerPubkey={ownerPubkey}
           isBusy={isBusy}
           onApply={onApplyPermissions}
           onClose={onToggleEditing}

@@ -39,6 +39,21 @@ vi.mock('@/services/groups/useGroupAdmin', () => ({
   }),
 }));
 
+// useGroupOwner is stubbed: no ownership loaded, so no Owner badge appears in
+// these tests. Ownership rendering is covered in the ownership.test.ts unit tests.
+vi.mock('@/services/groups/useGroupOwner', () => ({
+  useGroupOwner: () => ({
+    ownership: null,
+    isLoading: false,
+    isOwner: false,
+    transferOwnership: vi.fn(),
+    isBusy: false,
+    error: null,
+    notice: null,
+    dismiss: vi.fn(),
+  }),
+}));
+
 const mockUseGroupMembers = vi.mocked(useGroupMembers);
 
 // Test data fixtures

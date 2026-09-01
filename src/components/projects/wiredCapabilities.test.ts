@@ -54,4 +54,14 @@ describe('project admin capabilities are reachable', () => {
 
     expect(callers.length).toBeGreaterThan(0);
   });
+
+  it('transferOwnership has a caller outside useGroupOwner', () => {
+    // The transfer action must be reachable from the UI, not merely defined.
+    const callers = callersOf('transferOwnership', 'useGroupOwner.ts');
+
+    expect(
+      callers.length,
+      'transferOwnership is exported and nothing calls it — the owner cannot reach the transfer UI'
+    ).toBeGreaterThan(0);
+  });
 });
