@@ -722,6 +722,7 @@ function NoteCard({
             aria-disabled={!canAct}
             aria-haspopup="menu"
             aria-expanded={pickerOpen}
+            aria-label={`Reactions to this post (${note.engagement.reactions})`}
             title={canAct ? 'Click to react. Hold or right-click to choose an emoji.' : undefined}
             className={`flex items-center gap-2 text-sm ${
               !canAct
