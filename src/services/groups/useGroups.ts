@@ -9,6 +9,7 @@ import { useNdk, subscribeOnce, subscribeStream, type NDKEvent } from '@/service
 import { useAuthStore } from '@/stores/authStore';
 import type { Group, GroupMembership, AdminPermission } from '@/types/groups';
 import { GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND } from '@/types/groups';
+import { extractOwnerPrefix } from './ownership';
 
 /** Parse group metadata from kind:39000 event */
 function parseGroupEvent(event: NDKEvent): Group | null {
@@ -198,6 +199,20 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
         onEvent: (event: NDKEvent) => {
         const dTag = event.tags.find((t) => t[0] === 'd')?.[1];
         if (!dTag) return;
+
+        // Author filter: for pubkey-aware identifiers, accept events only
+        // from the group owner. Without this, anyone can publish a
+        // kind:39002 tagging a victim and the group appears in their
+        // sidebar. Legacy identifiers (no embedded pubkey prefix) are
+        // accepted unconditionally because there is no anchor to verify.
+        //
+        // This is a lighter check than the full trustedWriters resolution
+        // used in useGroupMembers/useGroupAdmin. The sidebar is display-
+        // only (no write amplification), so owner-only filtering is
+        // sufficient: it catches the injection attack, and the workspace
+        // components re-resolve with full trust chains when clicked.
+        const ownerPrefix = extractOwnerPrefix(dTag);
+        if (ownerPrefix && !event.pubkey.startsWith(ownerPrefix)) return;
 
         if (event.kind === GROUP_MEMBERS_KIND) {
           // Track member lists
