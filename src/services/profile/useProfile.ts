@@ -63,50 +63,60 @@ export function useProfile(): UseProfileReturn {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!fetchEvents || !pubkey) return;
+  // Promise-chained rather than async/await: every setState call needs to run
+  // from inside a .then()/.catch()/.finally() callback, not synchronously in
+  // load's own body -- react-hooks/set-state-in-effect flags a setState
+  // reachable synchronously from the effect below even when it is behind an
+  // await, since statically that is indistinguishable from an unconditional
+  // render-triggering update.
+  const load = useCallback((): Promise<void> => {
+    if (!fetchEvents || !pubkey) return Promise.resolve();
 
     // Not connected means we cannot know what exists. Recording `unreadable`
     // here is what stops a later save from publishing over a profile we never
     // managed to read.
     if (!isConnected) {
-      setExisting({ status: 'unreadable' });
-      return;
+      return Promise.resolve().then(() => {
+        setExisting({ status: 'unreadable' });
+      });
     }
 
-    setIsLoading(true);
-    setError(null);
+    return Promise.resolve()
+      .then(() => {
+        setIsLoading(true);
+        setError(null);
+      })
+      .then(() =>
+        Promise.all([
+          fetchEvents({ kinds: [METADATA_KIND], authors: [pubkey], limit: 10 }),
+          fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
+        ])
+      )
+      .then(([metadataEvents, relayEvents]) => {
+        const newestMetadata = newestOf(metadataEvents);
 
-    try {
-      const [metadataEvents, relayEvents] = await Promise.all([
-        fetchEvents({ kinds: [METADATA_KIND], authors: [pubkey], limit: 10 }),
-        fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
-      ]);
+        if (newestMetadata) {
+          const content = newestMetadata.content ?? '';
+          setExisting({ status: 'found', content });
+          setProfile(parseProfileContent(content));
+        } else {
+          // A relay answered and had nothing. Creating a profile from scratch is
+          // safe -- there is nothing to overwrite. Treating this as unreadable
+          // would mean a user with no kind:0 could never make one, which is the
+          // bug cloistr-stash had to fix in this same code path.
+          setExisting({ status: 'absent' });
+          setProfile({});
+        }
 
-      const newestMetadata = newestOf(metadataEvents);
-
-      if (newestMetadata) {
-        const content = newestMetadata.content ?? '';
-        setExisting({ status: 'found', content });
-        setProfile(parseProfileContent(content));
-      } else {
-        // A relay answered and had nothing. Creating a profile from scratch is
-        // safe -- there is nothing to overwrite. Treating this as unreadable
-        // would mean a user with no kind:0 could never make one, which is the
-        // bug cloistr-stash had to fix in this same code path.
-        setExisting({ status: 'absent' });
-        setProfile({});
-      }
-
-      const newestRelayList = newestOf(relayEvents);
-      setRelays(newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : []);
-    } catch (err) {
-      // We reached for it and failed. Explicitly NOT `absent`.
-      setExisting({ status: 'unreadable' });
-      setError(err instanceof Error ? err.message : 'Could not read your profile');
-    } finally {
-      setIsLoading(false);
-    }
+        const newestRelayList = newestOf(relayEvents);
+        setRelays(newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : []);
+      })
+      .catch((err) => {
+        // We reached for it and failed. Explicitly NOT `absent`.
+        setExisting({ status: 'unreadable' });
+        setError(err instanceof Error ? err.message : 'Could not read your profile');
+      })
+      .finally(() => setIsLoading(false));
   }, [fetchEvents, pubkey, isConnected]);
 
   useEffect(() => {

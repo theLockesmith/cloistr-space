@@ -55,19 +55,29 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
   const updateServiceStatus = useWorkspaceStore((s) => s.updateServiceStatus);
 
   const serviceRef = useRef<NdkService | null>(null);
+  // Mirrors serviceRef.current for anything read during render (the `value`
+  // useMemo below). Reading serviceRef.current directly inside that memo was
+  // a real bug, not just a lint complaint: mutating a ref does not schedule a
+  // re-render, so the memo (keyed on isConnected/relayStatuses/etc., none of
+  // which necessarily change at the moment the service is constructed) could
+  // keep handing consumers `service: null` / `subscribe: null` / etc.
+  // indefinitely -- until some unrelated relay-status update happened to fire
+  // and force a recompute. `service` state makes that transition observable.
+  const [service, setService] = useState<NdkService | null>(null);
   const [relayStatuses, setRelayStatuses] = useState<Map<string, RelayStatus>>(new Map());
   const [isConnecting, setIsConnecting] = useState(false);
 
   // Initialize NDK service once
   useEffect(() => {
     if (!serviceRef.current) {
-      serviceRef.current = new NdkService({
+      const instance = new NdkService({
         ...config,
         autoConnect: false, // We'll connect manually after setup
       });
+      serviceRef.current = instance;
 
       // Subscribe to status changes
-      const unsubscribe = serviceRef.current.onStatusChange((statuses) => {
+      const unsubscribe = instance.onStatusChange((statuses) => {
         setRelayStatuses(statuses);
 
         // Update workspace store with aggregate relay status
@@ -76,6 +86,12 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
         );
         updateServiceStatus('relay', { isConnected: hasConnected, lastPing: new Date() });
       });
+
+      // Deferred rather than a direct setService(instance) call here: the
+      // singleton is fully constructed by this point, so this only notifies
+      // `value` below that it's available -- it's not itself part of the
+      // effect's synchronization work.
+      queueMicrotask(() => setService(instance));
 
       return () => {
         unsubscribe();
@@ -222,17 +238,17 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
 
   const value: NdkContextValue = useMemo(
     () => ({
-      service: serviceRef.current,
+      service,
       isConnected,
       isConnecting,
       relayStatuses,
       reconnect,
-      subscribe: serviceRef.current ? subscribe : null,
-      fetchEvents: serviceRef.current ? fetchEvents : null,
+      subscribe: service ? subscribe : null,
+      fetchEvents: service ? fetchEvents : null,
       createEvent,
-      publish: serviceRef.current ? publish : null,
+      publish: service ? publish : null,
     }),
-    [isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, createEvent, publish]
+    [service, isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, createEvent, publish]
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;

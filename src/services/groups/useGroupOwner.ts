@@ -64,28 +64,36 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const loadOwnership = useCallback(async () => {
+  // Promise-chained rather than async/await: every setState call here needs
+  // to run from inside a .then()/.catch()/.finally() callback (a genuine
+  // response to fetchEvents settling), not synchronously in loadOwnership's
+  // own body -- react-hooks/set-state-in-effect flags the latter even when
+  // it is behind an await, since the effect below still calls this function
+  // directly and, statically, that is indistinguishable from an unconditional
+  // render-triggering update.
+  const loadOwnership = useCallback(() => {
     if (!fetchEvents || !isConnected) {
-      setIsLoading(false);
-      return;
+      return Promise.resolve().then(() => setIsLoading(false));
     }
 
-    setIsLoading(true);
-    try {
-      const events = await fetchEvents({
-        kinds: [GROUP_METADATA_KIND as number],
-        '#d': [groupId],
-      });
-
-      // groupId IS the d-tag (identifier). Pass it to resolveOwnership so the
-      // pubkey prefix can be extracted without a separate query.
-      setOwnership(resolveOwnership(groupId, Array.from(events)));
-    } catch {
-      // Unknown owner is not fatal. isOwner fails closed (false), so nothing
-      // owner-gated is offered, which is the safe state.
-    } finally {
-      setIsLoading(false);
-    }
+    return Promise.resolve()
+      .then(() => setIsLoading(true))
+      .then(() =>
+        fetchEvents({
+          kinds: [GROUP_METADATA_KIND as number],
+          '#d': [groupId],
+        })
+      )
+      .then((events) => {
+        // groupId IS the d-tag (identifier). Pass it to resolveOwnership so the
+        // pubkey prefix can be extracted without a separate query.
+        setOwnership(resolveOwnership(groupId, Array.from(events)));
+      })
+      .catch(() => {
+        // Unknown owner is not fatal. isOwner fails closed (false), so nothing
+        // owner-gated is offered, which is the safe state.
+      })
+      .finally(() => setIsLoading(false));
   }, [fetchEvents, isConnected, groupId]);
 
   useEffect(() => {

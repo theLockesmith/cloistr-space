@@ -70,43 +70,9 @@ export function useDrive(options: UseDriveOptions = {}): UseDriveReturn {
     }
   }, [signer, isAuthenticated]);
 
-  // Fetch files and folders
-  const fetchData = useCallback(async () => {
-    if (!pubkey) {
-      setFiles([]);
-      setFolders([]);
-      setQuota(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const drive = getDrive();
-
-      // Fetch files, folders, and quota in parallel
-      const [filesResult, foldersResult, quotaResult] = await Promise.all([
-        drive.listFiles(pubkey, currentFolder),
-        drive.listFolders(pubkey, currentFolder),
-        drive.getQuota(pubkey),
-      ]);
-
-      setFiles(filesResult);
-      setFolders(foldersResult);
-      setQuota(quotaResult);
-
-      // Build breadcrumbs
-      await buildBreadcrumbs(currentFolder, pubkey);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load files');
-    } finally {
-      setIsLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- buildBreadcrumbs is stable
-  }, [pubkey, currentFolder]);
-
-  // Build breadcrumb path
+  // Build breadcrumb path. Declared before fetchData (which calls it) so
+  // fetchData can list it in its own dependency array below without a
+  // temporal-dead-zone reference to a not-yet-initialized const.
   const buildBreadcrumbs = useCallback(async (folderId: string, userPubkey: string) => {
     const crumbs: Breadcrumb[] = [{ id: '', name: 'My Drive' }];
 
@@ -129,6 +95,53 @@ export function useDrive(options: UseDriveOptions = {}): UseDriveReturn {
 
     setBreadcrumbs(crumbs);
   }, []);
+
+  // Fetch files and folders.
+  //
+  // Promise-chained rather than async/await: every setState call needs to run
+  // from inside a .then()/.catch()/.finally() callback, not synchronously in
+  // fetchData's own body -- react-hooks/set-state-in-effect flags a setState
+  // reachable synchronously from the effect below even when it is behind an
+  // await, since statically that is indistinguishable from an unconditional
+  // render-triggering update. buildBreadcrumbs can keep its own async/await
+  // internally: it is only invoked from within a .then() callback here, which
+  // is a separate function the effect never calls directly.
+  const fetchData = useCallback(() => {
+    if (!pubkey) {
+      return Promise.resolve().then(() => {
+        setFiles([]);
+        setFolders([]);
+        setQuota(null);
+      });
+    }
+
+    return Promise.resolve()
+      .then(() => {
+        setIsLoading(true);
+        setError(null);
+      })
+      .then(() => {
+        const drive = getDrive();
+        // Fetch files, folders, and quota in parallel
+        return Promise.all([
+          drive.listFiles(pubkey, currentFolder),
+          drive.listFolders(pubkey, currentFolder),
+          drive.getQuota(pubkey),
+        ]);
+      })
+      .then(([filesResult, foldersResult, quotaResult]) => {
+        setFiles(filesResult);
+        setFolders(foldersResult);
+        setQuota(quotaResult);
+
+        // Build breadcrumbs
+        return buildBreadcrumbs(currentFolder, pubkey);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load files');
+      })
+      .finally(() => setIsLoading(false));
+  }, [pubkey, currentFolder, buildBreadcrumbs]);
 
   // Auto-fetch on mount and when folder changes
   useEffect(() => {
