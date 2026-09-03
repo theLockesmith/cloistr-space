@@ -21,7 +21,7 @@ interface GroupMembersProps {
 }
 
 export function GroupMembers({ groupId }: GroupMembersProps) {
-  const { members, isLoading, error, refresh } = useGroupMembers(groupId);
+  const { members, isLoading, error, unverifiable, refresh } = useGroupMembers(groupId);
   const { pubkey } = useAuthStore();
   const { ownership } = useGroupOwner(groupId);
   // Legacy groups return { status: 'legacy' } — no badge, no disabled Remove.
@@ -98,6 +98,17 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
           </svg>
         </button>
       </div>
+
+      {unverifiable && (
+        <div className="border-b border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          <p className="font-medium">This list cannot be verified.</p>
+          <p className="mt-1 text-amber-200/80">
+            This project was created before group identifiers carried their owner, so there is no
+            way to tell which of these entries were published by someone entitled to. Anyone can
+            add themselves to a list like this. Create the project again to get a verifiable one.
+          </p>
+        </div>
+      )}
 
       {canAddMember && (
         <div className="border-b border-cloistr-light/10 px-4 py-3">
