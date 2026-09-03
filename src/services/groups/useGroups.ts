@@ -257,7 +257,6 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     if (!autoSubscribe || !isAuthenticated || !isConnected) {
       return;
     }
-
     const timeoutId = setTimeout(() => {
       startSubscription();
     }, 0);

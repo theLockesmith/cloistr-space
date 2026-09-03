@@ -56,6 +56,24 @@ export default defineConfig({
     },
 
     // ------------------------------------------------------------------
+    // Write-path access control tests
+    //
+    // Uses a WebSocket relay mock (no real relay needed) to test that
+    // admin controls are visible/hidden based on permissions, and that
+    // write operations produce correctly-structured events.
+    //
+    // Run:  npx playwright test --project=write-access-control
+    // ------------------------------------------------------------------
+    {
+      name: 'write-access-control',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chrome',
+      },
+      testMatch: ['**/write-access-control.spec.ts'],
+    },
+
+    // ------------------------------------------------------------------
     // Authenticated production walkthrough
     //
     // Targets https://space.cloistr.xyz with a real NIP-46 session

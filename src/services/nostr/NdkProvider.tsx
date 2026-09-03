@@ -58,30 +58,40 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
   const [relayStatuses, setRelayStatuses] = useState<Map<string, RelayStatus>>(new Map());
   const [isConnecting, setIsConnecting] = useState(false);
 
-  // Initialize NDK service once
+  // Initialize NDK service once.
+  //
+  // The ref guard creates the service exactly once. The status listener is
+  // attached OUTSIDE the guard so it re-attaches after a React StrictMode
+  // unmount/remount cycle (the cleanup removes the listener, but the ref
+  // persists, so without re-attaching on mount 2 the provider goes deaf
+  // to relay status changes and isConnected never becomes true).
+  //
+  // The cleanup no longer disconnects — the service lives in a ref that
+  // survives the StrictMode remount, and disconnecting it would require the
+  // auto-connect effect to notice and re-connect, which it cannot because
+  // its deps (isAuthenticated) have not changed.
   useEffect(() => {
     if (!serviceRef.current) {
       serviceRef.current = new NdkService({
         ...config,
         autoConnect: false, // We'll connect manually after setup
       });
-
-      // Subscribe to status changes
-      const unsubscribe = serviceRef.current.onStatusChange((statuses) => {
-        setRelayStatuses(statuses);
-
-        // Update workspace store with aggregate relay status
-        const hasConnected = Array.from(statuses.values()).some(
-          (s) => s.status === 'connected'
-        );
-        updateServiceStatus('relay', { isConnected: hasConnected, lastPing: new Date() });
-      });
-
-      return () => {
-        unsubscribe();
-        serviceRef.current?.disconnect();
-      };
     }
+
+    // (Re-)subscribe to status changes — must run on every mount.
+    const unsubscribe = serviceRef.current.onStatusChange((statuses) => {
+      setRelayStatuses(statuses);
+
+      // Update workspace store with aggregate relay status
+      const hasConnected = Array.from(statuses.values()).some(
+        (s) => s.status === 'connected'
+      );
+      updateServiceStatus('relay', { isConnected: hasConnected, lastPing: new Date() });
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [config, updateServiceStatus]);
 
   // Probe the HTTP-backed services.
@@ -146,7 +156,12 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
     }
   }, [signer]);
 
-  // Auto-connect when authenticated
+  // Auto-connect when authenticated.
+  //
+  // Depends on relayStatuses so that after a StrictMode unmount cycle (which
+  // may have disconnected inflight connections) the effect re-runs once the
+  // status listener reports the new state. Without this dep the effect fires
+  // only when isAuthenticated changes, which it does not across a remount.
   useEffect(() => {
     const service = serviceRef.current;
     if (!service) return;
@@ -155,7 +170,7 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
       setIsConnecting(true);
       service.connect().finally(() => setIsConnecting(false));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, relayStatuses]);
 
   const reconnect = useCallback(async () => {
     const service = serviceRef.current;

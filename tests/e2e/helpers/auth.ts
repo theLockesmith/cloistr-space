@@ -3,8 +3,9 @@ import { Page, expect } from '@playwright/test';
 export class AuthHelper {
   readonly page: Page;
 
-  // Mock pubkey - 64 hex chars
-  static readonly MOCK_PUBKEY = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+  // Pubkey derived from the test secret key in mock-relay.ts.
+  // Must match MOCK_PUBKEY there so relay events and auth state agree.
+  static readonly MOCK_PUBKEY = '3a09ac5ceed3528b751f16cea122e0cab694db80d4eca0b3c84d0bf1f4b61446';
 
   constructor(page: Page) {
     this.page = page;
