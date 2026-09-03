@@ -11,6 +11,12 @@
  * whatever the member list component last rendered -- that list may be minutes
  * old, and publishing a stale full list would silently revert somebody else's
  * change.
+ *
+ * THE READS FILTER BY AUTHOR. Because a publish rewrites the whole list, a
+ * read that swallowed an attacker's self-published kind:39002 would republish
+ * it signed by the owner. That is the one path that turns a forgeable event
+ * into a trusted one, so the author check belongs here even more than on the
+ * display path. See trustedWriters.ts.
  */
 
 import { useCallback, useState } from 'react';
@@ -22,6 +28,7 @@ import {
   type AdminPermission,
 } from '@/types/groups';
 import { buildAdminTags } from './permissions';
+import { resolveTrustedWriters, authoritativeMembers } from './trustedWriters';
 import {
   membersAfterAdd,
   membersAfterRemove,
@@ -67,14 +74,35 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
     if (!fetchEvents || !isConnected) return { ok: false, members: [] };
 
     try {
+      // Metadata and admins come along because the trusted-writer check needs
+      // them. THIS READ IS THE BASE FOR THE NEXT PUBLISH, which is why the
+      // author filter matters more here than on the display path: reading an
+      // attacker's kind:39002 and republishing it under the owner's key turns
+      // an injection anyone could ignore into one signed by the owner.
       const events = await fetchEvents({
-        kinds: [GROUP_MEMBERS_KIND as number],
+        kinds: [GROUP_METADATA_KIND as number, GROUP_ADMINS_KIND as number, GROUP_MEMBERS_KIND as number],
         '#d': [groupId],
       });
 
-      const latest = Array.from(events).sort(
-        (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)
-      )[0];
+      const all = Array.from(events);
+      const writers = resolveTrustedWriters(groupId, all);
+
+      if (writers.status === 'resolved') {
+        // [] here means "no member event from a trusted writer", which is a
+        // legitimately empty group. null never comes back for a resolved
+        // group; the ?? is for the type, not for a case that occurs.
+        return { ok: true, members: authoritativeMembers(writers, all) ?? [] };
+      }
+
+      // Legacy identifier: no owner anchor exists, so there is nothing to
+      // filter by. Behaviour is unchanged for these groups rather than
+      // refused, because every group that exists today is one of them and
+      // refusing would remove the only way to manage them. useGroupMembers
+      // marks them unverifiable in the UI. The fix is a migration to
+      // pubkey-aware identifiers, not a check we cannot perform.
+      const latest = all
+        .filter((e) => e.kind === GROUP_MEMBERS_KIND)
+        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
 
       // No event at all is a legitimate empty group, not a failure -- a group
       // that has never had a member list published has none.
@@ -151,13 +179,21 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
 
     try {
       const events = await fetchEvents({
-        kinds: [GROUP_ADMINS_KIND as number],
+        kinds: [GROUP_METADATA_KIND as number, GROUP_ADMINS_KIND as number],
         '#d': [groupId],
       });
 
-      const latest = Array.from(events).sort(
-        (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)
-      )[0];
+      const all = Array.from(events);
+      const writers = resolveTrustedWriters(groupId, all);
+
+      // Resolved groups take the owner-signed list only. An attacker's
+      // kind:39001 naming themselves an admin is not in it.
+      if (writers.status === 'resolved') return { ok: true, entries: writers.admins };
+
+      // Legacy identifier: unchanged, for the reason given in readMembers.
+      const latest = all
+        .filter((e) => e.kind === GROUP_ADMINS_KIND)
+        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
 
       // No event is a legitimate "nobody has permissions yet", not a failure.
       if (!latest) return { ok: true, entries: [] };

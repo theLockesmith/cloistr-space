@@ -101,6 +101,7 @@ const defaultHookReturn = {
   members: [],
   isLoading: false,
   error: null,
+  unverifiable: false,
   refresh: vi.fn(),
 };
 
@@ -111,6 +112,31 @@ describe('GroupMembers', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('Unverifiable groups', () => {
+    it('warns when the member list cannot be verified', () => {
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        unverifiable: true,
+        members: [mockRegularMember],
+      });
+
+      render(<GroupMembers groupId="old-group-without-a-pubkey" />);
+
+      expect(screen.getByText(/cannot be verified/i)).toBeInTheDocument();
+    });
+
+    it('shows no warning for a group whose list was author-checked', () => {
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [mockRegularMember],
+      });
+
+      render(<GroupMembers groupId="test-group" />);
+
+      expect(screen.queryByText(/cannot be verified/i)).not.toBeInTheDocument();
+    });
   });
 
   describe('Basic rendering', () => {

@@ -19,3 +19,11 @@ export {
   TRANSFER_TAG,
   type OwnershipResolution,
 } from './ownership';
+export {
+  resolveTrustedWriters,
+  authoritativeMembers,
+  parseAdminEntries,
+  parseMemberPubkeys,
+  type TrustedWriters,
+  type AdminEntry,
+} from './trustedWriters';
