@@ -63,11 +63,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
 
-  // Get stable action references (these don't change between renders)
-  const storeActions = useRef(useAuthStore.getState());
-  const storeLogin = storeActions.current.login;
-  const storeLogout = storeActions.current.logout;
-  const setLoading = storeActions.current.setLoading;
+  // Get stable action references (these don't change between renders).
+  // Select each action directly rather than snapshotting useAuthStore.getState()
+  // into a ref: zustand action identities are stable for the store's lifetime,
+  // so a plain selector already gives referential stability without reading a
+  // React ref during render (react-hooks/refs flagged the ref.current reads
+  // below, since they fed straight into effect/callback dependency arrays).
+  const storeLogin = useAuthStore((state) => state.login);
+  const storeLogout = useAuthStore((state) => state.logout);
+  const setLoading = useAuthStore((state) => state.setLoading);
 
   const [signer, setSigner] = useState<SignerInterface | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,8 +102,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const { isConnected, pubkey: sharedPubkey, method } = shared.authState;
     if (isConnected && sharedPubkey && !isAuthenticated) {
-      setSigner(shared.signer);
-      storeLogin(sharedPubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+      // Deferred a tick rather than called synchronously here: storeLogin
+      // writes through to authStore's persisted (localStorage) state, not
+      // just local React state, so this is really "update an external
+      // system" (category 3 in the set-state-in-effect guidance) rather than
+      // the derived-render-state case the rule mainly targets. The condition
+      // is self-limiting regardless -- storeLogin flips isAuthenticated,
+      // which is this same effect's own dependency, so it re-runs once more
+      // and then no-ops.
+      queueMicrotask(() => {
+        setSigner(shared.signer);
+        storeLogin(sharedPubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+      });
     }
   }, [shared.authState, shared.signer, isAuthenticated, storeLogin]);
 

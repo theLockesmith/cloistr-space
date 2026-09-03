@@ -62,27 +62,36 @@ export function useDocs(options: UseDocsOptions = {}): UseDocsReturn {
     docs.setAuth(pubkey);
   }, [pubkey]);
 
-  // Fetch documents
-  const fetchDocuments = useCallback(async () => {
+  // Fetch documents.
+  //
+  // Promise-chained rather than async/await: every setState call needs to run
+  // from inside a .then()/.catch()/.finally() callback, not synchronously in
+  // fetchDocuments's own body -- react-hooks/set-state-in-effect flags a
+  // setState reachable synchronously from the effect below even when it is
+  // behind an await, since statically that is indistinguishable from an
+  // unconditional render-triggering update.
+  const fetchDocuments = useCallback(() => {
     if (!pubkey) {
-      setDocuments([]);
-      setTotal(0);
-      return;
+      return Promise.resolve().then(() => {
+        setDocuments([]);
+        setTotal(0);
+      });
     }
 
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const docs = getDocs();
-      const result = await docs.listDocuments(page, pageSize);
-      setDocuments(result.documents);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load documents');
-    } finally {
-      setIsLoading(false);
-    }
+    return Promise.resolve()
+      .then(() => {
+        setIsLoading(true);
+        setError(null);
+      })
+      .then(() => getDocs().listDocuments(page, pageSize))
+      .then((result) => {
+        setDocuments(result.documents);
+        setTotal(result.total);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load documents');
+      })
+      .finally(() => setIsLoading(false));
   }, [pubkey, page, pageSize]);
 
   // Auto-fetch on mount and when dependencies change

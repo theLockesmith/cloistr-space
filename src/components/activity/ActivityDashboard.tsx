@@ -227,6 +227,17 @@ function FileRow({ file }: { file: FileMetadata }) {
   // a hook here would spin up a drive instance (and its fetches) per row.
   const [deleting, setDeleting] = useState(false);
 
+  // Optimistically hide the row. The activity feed is relay-derived and will
+  // not re-render on its own, so without this the file appears to survive a
+  // successful delete.
+  //
+  // Declared before handleDelete (rather than after, as it was) because
+  // handleDelete's closure used setDeleted before its declaration ran.
+  // react-hooks/immutability flags exactly this: with hoisting-sensitive
+  // compiler transforms, a setter referenced above its declaration can bind
+  // to a stale instance instead of the one created by this render.
+  const [deleted, setDeleted] = useState(false);
+
   const handleDelete = useCallback(async () => {
     // Blossom addresses blobs by content hash. `file.id` is the activity-feed
     // event id and is NOT the blob address, so deleting by it would fail or
@@ -249,10 +260,6 @@ function FileRow({ file }: { file: FileMetadata }) {
     }
   }, [file]);
 
-  // Optimistically hide the row. The activity feed is relay-derived and will
-  // not re-render on its own, so without this the file appears to survive a
-  // successful delete.
-  const [deleted, setDeleted] = useState(false);
   if (deleted) return null;
 
   return (

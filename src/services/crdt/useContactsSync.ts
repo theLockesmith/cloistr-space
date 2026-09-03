@@ -166,7 +166,6 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
   // This is intentional - we want to trigger sync when connection is established
   useEffect(() => {
     if (autoSync && isReady && syncServiceRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       sync();
     }
   }, [autoSync, isReady, sync]);
@@ -317,11 +316,6 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
     if (autoImportedForRef.current === pubkey) return;
 
     autoImportedForRef.current = pubkey;
-    // The rule fires because importFromKind3 eventually calls setKind3Status.
-    // That happens in a promise continuation after a relay round trip, not
-    // synchronously during this effect, so it does not cause the re-render
-    // cascade the rule guards against. Same shape as the autoSync effect above.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void importFromKind3();
   }, [
     autoImportKind3,
