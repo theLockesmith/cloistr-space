@@ -32,7 +32,11 @@ const { fetchEvents, fromRelayUrls } = vi.hoisted(() => ({
 
 vi.mock('@nostr-dev-kit/ndk', () => {
   const MockNDK = vi.fn().mockImplementation(() => ({
-    pool: { on: vi.fn(), relays: new Map() },
+    // getRelay is part of the pool contract, not decoration: setConfiguredRelays
+    // puts the user's resolved relays INTO the pool, which is what makes a
+    // publish able to reach them. A pool double without it is not a pool.
+    pool: { on: vi.fn(), relays: new Map(), getRelay: vi.fn() },
+    outboxPool: { relays: new Map(), getRelay: vi.fn() },
     connect: vi.fn().mockResolvedValue(undefined),
     signer: undefined,
     subscribe: vi.fn(),
