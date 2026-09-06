@@ -18,6 +18,24 @@ import { defaultRelays } from '@/config/environment';
 import { RelayAuthPolicy } from './authPolicy';
 
 /**
+ * Public relay-list indexers, kept as a SUPPLEMENT to our own relays.
+ *
+ * These are NDK's own DEFAULT_OUTBOX_RELAYS. They are named here rather than
+ * left to the default because the default is the whole bug: NDK builds its
+ * outbox pool from `opts.outboxRelayUrls || DEFAULT_OUTBOX_RELAYS`, and Space
+ * never passed the option, so every "which relays does this author write to"
+ * lookup went to purplepag.es and nos.lol and NEVER to relay.cloistr.xyz --
+ * which is the only place Space had put the list, because the Profile relay
+ * editor publishes kind:10002 through the same routing it was meant to fix.
+ *
+ * They stay in the set. A user who arrives with an existing Nostr identity
+ * already indexed on purplepag.es is resolved from there today and must keep
+ * being resolved from there; dropping these would trade one broken half for
+ * the other.
+ */
+const PUBLIC_OUTBOX_INDEXERS = ['wss://purplepag.es/', 'wss://nos.lol/'] as const;
+
+/**
  * Relay connection status for UI
  */
 export interface RelayStatus {
@@ -48,6 +66,13 @@ export interface NdkServiceConfig {
    * Backs the single user-facing setting described in ded5c8fc.
    */
   relayAuthEnabled?: boolean;
+  /**
+   * Public relay-list indexers to consult IN ADDITION to our own relays.
+   * Defaults to PUBLIC_OUTBOX_INDEXERS. Configurable so a self-hoster can name
+   * indexers that actually carry their users, and so tests can point this at
+   * loopback instead of depending on a third party being up.
+   */
+  outboxIndexerUrls?: string[];
 }
 
 /**
@@ -159,6 +184,14 @@ export class NdkService {
 
     this.ndk = new NDK({
       explicitRelayUrls: relayUrls,
+      // Where the outbox model LOOKS UP relay lists, which is a different pool
+      // from the one it publishes through and defaults to two third-party
+      // indexers that have never seen a Cloistr user's list. Without our own
+      // relays here the lookup returns nothing for exactly the users who
+      // curated a relay list in our app, and NDK falls back to
+      // pool.permanentAndConnectedRelays() -- the single explicit relay. See
+      // PUBLIC_OUTBOX_INDEXERS.
+      outboxRelayUrls: [...relayUrls, ...(config.outboxIndexerUrls ?? PUBLIC_OUTBOX_INDEXERS)],
       // Both of these default to true in NDK and were turned off during the
       // Phase 1 scaffold (c9fb26b) with a note to enable them later. Leaving
       // them off meant every feed query went to explicitRelayUrls only, so a
@@ -247,10 +280,35 @@ export class NdkService {
    *
    * Does not reconnect on its own -- NDK keeps existing sockets and the caller
    * decides whether a reconnect is warranted.
+   *
+   * It DOES put the relays into both NDK pools, which is the half this method
+   * used to be missing. Updating configuredRelays, the auth tier and the status
+   * map changed bookkeeping only: nothing reached NDK, so a user whose resolved
+   * relays differed from explicitRelayUrls had them shown in the relay UI as
+   * configured while no publish or subscription could ever reach them.
    */
   setConfiguredRelays(urls: string[]): void {
     this.configuredRelays = new Set(urls.map((url) => NdkService.normalizeUrl(url)));
     this.authPolicy.setTrustedRelays(urls);
+
+    // The main pool decides where a publish actually goes. NDK's fallback when
+    // an outbox lookup yields nothing is pool.permanentAndConnectedRelays(),
+    // and that deliberately EXCLUDES temporary relays -- which is what
+    // NDKRelaySet.fromRelayUrls creates -- so relays pulled in for reads can
+    // never contribute to a write. Adding them permanently is what makes the
+    // fallback honest rather than a silent narrowing to one relay.
+    //
+    // The outbox pool decides where the lookup ASKS. A user who edits their
+    // relay list to somewhere we do not already query would otherwise have the
+    // new list written to a relay nobody looks at.
+    //
+    // connect=true here registers each relay for auto-connect; NDK only dials
+    // immediately if the pool is already active, so this is safe before
+    // connect() as well as after.
+    for (const url of urls) {
+      this.ndk.pool?.getRelay(url, true, false);
+      this.ndk.outboxPool?.getRelay(url, true, false);
+    }
 
     for (const url of urls) {
       const normalized = NdkService.normalizeUrl(url);
