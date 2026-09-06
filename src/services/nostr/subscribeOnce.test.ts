@@ -211,9 +211,36 @@ describe('subscribeOnce', () => {
     expect(third?.onEvent).toBeTypeOf('function');
   });
 
-  it('returns the subscription so the caller can stop it early', () => {
+  it('passes relaySet through, so overriding routing does not mean bypassing the helper', () => {
+    // The reason this parameter exists. Before it, a call site needing to pin
+    // a one-shot query to our own relays had to call subscribe() directly and
+    // hand-write closeOnEose, which is exactly the per-call-site judgement
+    // this file's header says caused the original bug. useGroups
+    // .fetchGroupMetadata was doing that.
     const subscribe = makeEagerSubscribe([]);
-    const sub = subscribeOnce(subscribe as never, [{ kinds: [1] }], {});
-    expect(sub.stop).toBeTypeOf('function');
+    const relaySet = { urls: ['wss://relay.cloistr.xyz'] };
+
+    subscribeOnce(subscribe as never, [{ kinds: [39000] }], {}, { relaySet } as never);
+
+    const opts = subscribe.mock.calls[0][1] as { relaySet?: unknown };
+    expect(opts.relaySet).toBe(relaySet);
+  });
+
+  it('still forces closeOnEose even when opts try to unset it', () => {
+    // The type signature says Omit<StreamOptions, 'closeOnEose'>, so this is
+    // not reachable from typed code. It is asserted anyway because the
+    // guarantee now depends on spread ORDER inside the helper, and reordering
+    // two object literals is a silent, plausible edit.
+    const subscribe = makeEagerSubscribe([]);
+
+    subscribeOnce(
+      subscribe as never,
+      [{ kinds: [39000] }],
+      {},
+      { closeOnEose: false } as never
+    );
+
+    const opts = subscribe.mock.calls[0][1] as { closeOnEose?: boolean };
+    expect(opts.closeOnEose).toBe(true);
   });
 });

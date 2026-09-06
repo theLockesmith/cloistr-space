@@ -49,7 +49,7 @@ interface UseGroupMembersReturn {
  * Hook for fetching members of a group
  */
 export function useGroupMembers(groupId: string): UseGroupMembersReturn {
-  const { fetchEvents, isConnected } = useNdk();
+  const { fetchFromOwnRelays, isConnected } = useNdk();
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,10 +64,10 @@ export function useGroupMembers(groupId: string): UseGroupMembersReturn {
   }, []);
 
   useEffect(() => {
-    if (!fetchEvents || !isConnected || !groupId) return;
+    if (!fetchFromOwnRelays || !isConnected || !groupId) return;
 
     // Capture for closure
-    const doFetch = fetchEvents;
+    const doFetch = fetchFromOwnRelays;
     let cancelled = false;
 
     async function loadMembers() {
@@ -172,7 +172,7 @@ export function useGroupMembers(groupId: string): UseGroupMembersReturn {
     return () => {
       cancelled = true;
     };
-  }, [fetchEvents, isConnected, groupId, refreshKey]);
+  }, [fetchFromOwnRelays, isConnected, groupId, refreshKey]);
 
   return {
     members,

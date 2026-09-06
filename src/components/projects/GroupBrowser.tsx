@@ -6,6 +6,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useGroupActions } from '@/services/groups/useGroupActions';
+import { extractOwnerPrefix } from '@/services/groups/ownership';
 import { GROUP_METADATA_KIND, type Group } from '@/types/groups';
 import type { NDKEvent } from '@nostr-dev-kit/ndk';
 
@@ -15,7 +16,7 @@ interface GroupBrowserProps {
 }
 
 export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
-  const { fetchEvents, isConnected } = useNdk();
+  const { fetchFromOwnRelays, isConnected } = useNdk();
   const { joinGroup, canAct } = useGroupActions();
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,10 +26,11 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
 
   // Fetch public groups
   useEffect(() => {
-    if (!fetchEvents || !isConnected) return;
+    if (!fetchFromOwnRelays || !isConnected) return;
 
     // Capture reference for TypeScript narrowing
-    const doFetch = fetchEvents;
+    // Pin to own relays: kind:39000 lives on the group's relay. See relayRouting.ts.
+    const doFetch = fetchFromOwnRelays;
     let cancelled = false;
 
     async function loadGroups() {
@@ -51,6 +53,18 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
           const isPublic = event.tags.some((t) => t[0] === 'public');
 
           if (!identifier || !name || !isPublic) return;
+
+          // Author filter, same check the useGroups sidebar applies and for a
+          // stronger reason: this is the PUBLIC directory. A pubkey-aware
+          // identifier embeds its creator's pubkey prefix, so an event whose
+          // author does not match is someone else publishing under that
+          // group's identity. Without this, anyone can publish a kind:39000
+          // carrying another group's `d` tag plus a `public` tag and list a
+          // private group here under a name, description and picture they
+          // choose. Legacy identifiers carry no prefix and so no anchor to
+          // verify against; they are accepted unconditionally, as in useGroups.
+          const ownerPrefix = extractOwnerPrefix(identifier);
+          if (ownerPrefix && !event.pubkey.startsWith(ownerPrefix)) return;
 
           publicGroups.push({
             id: event.id ?? '',
@@ -85,7 +99,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
     return () => {
       cancelled = true;
     };
-  }, [fetchEvents, isConnected]);
+  }, [fetchFromOwnRelays, isConnected]);
 
   const handleJoin = useCallback(async (group: Group) => {
     if (!canAct || joiningId) return;

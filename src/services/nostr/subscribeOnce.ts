@@ -69,13 +69,18 @@ export type SubscribeFn = (
  *
  * closeOnEose is forced here rather than left to the caller: a one-shot query
  * that stays open is a leak, and every caller wanting this helper wants that.
+ * `Omit` is what keeps that forced while still letting a caller pass relaySet:
+ * without the parameter, a call site needing to override relay routing has to
+ * bypass this helper and hand-write closeOnEose, which is the per-call-site
+ * judgement the file header says caused the original bug.
  */
 export function subscribeOnce(
   subscribe: SubscribeFn,
   filters: NDKFilter[],
-  handlers: OnceHandlers
+  handlers: OnceHandlers,
+  opts: Omit<StreamOptions, 'closeOnEose'> = {}
 ): NDKSubscription {
-  return subscribe(filters, { closeOnEose: true }, handlers);
+  return subscribe(filters, { ...opts, closeOnEose: true }, handlers);
 }
 
 /**

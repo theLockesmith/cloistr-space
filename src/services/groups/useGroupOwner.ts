@@ -55,7 +55,7 @@ export interface UseGroupOwnerReturn {
 }
 
 export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
-  const { fetchEvents, createEvent, publish, isConnected } = useNdk();
+  const { fetchFromOwnRelays, createEvent, publish, isConnected } = useNdk();
   const { pubkey } = useAuthStore();
 
   const [ownership, setOwnership] = useState<OwnershipResolution | null>(null);
@@ -66,20 +66,20 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
 
   // Promise-chained rather than async/await: every setState call here needs
   // to run from inside a .then()/.catch()/.finally() callback (a genuine
-  // response to fetchEvents settling), not synchronously in loadOwnership's
+  // response to fetchFromOwnRelays settling), not synchronously in loadOwnership's
   // own body -- react-hooks/set-state-in-effect flags the latter even when
   // it is behind an await, since the effect below still calls this function
   // directly and, statically, that is indistinguishable from an unconditional
   // render-triggering update.
   const loadOwnership = useCallback(() => {
-    if (!fetchEvents || !isConnected) {
+    if (!fetchFromOwnRelays || !isConnected) {
       return Promise.resolve().then(() => setIsLoading(false));
     }
 
     return Promise.resolve()
       .then(() => setIsLoading(true))
       .then(() =>
-        fetchEvents({
+        fetchFromOwnRelays({
           kinds: [GROUP_METADATA_KIND as number],
           '#d': [groupId],
         })
@@ -94,7 +94,7 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
         // owner-gated is offered, which is the safe state.
       })
       .finally(() => setIsLoading(false));
-  }, [fetchEvents, isConnected, groupId]);
+  }, [fetchFromOwnRelays, isConnected, groupId]);
 
   useEffect(() => {
     void loadOwnership();
@@ -109,7 +109,7 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
 
   const transferOwnership = useCallback(
     async (successorPubkey: string) => {
-      if (!fetchEvents || !createEvent || !publish) {
+      if (!fetchFromOwnRelays || !createEvent || !publish) {
         setError('Not connected');
         return;
       }
@@ -123,7 +123,7 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
         // possible if the chain changed elsewhere since this hook last ran.
         // Same reasoning as readAdmins: a failed or changed read must not
         // become a publish.
-        const events = await fetchEvents({
+        const events = await fetchFromOwnRelays({
           kinds: [GROUP_METADATA_KIND as number],
           '#d': [groupId],
         });
@@ -172,7 +172,7 @@ export function useGroupOwner(groupId: string): UseGroupOwnerReturn {
         setIsBusy(false);
       }
     },
-    [fetchEvents, createEvent, publish, groupId, pubkey, loadOwnership]
+    [fetchFromOwnRelays, createEvent, publish, groupId, pubkey, loadOwnership]
   );
 
   return {
