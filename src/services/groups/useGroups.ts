@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeOnce, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Group, GroupMembership, AdminPermission } from '@/types/groups';
 import { GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND } from '@/types/groups';
@@ -147,7 +147,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     // always in our configured set. Without this, NDK routes to
     // explicitRelayUrls by default (no authors in filter), which happens to
     // be the same relay today but is not guaranteed. See relayRouting.ts.
-    subscribe([filter], { closeOnEose: true, relaySet: service?.getOwnRelaySet() }, {
+    subscribeOnce(subscribe, [filter], {
       onEvent: (event: NDKEvent) => {
         const group = parseGroupEvent(event);
         if (group) {
@@ -155,7 +155,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
           processGroups();
         }
       },
-    });
+    }, { relaySet: service?.getOwnRelaySet() });
   }, [subscribe, service, isConnected, processGroups]);
 
   const startSubscription = useCallback(() => {
