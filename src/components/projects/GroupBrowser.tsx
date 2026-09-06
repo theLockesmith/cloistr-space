@@ -15,7 +15,7 @@ interface GroupBrowserProps {
 }
 
 export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
-  const { fetchEvents, isConnected } = useNdk();
+  const { fetchFromOwnRelays, isConnected } = useNdk();
   const { joinGroup, canAct } = useGroupActions();
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -25,10 +25,11 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
 
   // Fetch public groups
   useEffect(() => {
-    if (!fetchEvents || !isConnected) return;
+    if (!fetchFromOwnRelays || !isConnected) return;
 
     // Capture reference for TypeScript narrowing
-    const doFetch = fetchEvents;
+    // Pin to own relays: kind:39000 lives on the group's relay. See relayRouting.ts.
+    const doFetch = fetchFromOwnRelays;
     let cancelled = false;
 
     async function loadGroups() {
@@ -85,7 +86,7 @@ export function GroupBrowser({ onJoinGroup, onClose }: GroupBrowserProps) {
     return () => {
       cancelled = true;
     };
-  }, [fetchEvents, isConnected]);
+  }, [fetchFromOwnRelays, isConnected]);
 
   const handleJoin = useCallback(async (group: Group) => {
     if (!canAct || joiningId) return;

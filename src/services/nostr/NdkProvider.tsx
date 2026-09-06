@@ -37,6 +37,16 @@ interface NdkContextValue {
   subscribe: NdkService['subscribe'] | null;
   /** Fetch events */
   fetchEvents: NdkService['fetchEvents'] | null;
+  /**
+   * Fetch from the user's own relays only, bypassing outbox routing.
+   *
+   * For kinds that live on OUR relay by construction (NIP-29 groups, NIP-0A
+   * contacts, calendar, tasks, file metadata). Without this, NDK routes a
+   * filter carrying `authors` by the author's relay list, which can scatter
+   * the query across relays that have never seen our kinds. See
+   * services/nostr/relayRouting.ts for the per-kind routing manifest.
+   */
+  fetchFromOwnRelays: NdkService['fetchFromOwnRelays'] | null;
   /** Create a new event */
   createEvent: () => NDKEvent | null;
   /** Publish an event */
@@ -217,6 +227,17 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
     []
   );
 
+  const fetchFromOwnRelays = useCallback<NdkService['fetchFromOwnRelays']>(
+    async (filters) => {
+      const service = serviceRef.current;
+      if (!service) {
+        throw new Error('NDK not initialized');
+      }
+      return service.fetchFromOwnRelays(filters);
+    },
+    []
+  );
+
   const createEvent = useCallback(() => {
     const service = serviceRef.current;
     if (!service) {
@@ -245,10 +266,11 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
       reconnect,
       subscribe: service ? subscribe : null,
       fetchEvents: service ? fetchEvents : null,
+      fetchFromOwnRelays: service ? fetchFromOwnRelays : null,
       createEvent,
       publish: service ? publish : null,
     }),
-    [service, isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, createEvent, publish]
+    [service, isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, fetchFromOwnRelays, createEvent, publish]
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;

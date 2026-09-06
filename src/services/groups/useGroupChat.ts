@@ -60,7 +60,7 @@ interface UseGroupChatReturn {
  */
 export function useGroupChat(groupId: string, options: UseGroupChatOptions = {}): UseGroupChatReturn {
   const { limit = MAX_MESSAGES, autoSubscribe = true } = options;
-  const { subscribe, publish, createEvent, isConnected } = useNdk();
+  const { subscribe, service, publish, createEvent, isConnected } = useNdk();
   const { pubkey } = useAuthStore();
 
   const [messages, setMessages] = useState<GroupMessage[]>([]);
@@ -98,6 +98,9 @@ export function useGroupChat(groupId: string, options: UseGroupChatOptions = {})
       // why this was previously classified as safe and left alone while the
       // group-listing bug was chased. It is the same defect, quiet instead of
       // fatal.
+      // Pin to own relays: kind:9 lives on the group's relay, which is always
+      // in our configured set. Without this, NDK sends the query to
+      // explicitRelayUrls (no authors in filter). See relayRouting.ts.
       const subscription = subscribeStream(subscribe, [filter], {
         onEvent: (event: NDKEvent) => {
         const message = parseMessageEvent(event, groupId);
@@ -116,7 +119,7 @@ export function useGroupChat(groupId: string, options: UseGroupChatOptions = {})
         onEose: () => {
           setIsLoading(false);
         },
-      });
+      }, { closeOnEose: false, relaySet: service?.getOwnRelaySet() });
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),
@@ -125,7 +128,7 @@ export function useGroupChat(groupId: string, options: UseGroupChatOptions = {})
       setError(err instanceof Error ? err.message : 'Failed to fetch messages');
       setIsLoading(false);
     }
-  }, [subscribe, isConnected, groupId, limit]);
+  }, [subscribe, service, isConnected, groupId, limit]);
 
   // Send a message to the group
   const sendMessage = useCallback(async (content: string, replyTo?: string) => {

@@ -56,7 +56,7 @@ interface UseGroupAdminReturn {
 }
 
 export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
-  const { fetchEvents, createEvent, publish, isConnected } = useNdk();
+  const { fetchFromOwnRelays, createEvent, publish, isConnected } = useNdk();
 
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
    * and the caller would then publish a list that removes everyone.
    */
   const readMembers = useCallback(async (): Promise<MemberRead> => {
-    if (!fetchEvents || !isConnected) return { ok: false, members: [] };
+    if (!fetchFromOwnRelays || !isConnected) return { ok: false, members: [] };
 
     try {
       // Metadata and admins come along because the trusted-writer check needs
@@ -79,7 +79,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
       // author filter matters more here than on the display path: reading an
       // attacker's kind:39002 and republishing it under the owner's key turns
       // an injection anyone could ignore into one signed by the owner.
-      const events = await fetchEvents({
+      const events = await fetchFromOwnRelays({
         kinds: [GROUP_METADATA_KIND as number, GROUP_ADMINS_KIND as number, GROUP_MEMBERS_KIND as number],
         '#d': [groupId],
       });
@@ -115,7 +115,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
     } catch {
       return { ok: false, members: [] };
     }
-  }, [fetchEvents, isConnected, groupId]);
+  }, [fetchFromOwnRelays, isConnected, groupId]);
 
   const publishMembers = useCallback(
     async (members: string[]) => {
@@ -175,10 +175,10 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
     ok: boolean;
     entries: { pubkey: string; permissions: AdminPermission[] }[];
   }> => {
-    if (!fetchEvents || !isConnected) return { ok: false, entries: [] };
+    if (!fetchFromOwnRelays || !isConnected) return { ok: false, entries: [] };
 
     try {
-      const events = await fetchEvents({
+      const events = await fetchFromOwnRelays({
         kinds: [GROUP_METADATA_KIND as number, GROUP_ADMINS_KIND as number],
         '#d': [groupId],
       });
@@ -207,7 +207,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
     } catch {
       return { ok: false, entries: [] };
     }
-  }, [fetchEvents, isConnected, groupId]);
+  }, [fetchFromOwnRelays, isConnected, groupId]);
 
   /**
    * Set one person's permissions, preserving everyone else's.

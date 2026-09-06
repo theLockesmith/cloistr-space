@@ -5,10 +5,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, subscribeOnce, subscribeStream, type NDKEvent } from '@/services/nostr';
+import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { Group, GroupMembership, AdminPermission } from '@/types/groups';
 import { GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND } from '@/types/groups';
+import { extractOwnerPrefix } from './ownership';
 
 /** Parse group metadata from kind:39000 event */
 function parseGroupEvent(event: NDKEvent): Group | null {
@@ -76,7 +77,7 @@ interface UseGroupsReturn {
  */
 export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
   const { autoSubscribe = true } = options;
-  const { subscribe, isConnected } = useNdk();
+  const { subscribe, service, isConnected } = useNdk();
   const { pubkey, isAuthenticated } = useAuthStore();
 
   const [groups, setGroups] = useState<GroupMembership[]>([]);
@@ -142,7 +143,11 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     // groupMetadataRef, so a group with no metadata is dropped: the membership
     // was known and discarded for want of a name. Create appeared to work
     // because the publish genuinely did.
-    subscribeOnce(subscribe, [filter], {
+    // Pin to own relays: kind:39000 lives on the group's relay, which is
+    // always in our configured set. Without this, NDK routes to
+    // explicitRelayUrls by default (no authors in filter), which happens to
+    // be the same relay today but is not guaranteed. See relayRouting.ts.
+    subscribe([filter], { closeOnEose: true, relaySet: service?.getOwnRelaySet() }, {
       onEvent: (event: NDKEvent) => {
         const group = parseGroupEvent(event);
         if (group) {
@@ -151,7 +156,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
         }
       },
     });
-  }, [subscribe, isConnected, processGroups]);
+  }, [subscribe, service, isConnected, processGroups]);
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
@@ -194,10 +199,25 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
       // only ever called from inside this handler, the metadata query never ran
       // either -- so fixing that query while this one still lost its events
       // produced no observable change at all.
+      // Pin to own relays: NIP-29 membership lists live on the group's relay.
       const subscription = subscribeStream(subscribe, filters, {
         onEvent: (event: NDKEvent) => {
         const dTag = event.tags.find((t) => t[0] === 'd')?.[1];
         if (!dTag) return;
+
+        // Author filter: for pubkey-aware identifiers, accept events only
+        // from the group owner. Without this, anyone can publish a
+        // kind:39002 tagging a victim and the group appears in their
+        // sidebar. Legacy identifiers (no embedded pubkey prefix) are
+        // accepted unconditionally because there is no anchor to verify.
+        //
+        // This is a lighter check than the full trustedWriters resolution
+        // used in useGroupMembers/useGroupAdmin. The sidebar is display-
+        // only (no write amplification), so owner-only filtering is
+        // sufficient: it catches the injection attack, and the workspace
+        // components re-resolve with full trust chains when clicked.
+        const ownerPrefix = extractOwnerPrefix(dTag);
+        if (ownerPrefix && !event.pubkey.startsWith(ownerPrefix)) return;
 
         if (event.kind === GROUP_MEMBERS_KIND) {
           // Track member lists
@@ -240,7 +260,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
         onEose: () => {
           setIsLoading(false);
         },
-      });
+      }, { closeOnEose: false, relaySet: service?.getOwnRelaySet() });
 
       subscriptionRef.current = {
         unsubscribe: () => subscription.stop(),
@@ -249,7 +269,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
       setError(err instanceof Error ? err.message : 'Failed to fetch groups');
       setIsLoading(false);
     }
-  }, [subscribe, isConnected, pubkey, processGroups, fetchGroupMetadata]);
+  }, [subscribe, service, isConnected, pubkey, processGroups, fetchGroupMetadata]);
 
   // Auto-subscribe on mount - use startSubscription directly but include it in deps
   // The subscription is idempotent (cleans up previous before starting new)
