@@ -150,10 +150,20 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
     subscribeOnce(subscribe, [filter], {
       onEvent: (event: NDKEvent) => {
         const group = parseGroupEvent(event);
-        if (group) {
-          groupMetadataRef.current.set(groupId, group);
-          processGroups();
-        }
+        if (!group) return;
+
+        // Author filter: for pubkey-aware identifiers, accept kind:39000
+        // only from the group's owner. Without this, anyone can publish a
+        // kind:39000 with a matching d-tag and spoof the group's name,
+        // description, and picture in the sidebar. Legacy identifiers (no
+        // embedded prefix) are accepted unconditionally because there is
+        // no anchor to verify. Same check as GroupBrowser and the
+        // membership subscription above.
+        const ownerPrefix = extractOwnerPrefix(groupId);
+        if (ownerPrefix && !event.pubkey.startsWith(ownerPrefix)) return;
+
+        groupMetadataRef.current.set(groupId, group);
+        processGroups();
       },
     }, { relaySet: service?.getOwnRelaySet() });
   }, [subscribe, service, isConnected, processGroups]);
