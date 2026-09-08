@@ -9,6 +9,8 @@ import userEvent from '@testing-library/user-event';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GroupMembers } from './GroupMembers';
 import { useGroupMembers, type GroupMember } from '@/services/groups/useGroupMembers';
+import { useGroupOwner } from '@/services/groups/useGroupOwner';
+import { useAuthStore } from '@/stores/authStore';
 import type { AdminPermission } from '@/types/groups';
 
 // Member names are <Link>s to the profile route now, so every render needs a
@@ -39,10 +41,19 @@ vi.mock('@/services/groups/useGroupAdmin', () => ({
   }),
 }));
 
+// authStore is stubbed: default is unauthenticated (null pubkey).
+// Tests that need a logged-in user override via vi.mocked(useAuthStore).
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: vi.fn(() => ({
+    pubkey: null,
+    isAuthenticated: false,
+  })),
+}));
+
 // useGroupOwner is stubbed: no ownership loaded, so no Owner badge appears in
 // these tests. Ownership rendering is covered in the ownership.test.ts unit tests.
 vi.mock('@/services/groups/useGroupOwner', () => ({
-  useGroupOwner: () => ({
+  useGroupOwner: vi.fn(() => ({
     ownership: null,
     isLoading: false,
     isOwner: false,
@@ -51,8 +62,11 @@ vi.mock('@/services/groups/useGroupOwner', () => ({
     error: null,
     notice: null,
     dismiss: vi.fn(),
-  }),
+  })),
 }));
+
+const mockUseGroupOwner = vi.mocked(useGroupOwner);
+const mockUseAuthStore = vi.mocked(useAuthStore);
 
 const mockUseGroupMembers = vi.mocked(useGroupMembers);
 
@@ -648,6 +662,111 @@ describe('GroupMembers', () => {
       expect(screen.getByText('Add User')).toBeInTheDocument();
       expect(screen.getByText('Edit Metadata')).toBeInTheDocument();
       expect(screen.getByText('Delete Event')).toBeInTheDocument();
+    });
+  });
+
+  describe('Permission editor gating (owner-only for resolved groups)', () => {
+    const OWNER_PUBKEY = 'owner' + '0'.repeat(60);
+    const ADMIN_PUBKEY = 'admin' + '0'.repeat(60);
+
+    const ownerReturn = {
+      ownership: { status: 'owner' as const, ownerPubkey: OWNER_PUBKEY, fromTransfer: false },
+      isLoading: false,
+      isOwner: true,
+      transferOwnership: vi.fn(),
+      isBusy: false,
+      error: null,
+      notice: null,
+      dismiss: vi.fn(),
+    };
+
+    const adminMemberWithPermGrant: GroupMember = {
+      pubkey: ADMIN_PUBKEY,
+      isAdmin: true,
+      permissions: ['add-user', 'remove-user', 'add-permission', 'remove-permission'] as AdminPermission[],
+      profile: { name: 'Delegated Admin', displayName: 'Admin' },
+    };
+
+    const ownerMember: GroupMember = {
+      pubkey: OWNER_PUBKEY,
+      isAdmin: true,
+      permissions: ['add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'] as AdminPermission[],
+      profile: { name: 'Owner', displayName: 'Owner' },
+    };
+
+    it('shows Permissions button to the owner on a resolved group', () => {
+      mockUseGroupOwner.mockReturnValue(ownerReturn);
+      mockUseAuthStore.mockReturnValue({ pubkey: OWNER_PUBKEY, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [ownerMember, adminMemberWithPermGrant],
+      });
+
+      render(<GroupMembers groupId="test-group" />);
+
+      const permButtons = screen.getAllByText('Permissions');
+      expect(permButtons.length).toBeGreaterThan(0);
+    });
+
+    it('hides Permissions button from a delegated admin on a resolved group', () => {
+      // The admin has add-permission and remove-permission, but the group is
+      // resolved and trustedWriters.ts reads only owner-signed kind:39001.
+      // Showing the button would let them publish a change nobody reads back.
+      mockUseGroupOwner.mockReturnValue(ownerReturn);
+      mockUseAuthStore.mockReturnValue({ pubkey: ADMIN_PUBKEY, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [ownerMember, adminMemberWithPermGrant],
+      });
+
+      render(<GroupMembers groupId="test-group" />);
+
+      expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
+    });
+
+    it('shows Permissions button to a delegated admin on a legacy group', () => {
+      // Legacy groups have no owner anchor, so the read path accepts any
+      // signer. Delegated edits work there. The button should stay visible.
+      mockUseGroupOwner.mockReturnValue({
+        ...ownerReturn,
+        ownership: null,
+        isOwner: false,
+      });
+      mockUseAuthStore.mockReturnValue({ pubkey: ADMIN_PUBKEY, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
+
+      // The member list must include the current user with permission grants
+      // for the legacy-path gate to pass.
+      const meAsAdmin: GroupMember = {
+        pubkey: ADMIN_PUBKEY,
+        isAdmin: true,
+        permissions: ['add-permission', 'remove-permission'] as AdminPermission[],
+        profile: { name: 'Me', displayName: 'Me' },
+      };
+
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [meAsAdmin, mockRegularMember],
+      });
+
+      render(<GroupMembers groupId="legacy-group" />);
+
+      const permButtons = screen.getAllByText('Permissions');
+      expect(permButtons.length).toBeGreaterThan(0);
+    });
+
+    afterEach(() => {
+      // Restore the default mocks so other tests are not affected
+      mockUseGroupOwner.mockReturnValue({
+        ownership: null,
+        isLoading: false,
+        isOwner: false,
+        transferOwnership: vi.fn(),
+        isBusy: false,
+        error: null,
+        notice: null,
+        dismiss: vi.fn(),
+      });
+      mockUseAuthStore.mockReturnValue({ pubkey: null, isAuthenticated: false } as ReturnType<typeof useAuthStore>);
     });
   });
 });
