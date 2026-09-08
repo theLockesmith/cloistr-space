@@ -192,6 +192,23 @@ export function useProfile(): UseProfileReturn {
       try {
         const tags = buildRelayListTags(entries);
 
+        // Add the declared relays to the NDK pools BEFORE publishing.
+        // setConfiguredRelays puts them in both the main and outbox pools and
+        // marks them tier 1 for auth (it calls setTrustedRelays internally).
+        // Without this, a new user whose pool contains only our default relay
+        // publishes the kind:10002 to that single relay alone. If that relay
+        // refuses (whitelist), nothing is stored; even if it accepts, the user's
+        // declared relays are never reachable for subsequent operations, and the
+        // next resolution finds nothing, creating a permanent bootstrap deadlock.
+        //
+        // This means a failed publish leaves the pools holding relays the
+        // persisted list does not. That is deliberate: a retry against the
+        // expanded pool can succeed, whereas restoring the old pool would
+        // reproduce the deadlock. setRelays (the persisted state) runs only
+        // after publish succeeds, so the two converge on success.
+        const urls = entries.map((e) => e.url);
+        service?.setConfiguredRelays(urls);
+
         const event = createEvent();
         if (!event) throw new Error('Could not create event');
 
@@ -202,12 +219,6 @@ export function useProfile(): UseProfileReturn {
         await publish(event);
 
         setRelays(entries);
-
-        // The relays the user just declared are theirs, so they become tier 1
-        // for auth: always authenticated, and exempt from the auth setting.
-        // Without this the app would keep treating a newly added personal relay
-        // as a stranger until reload.
-        service?.getAuthPolicy().setTrustedRelays(entries.map((e) => e.url));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save your relay list');
         throw err;
