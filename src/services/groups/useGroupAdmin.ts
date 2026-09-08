@@ -21,6 +21,7 @@
 
 import { useCallback, useState } from 'react';
 import { useNdk } from '@/services/nostr';
+import { useAuthStore } from '@/stores/authStore';
 import {
   GROUP_ADMINS_KIND,
   GROUP_MEMBERS_KIND,
@@ -57,6 +58,7 @@ interface UseGroupAdminReturn {
 
 export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
   const { fetchFromOwnRelays, createEvent, publish, isConnected } = useNdk();
+  const { pubkey: myPubkey } = useAuthStore();
 
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +176,15 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
   const readAdmins = useCallback(async (): Promise<{
     ok: boolean;
     entries: { pubkey: string; permissions: AdminPermission[] }[];
+    /**
+     * For pubkey-aware groups, the owner derived from the d-tag. Undefined for
+     * legacy groups where no owner can be established.
+     *
+     * setPermissions uses this to refuse a publish from a non-owner: the read
+     * path (trustedWriters.ts) accepts only owner-signed kind:39001, so a
+     * non-owner's publish would be silently ignored by every reader.
+     */
+    ownerPubkey?: string;
   }> => {
     if (!fetchFromOwnRelays || !isConnected) return { ok: false, entries: [] };
 
@@ -188,7 +199,9 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
 
       // Resolved groups take the owner-signed list only. An attacker's
       // kind:39001 naming themselves an admin is not in it.
-      if (writers.status === 'resolved') return { ok: true, entries: writers.admins };
+      if (writers.status === 'resolved') {
+        return { ok: true, entries: writers.admins, ownerPubkey: writers.owner };
+      }
 
       // Legacy identifier: unchanged, for the reason given in readMembers.
       const latest = all
@@ -256,7 +269,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
         setIsBusy(false);
       }
     },
-    [createEvent, publish, groupId, readAdmins]
+    [createEvent, publish, groupId, readAdmins, myPubkey]
   );
 
   const addMember = useCallback(

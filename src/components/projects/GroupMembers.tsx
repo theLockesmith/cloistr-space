@@ -51,8 +51,17 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
 
   const canAddMember = can(myPermissions, 'add-user');
   const canRemoveMember = can(myPermissions, 'remove-user');
-  const canSetPermissions =
-    can(myPermissions, 'add-permission') || can(myPermissions, 'remove-permission');
+  // For pubkey-aware groups (ownerPubkey is resolved), only the owner can edit
+  // permissions. The read path (trustedWriters.ts) accepts only owner-signed
+  // kind:39001, so a delegated admin's edit would be published and silently
+  // ignored by every reader. Showing the button to someone whose change will
+  // not stick is the bug this fixes.
+  //
+  // For legacy groups (ownerPubkey undefined), keep the permission-based gate:
+  // the read path accepts any signer, so delegated edits actually work.
+  const canSetPermissions = ownerPubkey
+    ? pubkey === ownerPubkey
+    : can(myPermissions, 'add-permission') || can(myPermissions, 'remove-permission');
 
   const [editing, setEditing] = useState<string | null>(null);
 
