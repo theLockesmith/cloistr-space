@@ -200,6 +200,12 @@ export function useProfile(): UseProfileReturn {
         // refuses (whitelist), nothing is stored; even if it accepts, the user's
         // declared relays are never reachable for subsequent operations, and the
         // next resolution finds nothing, creating a permanent bootstrap deadlock.
+        //
+        // This means a failed publish leaves the pools holding relays the
+        // persisted list does not. That is deliberate: a retry against the
+        // expanded pool can succeed, whereas restoring the old pool would
+        // reproduce the deadlock. setRelays (the persisted state) runs only
+        // after publish succeeds, so the two converge on success.
         const urls = entries.map((e) => e.url);
         service?.setConfiguredRelays(urls);
 
