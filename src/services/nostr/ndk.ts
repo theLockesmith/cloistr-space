@@ -5,6 +5,7 @@
 
 import NDK, {
   NDKEvent,
+  NDKPublishError,
   NDKRelaySet,
   NDKSigner,
   NDKUser,
@@ -533,10 +534,36 @@ export class NdkService {
   }
 
   /**
-   * Publish an event to relays
+   * Publish an event to relays.
+   *
+   * NDKPublishError.message is always the generic "Not enough relays received
+   * the event", even when the relay sent a specific reason like "restricted:
+   * your pubkey is not on the whitelist". Every catch block in the app reads
+   * `.message`, so the user never sees the real reason. Unwrap here so all
+   * callers benefit without needing to know about NDKPublishError.
    */
   async publish(event: NDKEvent, relaySet?: NDKRelaySet): Promise<Set<NDKRelay>> {
-    return event.publish(relaySet);
+    try {
+      return await event.publish(relaySet);
+    } catch (err) {
+      if (err instanceof NDKPublishError && err.errors.size > 0) {
+        // Collect the relay-specific reasons. Each entry in .errors is a
+        // Map<NDKRelay, Error>. Dedupe identical messages (common when every
+        // relay rejects for the same policy reason).
+        const reasons = new Set<string>();
+        for (const [, relayErr] of err.errors) {
+          const msg = relayErr?.message ?? String(relayErr);
+          if (msg) reasons.add(msg);
+        }
+
+        if (reasons.size > 0) {
+          const unwrapped = new Error([...reasons].join('; '));
+          unwrapped.cause = err;
+          throw unwrapped;
+        }
+      }
+      throw err;
+    }
   }
 
   /**
