@@ -90,6 +90,24 @@ export function subscribeOnce(
  * that decides whether the opening burst matters. A group-membership
  * subscription wants to stay open so later joins arrive, and equally cannot
  * afford to miss the members who joined before it opened.
+ *
+ * groupable is forced to false. NDK groups subscriptions whose filters share
+ * the same key names (not values) into a single REQ, delaying them up to 250ms
+ * and merging the filters. filterFingerprint (NDK 2.18.1 dist/index.mjs:1542)
+ * keys on Object.keys(filter).sort().join('-'), so {kinds:[9], '#h':[g]}
+ * and {kinds:[1111], '#h':[g]} produce the identical fingerprint '#h-kinds-limit'.
+ * When three views mount in the same groupable window, the first subscription
+ * to reach RUNNING status owns the bucket; later arrivals are registered in
+ * NDK's bookkeeping but never get a REQ on the wire (addItem case 3: RUNNING
+ * just breaks). The result is that only one of chat/threads/files actually
+ * queries the relay per mount cycle. Forcing groupable:false gives each stream
+ * its own REQ regardless of filter shape overlap.
+ *
+ * Trade-off: more concurrent subscriptions per connection. Our relay has no
+ * per-connection subscription limit (NIP-11 limitation object is empty). A
+ * third-party relay that does cap concurrent subscriptions could reject the
+ * extras — if that ever matters, the fix is per-relay negotiation, not
+ * re-enabling grouping (which silently drops data).
  */
 export function subscribeStream(
   subscribe: SubscribeFn,
@@ -97,5 +115,5 @@ export function subscribeStream(
   handlers: OnceHandlers,
   opts: StreamOptions = { closeOnEose: false }
 ): NDKSubscription {
-  return subscribe(filters, opts, handlers);
+  return subscribe(filters, { ...opts, groupable: false }, handlers);
 }

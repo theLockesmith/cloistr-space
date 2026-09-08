@@ -138,6 +138,35 @@ describe('the historical-streaming case, which the old rule called safe', () => 
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('subscribeStream forces groupable:false so identical filter shapes get separate REQs', () => {
+    // NDK's filterFingerprint keys on Object.keys(filter).sort().join('-'),
+    // ignoring values. So {kinds:[9], '#h':['g1']} and {kinds:[1111], '#h':['g1']}
+    // produce the identical fingerprint '#h-kinds-limit'. When both land in the
+    // 250ms groupable window, the second never gets a REQ on the wire — it is
+    // registered in NDK's bookkeeping (addItem) but the RUNNING status branch
+    // just breaks without executing.
+    //
+    // Forcing groupable:false on every subscribeStream call is the fix. This
+    // test pins that the option reaches subscribe().
+    const subscribe = makeEagerSubscribe([]);
+
+    subscribeStream(subscribe as never, [{ kinds: [9] }], {});
+    const opts = subscribe.mock.calls[0][1] as { groupable?: boolean };
+    expect(opts.groupable).toBe(false);
+  });
+
+  it('subscribeStream forces groupable:false even when caller passes groupable:true', () => {
+    // A caller should not be able to re-enable grouping on a long-lived
+    // subscription, because the failure is silent and timing-dependent — it
+    // only manifests when two views with the same filter key shape mount in
+    // the same 250ms window.
+    const subscribe = makeEagerSubscribe([]);
+
+    subscribeStream(subscribe as never, [{ kinds: [9] }], {}, { closeOnEose: false, groupable: true });
+    const opts = subscribe.mock.calls[0][1] as { groupable?: boolean };
+    expect(opts.groupable).toBe(false);
+  });
+
   it('subscribeStream leaves closeOnEose to the caller', () => {
     // The distinction that matters is historical-versus-ongoing, not
     // closeOnEose — so the helper must not decide closeOnEose for you the way
