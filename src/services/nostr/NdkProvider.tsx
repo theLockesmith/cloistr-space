@@ -21,6 +21,7 @@ import {
   type NdkServiceConfig,
   NDKEvent,
 } from './ndk';
+import { loadTiming } from '@/services/performance';
 
 interface NdkContextValue {
   /** NDK service instance */
@@ -197,7 +198,9 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
   }, []);
 
   const isConnected = useMemo(() => {
-    return Array.from(relayStatuses.values()).some((s) => s.status === 'connected');
+    const connected = Array.from(relayStatuses.values()).some((s) => s.status === 'connected');
+    if (connected) loadTiming.mark('ndk-connected');
+    return connected;
   }, [relayStatuses]);
 
   const subscribe = useCallback<NdkService['subscribe']>(

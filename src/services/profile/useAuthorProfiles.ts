@@ -18,6 +18,8 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import type { NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { METADATA_KIND, parseProfileContent } from './profileEvents';
+import { loadTiming } from '@/services/performance';
+import { saveProfiles, loadProfilesFor } from '@/services/cache';
 
 export interface AuthorProfile {
   name?: string;
@@ -46,6 +48,24 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
   const requestedRef = useRef<Set<string>>(new Set());
   // Live subscriptions, kept out of the effect's cleanup on purpose. See below.
   const subsRef = useRef<NDKSubscription[]>([]);
+  const cacheRestoredRef = useRef(false);
+
+  // Restore profiles from IndexedDB on mount. Happens once, before any relay
+  // subscription fires. A stale avatar beats a truncated pubkey.
+  useEffect(() => {
+    if (cacheRestoredRef.current || pubkeys.length === 0) return;
+    cacheRestoredRef.current = true;
+
+    void loadProfilesFor(pubkeys).then((cached) => {
+      if (cached.size === 0) return;
+      for (const [pk, profile] of cached) {
+        if (!cacheRef.current.has(pk)) {
+          cacheRef.current.set(pk, profile);
+        }
+      }
+      setProfiles(new Map(cacheRef.current));
+    });
+  }, [pubkeys]);
 
   // Stable key so the effect fires on author-SET-content change, not array
   // identity -- an infinite-scroll feed hands us a new `pubkeys` array
@@ -119,7 +139,10 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
         }
 
         cacheRef.current.set(event.pubkey, next);
+        loadTiming.mark('first-profile');
         setProfiles(new Map(cacheRef.current));
+        // Persist to IndexedDB. Fire-and-forget; failures are harmless.
+        void saveProfiles(new Map([[event.pubkey, next]]));
       },
     });
 
