@@ -51,17 +51,12 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
 
   const canAddMember = can(myPermissions, 'add-user');
   const canRemoveMember = can(myPermissions, 'remove-user');
-  // For pubkey-aware groups (ownerPubkey is resolved), only the owner can edit
-  // permissions. The read path (trustedWriters.ts) accepts only owner-signed
-  // kind:39001, so a delegated admin's edit would be published and silently
-  // ignored by every reader. Showing the button to someone whose change will
-  // not stick is the bug this fixes.
-  //
-  // For legacy groups (ownerPubkey undefined), keep the permission-based gate:
-  // the read path accepts any signer, so delegated edits actually work.
-  const canSetPermissions = ownerPubkey
-    ? pubkey === ownerPubkey
-    : can(myPermissions, 'add-permission') || can(myPermissions, 'remove-permission');
+  // The read path (trustedWriters.ts) accepts kind:39001 from the owner and
+  // from any admin the owner granted add-permission or remove-permission. So
+  // the gate here matches: anyone holding either of those permissions may edit.
+  // This is the same rule for both resolved and legacy groups.
+  const canSetPermissions =
+    can(myPermissions, 'add-permission') || can(myPermissions, 'remove-permission');
 
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -319,7 +314,7 @@ function MemberRow({
 }) {
   const isOwner = !!ownerPubkey && member.pubkey === ownerPubkey;
   // The owner cannot be removed by anyone else. A non-owner attempting to remove
-  // the owner gets a disabled button, not an absent one — affordance, not silence.
+  // the owner gets a disabled button, not an absent one, so the reason is visible.
   const removeBlocked = isOwner && editorPubkey !== ownerPubkey;
   const displayName = profile?.displayName || profile?.name || formatPubkey(member.pubkey);
   const initials = displayName.slice(0, 2).toUpperCase();

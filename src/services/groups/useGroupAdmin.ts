@@ -180,9 +180,8 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
      * For pubkey-aware groups, the owner derived from the d-tag. Undefined for
      * legacy groups where no owner can be established.
      *
-     * setPermissions uses this to refuse a publish from a non-owner: the read
-     * path (trustedWriters.ts) accepts only owner-signed kind:39001, so a
-     * non-owner's publish would be silently ignored by every reader.
+     * The read path (trustedWriters.ts) accepts kind:39001 from the owner and
+     * from admins the owner granted add-permission or remove-permission.
      */
     ownerPubkey?: string;
   }> => {

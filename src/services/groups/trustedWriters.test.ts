@@ -22,6 +22,7 @@ const ALICE = 'a'.repeat(64); // owner
 const BOB = 'b'.repeat(64); // admin with member-management
 const CAROL = 'c'.repeat(64); // ordinary member
 const EVE = 'e'.repeat(64); // attacker
+const DAN = 'd'.repeat(64); // delegated permission admin
 
 /** A pubkey-aware identifier, the form buildGroupIdentifier produces. */
 function idFor(pubkey: string): string {
@@ -48,7 +49,7 @@ function evt(
   } as unknown as NDKEvent;
 }
 
-/** kind:39000 from the owner — what makes ownership resolvable at all. */
+/** kind:39000 from the owner -- what makes ownership resolvable at all. */
 function metadata(pubkey: string, created_at = 100): NDKEvent {
   return evt(GROUP_METADATA_KIND, pubkey, created_at, [['name', 'Test Group']]);
 }
@@ -100,7 +101,8 @@ describe('self-published membership', () => {
     const events = [
       metadata(ALICE),
       adminList(ALICE, 200, [[BOB, 'add-user', 'remove-user']]),
-      // Eve grants herself everything, more recently than Alice.
+      // Eve grants herself everything, more recently than Alice. Eve is NOT
+      // in the owner's admin list, so her kind:39001 is not trusted.
       adminList(EVE, 999, [
         [EVE, 'add-user', 'remove-user', 'add-permission', 'remove-permission'],
       ]),
@@ -147,7 +149,7 @@ describe('self-published membership', () => {
  *
  * It is reproduced here rather than described, so the tests above are
  * demonstrably about a real difference. If someone reverts the author check,
- * the assertions above fail and this one still passes — which is the point.
+ * the assertions above fail and this one still passes -- which is the point.
  */
 function legacyMerge(events: NDKEvent[]): string[] {
   const seen = new Set<string>();
@@ -172,7 +174,10 @@ describe('the previous behaviour', () => {
     expect(authoritativeMembers(resolveTrustedWriters(GROUP, events), events)).not.toContain(EVE);
   });
 
-  it('admitted a self-granted admin, which the owner-only rule now rejects', () => {
+  it('admitted a self-granted admin, which the two-pass rule now rejects', () => {
+    // Eve is NOT in the owner's admin list, so her kind:39001 is not trusted
+    // even though it is newer. The two-pass approach only trusts signers the
+    // owner explicitly authorised with add-permission or remove-permission.
     const events = [
       metadata(ALICE),
       adminList(ALICE, 200, [[BOB, 'add-user']]),
@@ -268,6 +273,138 @@ describe('legitimate writers', () => {
 
     expect(writers.memberWriters.has(BOB)).toBe(false);
     expect(authoritativeMembers(writers, events)).toEqual([ALICE, CAROL]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delegated admin writes: the permission editor must not be a silent noop
+// ---------------------------------------------------------------------------
+
+describe('delegated admin kind:39001 writes', () => {
+  it('accepts kind:39001 from an admin the owner granted add-permission', () => {
+    // Alice (owner) grants Bob add-permission. Bob publishes a newer
+    // kind:39001 that adds Carol as an admin. The read path must honour it.
+    const events = [
+      metadata(ALICE),
+      adminList(ALICE, 200, [[BOB, 'add-permission', 'remove-permission']]),
+      adminList(BOB, 300, [
+        [BOB, 'add-permission', 'remove-permission'],
+        [CAROL, 'add-user', 'remove-user'],
+      ]),
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // Bob's list is newer and he is authorised, so Carol should appear.
+    expect(writers.admins.map((a) => a.pubkey)).toContain(CAROL);
+    expect(writers.admins.map((a) => a.pubkey)).toContain(BOB);
+    // Carol got add-user from Bob's list, so she is a member writer.
+    expect(writers.memberWriters.has(CAROL)).toBe(true);
+  });
+
+  it('falls back to owner list when delegated admin list is older', () => {
+    // The owner's kind:39001 is newer than the delegated admin's. The latest
+    // event from any authorised signer wins, so the owner's list is canonical.
+    const events = [
+      metadata(ALICE),
+      adminList(ALICE, 200, [[BOB, 'add-permission']]),
+      adminList(BOB, 150, [[BOB, 'add-permission'], [CAROL, 'edit-metadata']]),
+      // Owner's list at T=200 is newer than Bob's at T=150.
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // Owner's list wins. It only has Bob, not Carol.
+    expect(writers.admins.map((a) => a.pubkey)).toEqual([BOB]);
+  });
+
+  it('revokes a delegated admin writer when the owner removes their add-permission', () => {
+    const events = [
+      metadata(ALICE),
+      // First: owner grants Bob add-permission.
+      adminList(ALICE, 200, [[BOB, 'add-permission']]),
+      // Bob uses that to add Carol.
+      adminList(BOB, 300, [[BOB, 'add-permission'], [CAROL, 'add-user']]),
+      // Owner revokes Bob at T=400. Bob is no longer in the owner's list.
+      adminList(ALICE, 400, [[DAN, 'edit-metadata']]),
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // First pass: owner's latest (T=400) has only Dan with edit-metadata.
+    // Dan has no add-permission, so adminWriters = {ALICE}.
+    // Second pass: latest from {ALICE} only = Alice's T=400 event.
+    // Bob's T=300 event is no longer trusted.
+    expect(writers.admins.map((a) => a.pubkey)).toEqual([DAN]);
+    expect(writers.admins.map((a) => a.pubkey)).not.toContain(BOB);
+    expect(writers.admins.map((a) => a.pubkey)).not.toContain(CAROL);
+  });
+
+  it('does not allow transitive delegation (admin cannot authorise another admin writer)', () => {
+    // Alice grants Bob add-permission. Bob grants Carol add-permission.
+    // Carol then publishes her own kind:39001. Carol's event should NOT be
+    // trusted, because only the owner's event determines who can write.
+    const events = [
+      metadata(ALICE),
+      adminList(ALICE, 200, [[BOB, 'add-permission']]),
+      adminList(BOB, 300, [[BOB, 'add-permission'], [CAROL, 'add-permission']]),
+      // Carol tries to use her delegated-delegated power.
+      adminList(CAROL, 400, [
+        [BOB, 'add-permission'],
+        [CAROL, 'add-permission'],
+        [EVE, 'add-user', 'remove-user'],
+      ]),
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // First pass: owner's latest (T=200) has Bob. adminWriters = {ALICE, BOB}.
+    // Carol is NOT in adminWriters (she was only granted by Bob, not the owner).
+    // Second pass: latest from {ALICE, BOB} = Bob's T=300 event.
+    // Carol's T=400 event is ignored entirely.
+    expect(writers.admins.map((a) => a.pubkey)).not.toContain(EVE);
+    // Bob's list is the canonical one.
+    expect(writers.admins.map((a) => a.pubkey)).toContain(BOB);
+    expect(writers.admins.map((a) => a.pubkey)).toContain(CAROL);
+  });
+
+  it('an admin with only remove-permission (not add) can also write the admin list', () => {
+    const events = [
+      metadata(ALICE),
+      adminList(ALICE, 200, [[DAN, 'remove-permission']]),
+      adminList(DAN, 300, [[DAN, 'remove-permission']]),
+      // Dan removed everyone else from the admin list but kept himself.
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // Dan's list at T=300 is accepted because he has remove-permission.
+    expect(writers.admins.map((a) => a.pubkey)).toEqual([DAN]);
+  });
+
+  it('an admin without add-permission or remove-permission cannot write the admin list', () => {
+    // Bob has only add-user, not add-permission. His kind:39001 is ignored.
+    const events = [
+      metadata(ALICE),
+      adminList(ALICE, 200, [[BOB, 'add-user', 'remove-user']]),
+      adminList(BOB, 300, [
+        [BOB, 'add-user', 'remove-user'],
+        [EVE, 'add-permission'],
+      ]),
+    ];
+
+    const writers = resolveTrustedWriters(GROUP, events);
+    if (writers.status !== 'resolved') throw new Error('expected resolved');
+
+    // Bob's event is NOT in adminWriters (he has add-user, not add-permission).
+    // Only Alice's T=200 event is read. Eve is not in it.
+    expect(writers.admins.map((a) => a.pubkey)).toEqual([BOB]);
+    expect(writers.admins.map((a) => a.pubkey)).not.toContain(EVE);
   });
 });
 

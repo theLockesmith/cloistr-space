@@ -708,10 +708,10 @@ describe('GroupMembers', () => {
       expect(permButtons.length).toBeGreaterThan(0);
     });
 
-    it('hides Permissions button from a delegated admin on a resolved group', () => {
-      // The admin has add-permission and remove-permission, but the group is
-      // resolved and trustedWriters.ts reads only owner-signed kind:39001.
-      // Showing the button would let them publish a change nobody reads back.
+    it('shows Permissions button to a delegated admin on a resolved group', () => {
+      // The admin has add-permission and remove-permission. The read path
+      // (trustedWriters.ts) now accepts kind:39001 from admins the owner
+      // granted those permissions, so the button should be visible.
       mockUseGroupOwner.mockReturnValue(ownerReturn);
       mockUseAuthStore.mockReturnValue({ pubkey: ADMIN_PUBKEY, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
       mockUseGroupMembers.mockReturnValue({
@@ -721,7 +721,8 @@ describe('GroupMembers', () => {
 
       render(<GroupMembers groupId="test-group" />);
 
-      expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
+      const permButtons = screen.getAllByText('Permissions');
+      expect(permButtons.length).toBeGreaterThan(0);
     });
 
     it('shows Permissions button to a delegated admin on a legacy group', () => {

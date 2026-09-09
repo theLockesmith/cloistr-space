@@ -36,15 +36,20 @@
  *   member list      <- the latest kind:39002 signed by the owner, or by an
  *                       admin the owner's list grants add-user/remove-user
  *
- * ## Deliberate narrowing: the admin list is owner-only
+ * ## Two-pass admin resolution
  *
- * An admin holding add-permission/remove-permission can no longer write the
- * admin list in a way this client reads. That is a real reduction and it is
- * chosen: any wider rule needs a delegation chain with revocation semantics,
- * and a monotone "once trusted, always trusted" closure would mean removing
- * someone's add-permission does not remove their ability to rewrite the list.
- * Getting that wrong reintroduces the bug with extra steps. Member management,
- * which is the everyday operation, still works for delegated admins.
+ * The owner's kind:39001 is always the root of trust (first pass). Admins the
+ * owner granted add-permission or remove-permission are also accepted as
+ * kind:39001 writers (second pass). The latest event from any authorised signer
+ * is the canonical admin list.
+ *
+ * Revocation works because the first pass always re-derives who is authorised
+ * from the OWNER's latest event. If the owner publishes a new kind:39001 that
+ * removes someone's add-permission, that person's own kind:39001 drops out of
+ * the authorised set on the next read. There is no transitivity: an authorised
+ * admin cannot delegate their delegation power further, because only the
+ * owner's event feeds the first pass. Member management, which is the everyday
+ * operation, also works for delegated admins (unchanged).
  *
  * ## Legacy groups
  *
@@ -66,6 +71,9 @@ import { resolveOwnership } from './ownership';
 
 /** Permissions that make an admin a trusted writer of the MEMBER list. */
 const MEMBER_WRITE_PERMISSIONS: AdminPermission[] = ['add-user', 'remove-user'];
+
+/** Permissions that make an admin a trusted writer of the ADMIN list itself. */
+const ADMIN_WRITE_PERMISSIONS: AdminPermission[] = ['add-permission', 'remove-permission'];
 
 export interface AdminEntry {
   pubkey: string;
@@ -140,8 +148,20 @@ export function resolveTrustedWriters(identifier: string, events: NDKEvent[]): T
 
   const owner = ownership.ownerPubkey;
 
-  // Owner-only, by design. See the file comment.
-  const admins = parseAdminEntries(latestFrom(adminEvents, new Set([owner])));
+  // First pass: the owner's kind:39001 is the root of trust.
+  const ownerAdmins = parseAdminEntries(latestFrom(adminEvents, new Set([owner])));
+
+  // Build the set of pubkeys whose kind:39001 we accept: owner, plus anyone
+  // the owner granted add-permission or remove-permission.
+  const adminWriters = new Set<string>([owner]);
+  for (const entry of ownerAdmins) {
+    if (entry.permissions.some((p) => ADMIN_WRITE_PERMISSIONS.includes(p))) {
+      adminWriters.add(entry.pubkey);
+    }
+  }
+
+  // Second pass: the latest kind:39001 from any authorised signer.
+  const admins = parseAdminEntries(latestFrom(adminEvents, adminWriters));
 
   const memberWriters = new Set<string>([owner]);
   for (const entry of admins) {
