@@ -43,6 +43,11 @@ export default defineConfig({
       'tests/**',
       '**/*.browser.test.{ts,tsx}',
       'src/test/browser-apis.test.ts',
+      // Git worktrees live under .worktrees/ and carry their own source trees.
+      // Without this, vitest's default glob picks them up and runs tests from a
+      // different branch against THIS branch's node_modules, which fails and
+      // makes the whole suite look broken.
+      '.worktrees/**',
     ],
     coverage: {
       provider: 'v8',
