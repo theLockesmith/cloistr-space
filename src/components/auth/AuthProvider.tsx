@@ -17,6 +17,7 @@ import {
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
+import { clearAll as clearCache } from '@/services/cache';
 
 interface AuthContextValue {
   pubkey: string | null;
@@ -418,6 +419,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(STORAGE_KEY);
       // Clear shared session for SSO logout
       clearSharedSession();
+      // Clear IndexedDB cache so the next user does not inherit this one's feed.
+      void clearCache();
       storeLogout();
     }
   }, [signer, storeLogout]);

@@ -9,6 +9,7 @@ import { connectedRelayUrls, needsExplicitRelays, widenRelays } from './globalRe
 import { useAuthStore } from '@/stores/authStore';
 import { useContactsStore } from '@/stores/contactsStore';
 import { saveSnapshot, loadSnapshot, shouldPersist, upsertNote } from './feedSnapshot';
+import { saveNotes, loadNotes } from '@/services/cache';
 import { tryParseEmbeddedNote } from './noteProjection';
 import {
   NOTE_KIND,
@@ -21,6 +22,7 @@ import {
   type MediaAttachment,
 } from '@/types/social';
 import type { NDKEvent, NDKSubscription, NDKFilter } from '@nostr-dev-kit/ndk';
+import { loadTiming } from '@/services/performance';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -272,9 +274,11 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
 
   // Get following list for filter
   const following = useMemo(() => {
-    return Array.from(contacts.values())
+    const list = Array.from(contacts.values())
       .filter((c) => c.isFollowing)
       .map((c) => c.pubkey);
+    if (list.length > 0) loadTiming.mark('contacts-ready');
+    return list;
   }, [contacts]);
 
   // Fold accumulated engagement into the rendered notes.
@@ -383,6 +387,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   }, []);
 
   const refresh = useCallback(() => {
+    loadTiming.reset();
     seenIdsRef.current.clear();
     seenRepostIdsRef.current.clear();
     engagementRef.current.clear();
@@ -437,17 +442,28 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
     seenEngagementRef.current.clear();
     oldestTimestampRef.current = Math.floor(Date.now() / 1000);
 
-    // REPLACE, not merge. The previous version merged to guard against the live
-    // subscription having already delivered notes -- but both effects run in
-    // the same commit, before any relay event can arrive, so that race does not
-    // exist. The defence against an impossible race created a real bug.
-    const restored = loadSnapshot(mode, pubkey);
-    setNotes(restored);
+    // Try IndexedDB first (persists across sessions), fall back to
+    // sessionStorage (survives reload only). The sessionStorage snapshot
+    // remains as a synchronous fallback for when IndexedDB is unavailable
+    // or slow to open.
+    const sessionNotes = loadSnapshot(mode, pubkey);
+    if (sessionNotes.length > 0) {
+      setNotes(sessionNotes);
+      for (const note of sessionNotes) seenIdsRef.current.add(note.id);
+    }
 
-    // SEED the seen-set with what we just put on screen. Without this the live
-    // subscription redelivers every restored note, each one passes the empty
-    // seen-set, and the feed renders every post twice.
-    for (const note of restored) seenIdsRef.current.add(note.id);
+    // IndexedDB is async, so it may arrive after the sessionStorage restore.
+    // If it has more notes, use those instead.
+    void loadNotes(mode, pubkey).then((cached) => {
+      if (cached.length === 0) return;
+      // Only upgrade if we got more from IndexedDB than sessionStorage gave.
+      // If sessionStorage had content and IndexedDB is stale, keep what we have.
+      if (cached.length <= sessionNotes.length) return;
+
+      setNotes(cached);
+      seenIdsRef.current.clear();
+      for (const note of cached) seenIdsRef.current.add(note.id);
+    });
   }, [mode, pubkey]);
 
   // Persist on the trailing edge. Serialising 50 notes on every engagement
@@ -456,6 +472,9 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
   const schedulePersist = useCoalesced(() => {
     if (!shouldPersist(notesOwnerRef.current, `${mode}:${pubkey ?? 'anon'}`, notes.length)) return;
     saveSnapshot(notes, mode, pubkey);
+    // IndexedDB persistence: async, fire-and-forget. Failures are swallowed
+    // inside saveNotes, same as sessionStorage failures in saveSnapshot.
+    void saveNotes(notes, mode, pubkey);
   }, 1000);
 
   useEffect(() => {
@@ -565,6 +584,7 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
         seenIdsRef.current.add(id);
 
         const note = parseNoteEvent(event);
+        loadTiming.mark('first-note');
 
         // Track oldest timestamp for pagination
         if (oldestTimestampRef.current === null || note.createdAt < oldestTimestampRef.current) {
@@ -577,6 +597,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
         setNotes((prev) => upsertNote(prev, note));
       },
         onEose: () => {
+        loadTiming.mark('feed-eose');
+        loadTiming.seal();
         setIsLoading(false);
         // If we got fewer notes than requested, no more to load
         const currentCount = seenIdsRef.current.size;
@@ -686,6 +708,8 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
 
       const targetId = event.tags.find((t) => t[0] === 'e')?.[1];
       if (!targetId) return;
+
+      loadTiming.mark('first-engagement');
 
       const current = engagementRef.current.get(targetId) ?? {
         reactions: 0,
