@@ -21,6 +21,8 @@ import {
   type ThreadComment,
   type ReplyTarget,
 } from './threadEvents';
+import { decryptThreadContent, encryptThreadContent, looksLikeNip44 } from './threadKeyStore';
+import { useThreadKeyStore } from './useThreadKeyStore';
 
 const MAX_COMMENTS = 500;
 
@@ -33,9 +35,10 @@ interface UseThreadsReturn {
   refresh: () => void;
 }
 
-export function useThreads(groupId: string): UseThreadsReturn {
+export function useThreads(groupId: string, threadPubkey?: string): UseThreadsReturn {
   const { subscribe, publish, createEvent, isConnected } = useNdk();
   const { pubkey } = useAuthStore();
+  const keyStore = useThreadKeyStore();
 
   const [comments, setComments] = useState<ThreadComment[]>([]);
   const [isFetching, setIsFetching] = useState(true);
@@ -79,11 +82,37 @@ export function useThreads(groupId: string): UseThreadsReturn {
     try {
       const subscription = subscribeStream(subscribe, [filter], {
         onEvent: (event: NDKEvent) => {
+        // Attempt NIP-44 decryption when the content looks encrypted and we
+        // hold the thread key. The thread pubkey comes from `threadPubkey`
+        // (caller knows which sealed thread this group uses) or is inferred
+        // from the event tags. When neither is available, or the key is not
+        // held, the raw content passes through — the user sees ciphertext,
+        // which is better than dropping the message.
+        let content = event.content;
+
+        if (looksLikeNip44(content)) {
+          // Try to find the thread key. A sealed group thread tags its
+          // thread pubkey in a `thread` tag or in the `h` value itself.
+          const effectiveThreadPubkey =
+            threadPubkey ??
+            event.tags.find((t: string[]) => t[0] === 'thread')?.[1];
+
+          if (effectiveThreadPubkey) {
+            const sk = keyStore.get(effectiveThreadPubkey);
+            if (sk) {
+              const decrypted = decryptThreadContent(content, sk, event.pubkey);
+              if (decrypted !== null) {
+                content = decrypted;
+              }
+            }
+          }
+        }
+
         const parsed = parseThreadEvent(
           {
             id: event.id,
             pubkey: event.pubkey,
-            content: event.content,
+            content,
             created_at: event.created_at,
             tags: event.tags,
           },
@@ -105,7 +134,7 @@ export function useThreads(groupId: string): UseThreadsReturn {
       setError(err instanceof Error ? err.message : 'Could not load threads');
       setIsFetching(false);
     }
-  }, [canSubscribe, subscribe, groupId]);
+  }, [canSubscribe, subscribe, groupId, threadPubkey, keyStore]);
 
   useEffect(() => {
     // Deferred to a macrotask so the state resets inside startSubscription do
@@ -138,12 +167,24 @@ export function useThreads(groupId: string): UseThreadsReturn {
       if (!event) throw new Error('Could not create event');
 
       event.kind = THREAD_KIND;
-      event.content = body.trim();
+
+      // Encrypt the body if we hold a key for a sealed thread in this group.
+      if (threadPubkey && pubkey) {
+        const sk = keyStore.get(threadPubkey);
+        if (sk) {
+          event.content = encryptThreadContent(body.trim(), sk, pubkey);
+        } else {
+          event.content = body.trim();
+        }
+      } else {
+        event.content = body.trim();
+      }
+
       event.tags = buildThreadRootTags(groupId, subject);
 
       await publish(event);
     },
-    [publish, createEvent, isConnected, pubkey, groupId]
+    [publish, createEvent, isConnected, pubkey, groupId, threadPubkey, keyStore]
   );
 
   const reply = useCallback(
@@ -159,12 +200,23 @@ export function useThreads(groupId: string): UseThreadsReturn {
       if (!event) throw new Error('Could not create event');
 
       event.kind = THREAD_KIND;
-      event.content = content.trim();
+
+      if (threadPubkey && pubkey) {
+        const sk = keyStore.get(threadPubkey);
+        if (sk) {
+          event.content = encryptThreadContent(content.trim(), sk, pubkey);
+        } else {
+          event.content = content.trim();
+        }
+      } else {
+        event.content = content.trim();
+      }
+
       event.tags = buildReplyTags(groupId, target);
 
       await publish(event);
     },
-    [publish, createEvent, isConnected, pubkey, groupId]
+    [publish, createEvent, isConnected, pubkey, groupId, threadPubkey, keyStore]
   );
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);

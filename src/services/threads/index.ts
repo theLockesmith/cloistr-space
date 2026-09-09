@@ -17,3 +17,17 @@ export {
 export { useThreads } from './useThreads';
 
 export { useAllThreads, type ThreadWithGroup, type UseAllThreadsReturn } from './useAllThreads';
+
+export {
+  ThreadKeyStore,
+  KEY_WRAP_KIND,
+  decryptThreadContent,
+  encryptThreadContent,
+  looksLikeNip44,
+  type ThreadKey,
+} from './threadKeyStore';
+
+export {
+  useThreadKeyStore,
+  useThreadKeyLoader,
+} from './useThreadKeyStore';

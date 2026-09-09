@@ -9,6 +9,7 @@ import NDK, {
   NDKRelaySet,
   NDKSigner,
   NDKUser,
+  type NDKEncryptionScheme,
   type NDKFilter,
   type NDKRelay,
   type NostrEvent,
@@ -136,13 +137,38 @@ export class SignerAdapter implements NDKSigner {
     return signed.sig;
   }
 
-  async encrypt(recipient: NDKUser, value: string): Promise<string> {
-    // Note: NDK's encrypt has optional scheme parameter, we only support nip04
+  /**
+   * Report which encryption schemes the underlying signer supports.
+   *
+   * NDK calls this to decide whether to attempt NIP-44 before falling back to
+   * NIP-04. Without it, NDK's `isEncryptionEnabled` returns false for nip44 and
+   * every `NDKEvent.decrypt()` call that defaults to scheme=nip44 silently fails
+   * before trying nip04.
+   */
+  async encryptionEnabled(scheme?: NDKEncryptionScheme): Promise<NDKEncryptionScheme[]> {
+    const schemes: NDKEncryptionScheme[] = ['nip04'];
+    if (this.signer.nip44Encrypt) {
+      schemes.push('nip44');
+    }
+    if (scheme) {
+      return schemes.includes(scheme) ? [scheme] : [];
+    }
+    return schemes;
+  }
+
+  async encrypt(recipient: NDKUser, value: string, scheme?: NDKEncryptionScheme): Promise<string> {
+    if (scheme === 'nip44' && this.signer.nip44Encrypt) {
+      return this.signer.nip44Encrypt(recipient.pubkey, value);
+    }
+    // NIP-04 fallback (also used when scheme is undefined for backward compat)
     return this.signer.encrypt(recipient.pubkey, value);
   }
 
-  async decrypt(sender: NDKUser, value: string): Promise<string> {
-    // Note: NDK's decrypt has optional scheme parameter, we only support nip04
+  async decrypt(sender: NDKUser, value: string, scheme?: NDKEncryptionScheme): Promise<string> {
+    if (scheme === 'nip44' && this.signer.nip44Decrypt) {
+      return this.signer.nip44Decrypt(sender.pubkey, value);
+    }
+    // NIP-04 fallback
     return this.signer.decrypt(sender.pubkey, value);
   }
 
