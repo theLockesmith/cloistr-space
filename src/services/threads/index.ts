@@ -32,3 +32,5 @@ export {
   useThreadKeyStore,
   useThreadKeyLoader,
 } from './useThreadKeyStore';
+
+export { useThreadKeyGrant } from './useThreadKeyGrant';

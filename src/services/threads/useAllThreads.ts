@@ -63,8 +63,10 @@ function parseAnyGroupThread(
   if (!hTag?.[1]) return null;
 
   let content = event.content;
+  let sealed = false;
 
   if (keyStore && looksLikeNip44(content)) {
+    sealed = true;
     const threadPubkey = event.tags.find((t: string[]) => t[0] === 'thread')?.[1];
     if (threadPubkey) {
       const sk = keyStore.get(threadPubkey);
@@ -86,6 +88,7 @@ function parseAnyGroupThread(
     rootId: event.tags.find((t) => t[0] === 'E')?.[1],
     parentId: event.tags.find((t) => t[0] === 'e')?.[1],
     subject: event.tags.find((t) => t[0] === 'subject')?.[1],
+    sealed: sealed || undefined,
   };
 }
 

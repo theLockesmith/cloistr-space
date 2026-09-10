@@ -89,8 +89,10 @@ export function useThreads(groupId: string, threadPubkey?: string): UseThreadsRe
         // held, the raw content passes through — the user sees ciphertext,
         // which is better than dropping the message.
         let content = event.content;
+        let sealed = false;
 
         if (looksLikeNip44(content)) {
+          sealed = true;
           // Try to find the thread key. A sealed group thread tags its
           // thread pubkey in a `thread` tag or in the `h` value itself.
           const effectiveThreadPubkey =
@@ -119,6 +121,7 @@ export function useThreads(groupId: string, threadPubkey?: string): UseThreadsRe
           groupId
         );
         if (!parsed) return;
+        if (sealed) parsed.sealed = true;
 
         commentsRef.current.set(parsed.id, parsed);
         setComments(Array.from(commentsRef.current.values()));

@@ -93,6 +93,13 @@ export interface ThreadComment {
   parentId?: string;
   /** Root-only: the thread title. */
   subject?: string;
+  /**
+   * True when the original content was NIP-44 ciphertext. Set regardless of
+   * whether decryption succeeded: a sealed message whose key we do not hold
+   * is still sealed, just unreadable. The renderer uses this to show a lock
+   * icon and, when content is still ciphertext, a "missing key" placeholder.
+   */
+  sealed?: boolean;
 }
 
 interface RawEvent {
