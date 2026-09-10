@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { generateSecretKey, getPublicKey, utils as ntUtils } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, nip44, utils as ntUtils } from 'nostr-tools';
 
 const { bytesToHex } = ntUtils;
 import {
@@ -8,6 +8,8 @@ import {
   encryptThreadContent,
   getThreadConversationKey,
   looksLikeNip44,
+  buildKeyWrapEvent,
+  KEY_WRAP_KIND,
 } from './threadKeyStore';
 
 describe('ThreadKeyStore', () => {
@@ -153,5 +155,59 @@ describe('looksLikeNip44', () => {
     const ciphertext = encryptThreadContent('test', threadSk, authorPk);
 
     expect(looksLikeNip44(ciphertext)).toBe(true);
+  });
+});
+
+describe('buildKeyWrapEvent', () => {
+  it('produces a wrap that the recipient can unwrap to recover the thread key', () => {
+    const threadSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    const granterSk = generateSecretKey();
+    const granterPk = getPublicKey(granterSk);
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+
+    const wrap = buildKeyWrapEvent(threadSk, granterSk, recipientPk);
+
+    // Structure checks
+    expect(wrap.kind).toBe(KEY_WRAP_KIND);
+    expect(wrap.tags).toContainEqual(['d', threadPk]);
+    expect(wrap.tags).toContainEqual(['p', recipientPk]);
+    expect(wrap.created_at).toBeGreaterThan(0);
+
+    // Round-trip: recipient decrypts and recovers the thread secret key
+    const ck = nip44.v2.utils.getConversationKey(recipientSk, granterPk);
+    const decryptedHex = nip44.v2.decrypt(wrap.content, ck);
+    expect(decryptedHex).toBe(bytesToHex(threadSk));
+  });
+
+  it('a third party cannot unwrap the key', () => {
+    const threadSk = generateSecretKey();
+    const granterSk = generateSecretKey();
+    const granterPk = getPublicKey(granterSk);
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const eveSk = generateSecretKey();
+
+    const wrap = buildKeyWrapEvent(threadSk, granterSk, recipientPk);
+
+    // Eve tries to decrypt with her own key against the granter
+    const eveCk = nip44.v2.utils.getConversationKey(eveSk, granterPk);
+    expect(() => nip44.v2.decrypt(wrap.content, eveCk)).toThrow();
+  });
+
+  it('two wraps for different recipients produce different ciphertext', () => {
+    const threadSk = generateSecretKey();
+    const granterSk = generateSecretKey();
+    const recipient1Pk = getPublicKey(generateSecretKey());
+    const recipient2Pk = getPublicKey(generateSecretKey());
+
+    const wrap1 = buildKeyWrapEvent(threadSk, granterSk, recipient1Pk);
+    const wrap2 = buildKeyWrapEvent(threadSk, granterSk, recipient2Pk);
+
+    // Same thread key, different recipients, different ciphertexts
+    expect(wrap1.content).not.toBe(wrap2.content);
+    // But same d-tag (the thread pubkey)
+    expect(wrap1.tags.find(t => t[0] === 'd')).toEqual(wrap2.tags.find(t => t[0] === 'd'));
   });
 });

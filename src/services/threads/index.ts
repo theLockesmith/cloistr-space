@@ -23,6 +23,7 @@ export {
   KEY_WRAP_KIND,
   decryptThreadContent,
   encryptThreadContent,
+  buildKeyWrapEvent,
   looksLikeNip44,
   type ThreadKey,
 } from './threadKeyStore';

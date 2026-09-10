@@ -15,7 +15,7 @@
  * emptied on logout/disconnect.
  */
 
-import { nip44, utils as ntUtils } from 'nostr-tools';
+import { getPublicKey, nip44, utils as ntUtils } from 'nostr-tools';
 
 const { bytesToHex, hexToBytes } = ntUtils;
 
@@ -140,6 +140,50 @@ export class ThreadKeyStore {
     const sk = this.keys.get(threadPubkey);
     return sk ? bytesToHex(sk) : undefined;
   }
+}
+
+/**
+ * Build a key-wrap event body for granting a thread key to a recipient.
+ *
+ * The returned object is an unsigned event template. The caller signs it with
+ * the granter's signer and publishes it. Because the event is addressable
+ * (kind 24242 with a d-tag), a newer wrap for the same (granter, thread,
+ * recipient) triple replaces the old one on the relay.
+ *
+ * @param threadSecretKey  The thread's 32-byte secret key to share
+ * @param granterSecretKey The granter's 32-byte secret key (for NIP-44 encryption)
+ * @param recipientPubkey  The recipient's public key (hex)
+ * @returns An unsigned event template ready for signing
+ */
+export function buildKeyWrapEvent(
+  threadSecretKey: Uint8Array,
+  granterSecretKey: Uint8Array,
+  recipientPubkey: string,
+): {
+  kind: number;
+  content: string;
+  tags: string[][];
+  created_at: number;
+} {
+  const threadPubkey = getPublicKey(threadSecretKey);
+  const conversationKey = nip44.v2.utils.getConversationKey(
+    granterSecretKey,
+    recipientPubkey,
+  );
+  const encryptedContent = nip44.v2.encrypt(
+    bytesToHex(threadSecretKey),
+    conversationKey,
+  );
+
+  return {
+    kind: KEY_WRAP_KIND,
+    content: encryptedContent,
+    tags: [
+      ['d', threadPubkey],
+      ['p', recipientPubkey],
+    ],
+    created_at: Math.floor(Date.now() / 1000),
+  };
 }
 
 /**
