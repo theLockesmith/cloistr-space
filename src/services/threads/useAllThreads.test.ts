@@ -9,11 +9,10 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { generateSecretKey, getPublicKey, nip44, utils as ntUtils } from 'nostr-tools';
+import { generateSecretKey, getPublicKey } from 'nostr-tools';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
 import { THREAD_KIND } from './threadEvents';
 
-const { bytesToHex } = ntUtils;
 
 // ---- Test keys ----
 
