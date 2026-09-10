@@ -212,6 +212,89 @@ describe('useThreadKeyLoader', () => {
     expect(result.current.keyCount).toBe(0);
   });
 
+  it('delegated member unwraps a key and reads a message from a third-party author', async () => {
+    // Scenario: Alice (granter) wraps a thread key to Bob (RECIPIENT).
+    // Carol (a third author, neither granter nor recipient) encrypts a message
+    // using the thread key. After the loader unwraps, Bob can decrypt Carol's
+    // message. This proves the full read path works for a delegated member
+    // who is not the thread creator.
+    const threadSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    const aliceSk = generateSecretKey(); // granter
+    const carolSk = generateSecretKey(); // third-party author
+    const carolPk = getPublicKey(carolSk);
+
+    // Alice wraps the thread key to Bob (RECIPIENT)
+    const wrapEvent = makeKeyWrapEvent(threadSk, aliceSk, RECIPIENT_PK);
+    mockFetchEvents.mockResolvedValue(new Set([wrapEvent]));
+
+    // Bob's signer decrypts the wrap from Alice
+    mockSigner.nip44Decrypt.mockImplementation(
+      async (senderPubkey: string, ciphertext: string) => {
+        const ck = nip44.v2.utils.getConversationKey(RECIPIENT_SK, senderPubkey);
+        return nip44.v2.decrypt(ciphertext, ck);
+      },
+    );
+
+    const { result } = renderHook(() => useThreadKeyLoader());
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    expect(result.current.keyCount).toBe(1);
+
+    // Carol encrypts a message using the thread key
+    const carolMessage = 'The deploy pipeline is broken on staging.';
+    const ck = nip44.v2.utils.getConversationKey(threadSk, carolPk);
+    const ciphertext = nip44.v2.encrypt(carolMessage, ck);
+
+    // Bob (RECIPIENT) reads Carol's message using the unwrapped thread key
+    const { result: storeResult } = renderHook(() => useThreadKeyStore());
+    const storedSk = storeResult.current.get(threadPk);
+    expect(storedSk).toBeDefined();
+
+    const readCk = nip44.v2.utils.getConversationKey(storedSk!, carolPk);
+    const plaintext = nip44.v2.decrypt(ciphertext, readCk);
+    expect(plaintext).toBe(carolMessage);
+  });
+
+  it('a wrap addressed to someone else yields no keys for the current user', async () => {
+    // Negative control: a key-wrap event exists but its p-tag points at a
+    // different pubkey (Eve). Even if the relay returns it loosely, the
+    // current user (RECIPIENT) cannot derive the right conversation key to
+    // decrypt it, so the store stays empty. Without this test a loader that
+    // ignores the wrap entirely looks identical to one that works.
+    const threadSk = generateSecretKey();
+    const granterSk = generateSecretKey();
+    const eveSk = generateSecretKey();
+    const evePk = getPublicKey(eveSk);
+
+    // Wrap is addressed to Eve, not to RECIPIENT
+    const wrapEvent = makeKeyWrapEvent(threadSk, granterSk, evePk);
+    mockFetchEvents.mockResolvedValue(new Set([wrapEvent]));
+
+    // RECIPIENT's signer tries to decrypt with its own key, which produces
+    // the wrong conversation key and the decrypt throws
+    mockSigner.nip44Decrypt.mockImplementation(
+      async (senderPubkey: string, ciphertext: string) => {
+        const ck = nip44.v2.utils.getConversationKey(RECIPIENT_SK, senderPubkey);
+        // This will throw because the ciphertext was encrypted to Eve, not us
+        return nip44.v2.decrypt(ciphertext, ck);
+      },
+    );
+
+    const { result } = renderHook(() => useThreadKeyLoader());
+
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
+    // No keys loaded: the wrap was not for us
+    expect(result.current.keyCount).toBe(0);
+    expect(mockSigner.nip44Decrypt).toHaveBeenCalledOnce();
+  });
+
   it('survives a decrypt failure on one wrap and processes the rest', async () => {
     const goodThreadSk = generateSecretKey();
     const goodThreadPk = getPublicKey(goodThreadSk);
