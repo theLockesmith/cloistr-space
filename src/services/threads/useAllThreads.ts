@@ -23,6 +23,8 @@ import {
   type Thread,
   type ThreadComment,
 } from './threadEvents';
+import { decryptThreadContent, looksLikeNip44 } from './threadKeyStore';
+import { useThreadKeyStore } from './useThreadKeyStore';
 
 /** A thread plus the group it belongs to, for a listing that spans groups. */
 export interface ThreadWithGroup {
@@ -47,16 +49,39 @@ export interface UseAllThreadsReturn {
  * event, so the h tag is the answer rather than the check -- but it is still
  * checked against known membership by the caller, so a thread from a group the
  * user is not in cannot appear.
+ *
+ * When a ThreadKeyStore is provided and the content looks like NIP-44
+ * ciphertext, attempts decryption using the thread pubkey from the event's
+ * `thread` tag. Falls through to raw content when no key is held or
+ * decryption fails.
  */
-function parseAnyGroupThread(event: NDKEvent): ThreadComment | null {
+function parseAnyGroupThread(
+  event: NDKEvent,
+  keyStore?: import('./threadKeyStore').ThreadKeyStore,
+): ThreadComment | null {
   const hTag = event.tags.find((t) => t[0] === 'h');
   if (!hTag?.[1]) return null;
+
+  let content = event.content;
+
+  if (keyStore && looksLikeNip44(content)) {
+    const threadPubkey = event.tags.find((t: string[]) => t[0] === 'thread')?.[1];
+    if (threadPubkey) {
+      const sk = keyStore.get(threadPubkey);
+      if (sk) {
+        const decrypted = decryptThreadContent(content, sk, event.pubkey);
+        if (decrypted !== null) {
+          content = decrypted;
+        }
+      }
+    }
+  }
 
   return {
     id: event.id,
     pubkey: event.pubkey,
     groupId: hTag[1],
-    content: event.content,
+    content,
     createdAt: event.created_at ?? Math.floor(Date.now() / 1000),
     rootId: event.tags.find((t) => t[0] === 'E')?.[1],
     parentId: event.tags.find((t) => t[0] === 'e')?.[1],
@@ -67,6 +92,7 @@ function parseAnyGroupThread(event: NDKEvent): ThreadComment | null {
 export function useAllThreads(): UseAllThreadsReturn {
   const { subscribe, isConnected } = useNdk();
   const { groups: memberships, isLoading: groupsLoading } = useGroups();
+  const keyStore = useThreadKeyStore();
 
   const [comments, setComments] = useState<ThreadComment[]>([]);
   const [isFetching, setIsFetching] = useState(true);
@@ -99,7 +125,7 @@ export function useAllThreads(): UseAllThreadsReturn {
     // screen appears without a reload.
     const sub = subscribeStream(subscribe, [filter], {
       onEvent: (event: NDKEvent) => {
-        const parsed = parseAnyGroupThread(event);
+        const parsed = parseAnyGroupThread(event, keyStore);
         if (!parsed) return;
 
         commentsRef.current.set(parsed.id, parsed);
