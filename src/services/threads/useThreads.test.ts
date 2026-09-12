@@ -239,6 +239,12 @@ describe('useThreads sealed thread encryption', () => {
     expect(event.kind).toBe(THREAD_KIND);
     expect(event.content).not.toBe('Secret body');
     expect(looksLikeNip44(event.content)).toBe(true);
+
+    // The event must carry a thread tag so cross-group readers can identify
+    // which key to use for decryption.
+    const threadTag = event.tags.find((t: string[]) => t[0] === 'thread');
+    expect(threadTag).toBeDefined();
+    expect(threadTag![1]).toBe(threadPk);
   });
 
   it('createThread sends plaintext when no threadPubkey', async () => {
@@ -263,5 +269,8 @@ describe('useThreads sealed thread encryption', () => {
     expect(mockPublish).toHaveBeenCalledOnce();
     const event = mockPublish.mock.calls[0][0];
     expect(event.content).toBe('Public body');
+
+    // No thread tag when composing without a sealed thread
+    expect(event.tags.find((t: string[]) => t[0] === 'thread')).toBeUndefined();
   });
 });

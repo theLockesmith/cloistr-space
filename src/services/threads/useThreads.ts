@@ -185,6 +185,13 @@ export function useThreads(groupId: string, threadPubkey?: string): UseThreadsRe
 
       event.tags = buildThreadRootTags(groupId, subject);
 
+      // Tag the thread pubkey so readers (especially cross-group) can find the
+      // right key to decrypt. Without this, useAllThreads has no way to know
+      // which ThreadKeyStore entry matches the ciphertext.
+      if (threadPubkey && keyStore.has(threadPubkey)) {
+        event.tags.push(['thread', threadPubkey]);
+      }
+
       await publish(event);
     },
     [publish, createEvent, isConnected, pubkey, groupId, threadPubkey, keyStore]
@@ -216,6 +223,10 @@ export function useThreads(groupId: string, threadPubkey?: string): UseThreadsRe
       }
 
       event.tags = buildReplyTags(groupId, target);
+
+      if (threadPubkey && keyStore.has(threadPubkey)) {
+        event.tags.push(['thread', threadPubkey]);
+      }
 
       await publish(event);
     },
