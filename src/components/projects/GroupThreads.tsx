@@ -9,6 +9,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useThreads } from '@/services/threads';
 import type { Thread, ThreadNode } from '@/services/threads';
+import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
 
 interface GroupThreadsProps {
   groupId: string;
@@ -120,8 +121,13 @@ export function GroupThreads({ groupId }: GroupThreadsProps) {
                 onClick={() => setOpenThreadId(thread.root.id)}
                 className="w-full px-4 py-3 text-left hover:bg-cloistr-light/5"
               >
-                <div className="text-sm text-cloistr-light">
-                  {thread.root.subject || thread.root.content.slice(0, 80) || 'Untitled thread'}
+                <div className="flex items-center gap-1.5 text-sm text-cloistr-light">
+                  {thread.root.sealed && <span title="Encrypted thread">🔒</span>}
+                  <span className="min-w-0 truncate">
+                    {thread.root.sealed && looksLikeNip44(thread.root.content)
+                      ? thread.root.subject || 'Encrypted thread'
+                      : thread.root.subject || thread.root.content.slice(0, 80) || 'Untitled thread'}
+                  </span>
                 </div>
                 <div className="mt-1 text-xs text-cloistr-light/50">
                   {thread.replyCount} {thread.replyCount === 1 ? 'reply' : 'replies'} ·{' '}
@@ -191,7 +197,7 @@ function ThreadDetail({
       </div>
 
       <div className="flex-1 space-y-3 overflow-auto p-4">
-        <Comment pubkey={thread.root.pubkey} content={thread.root.content} createdAt={thread.root.createdAt} />
+        <Comment pubkey={thread.root.pubkey} content={thread.root.content} createdAt={thread.root.createdAt} sealed={thread.root.sealed} />
 
         {thread.replies.map((node) => (
           <ReplyTree key={node.id} node={node} onSelect={(n) => setReplyTo({ id: n.id, pubkey: n.pubkey })} />
@@ -241,6 +247,7 @@ function ReplyTree({ node, onSelect }: { node: ThreadNode; onSelect: (n: ThreadN
         pubkey={node.pubkey}
         content={node.content}
         createdAt={node.createdAt}
+        sealed={node.sealed}
         onReply={() => onSelect(node)}
       />
       {node.replies.map((child) => (
@@ -254,21 +261,34 @@ function Comment({
   pubkey,
   content,
   createdAt,
+  sealed,
   onReply,
 }: {
   pubkey: string;
   content: string;
   createdAt: number;
+  sealed?: boolean;
   onReply?: () => void;
 }) {
+  const encrypted = sealed && looksLikeNip44(content);
+
   return (
     <div className="mt-2 rounded border border-cloistr-light/10 bg-cloistr-light/5 p-3">
       <div className="flex items-center justify-between text-xs text-cloistr-light/50">
-        <span>{pubkey.slice(0, 8)}…</span>
+        <span className="flex items-center gap-1">
+          {pubkey.slice(0, 8)}…
+          {sealed && !encrypted && <span title="Decrypted">🔒</span>}
+        </span>
         <span>{new Date(createdAt * 1000).toLocaleString()}</span>
       </div>
-      <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">{content}</p>
-      {onReply && (
+      {encrypted ? (
+        <p className="mt-1 text-sm italic text-cloistr-light/40">
+          🔒 Encrypted — you don't have the key for this thread
+        </p>
+      ) : (
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">{content}</p>
+      )}
+      {onReply && !encrypted && (
         <button
           onClick={onReply}
           className="mt-1 text-xs text-cloistr-light/50 hover:text-cloistr-light"

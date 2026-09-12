@@ -11,6 +11,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAllThreads } from '@/services/threads';
 import { useThreads } from '@/services/threads';
+import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
 
 export function ThreadsView() {
   const { threads, groups, isLoading, error } = useAllThreads();
@@ -107,8 +108,11 @@ export function ThreadsView() {
                 <span className="shrink-0 rounded bg-cloistr-primary/15 px-1.5 py-0.5 text-xs text-cloistr-primary">
                   {groupName}
                 </span>
+                {thread.root.sealed && <span className="shrink-0" title="Encrypted thread">🔒</span>}
                 <span className="min-w-0 truncate text-sm text-cloistr-light">
-                  {thread.root.subject || thread.root.content.slice(0, 80) || 'Untitled thread'}
+                  {thread.root.sealed && looksLikeNip44(thread.root.content)
+                    ? thread.root.subject || 'Encrypted thread'
+                    : thread.root.subject || thread.root.content.slice(0, 80) || 'Untitled thread'}
                 </span>
               </div>
               <div className="mt-1 text-xs text-cloistr-light/50">
