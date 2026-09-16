@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cloistr/auth": "^0.6.0",
+    "@cloistr/auth": "^0.7.0",
     "@cloistr/collab-common": "^0.2.15",
     "@cloistr/ui": "^0.42.0",
     "@nostr-dev-kit/ndk": "^2.18.1",
