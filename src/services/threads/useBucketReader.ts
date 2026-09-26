@@ -15,9 +15,11 @@ import { hexToBytes } from 'nostr-tools/utils';
 import { bytesToHex } from 'nostr-tools/utils';
 import { nip44 } from 'nostr-tools';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { type ThreadKeyStore } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
 import { saveThreadKey, type StorageAdapter } from './threadKeyPersistence';
+import { signerHandoffBuckets } from './signerEcdh';
 import {
   getWindowId,
   computeThreadBucket,
@@ -76,6 +78,7 @@ export function useBucketReader(
   granterPubkeys: string[] = [],
 ): BucketReaderReturn {
   const { subscribe, isConnected } = useNdk();
+  const { signer } = useAuth();
   const keyStore = useThreadKeyStore();
 
   const [messages, setMessages] = useState<UnwrappedMessage[]>([]);
@@ -107,73 +110,87 @@ export function useBucketReader(
     const prevWindow = currWindow - 1;
     const since = prevWindow * WINDOW_SECONDS;
 
-    // Collect real buckets from both current and previous window
     const realCurr = computeRealBuckets(keyStore, currWindow, recipientSecret, granterPubkeys);
     const realPrev = computeRealBuckets(keyStore, prevWindow, recipientSecret, granterPubkeys);
-    const allReal = Array.from(new Set([...realCurr, ...realPrev]));
-    const bucketSet = generateBucketSet(allReal);
 
-    const filter: NDKFilter = {
-      kinds: [GIFT_WRAP_KIND as number],
-      '#t': bucketSet,
-      since,
-    };
+    const doSubscribe = (allReal: string[]) => {
+      const bucketSet = generateBucketSet(allReal);
+      const filter: NDKFilter = {
+        kinds: [GIFT_WRAP_KIND as number],
+        '#t': bucketSet,
+        since,
+      };
+      try {
+        const subscription = subscribeStream(subscribe, [filter], {
+          onEvent: (event: NDKEvent) => {
+            if (messagesRef.current.has(event.id) || handoffsRef.current.has(event.id)) return;
 
-    try {
-      const subscription = subscribeStream(subscribe, [filter], {
-        onEvent: (event: NDKEvent) => {
-          if (messagesRef.current.has(event.id) || handoffsRef.current.has(event.id)) return;
-
-          const msg = tryUnwrapMessage(
-            { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags },
-            keyStore,
-          );
-          if (msg) {
-            messagesRef.current.set(msg.wrapId, msg);
-            setMessages(Array.from(messagesRef.current.values()));
-            setIsFetching(false);
-            return;
-          }
-
-          if (recipientSecret) {
-            const handoff = tryUnwrapHandoff(
-              { id: event.id, pubkey: event.pubkey, content: event.content },
-              recipientSecret,
+            const msg = tryUnwrapMessage(
+              { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags },
+              keyStore,
             );
-            if (handoff) {
-              const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
-              keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
-              handoffsRef.current.set(handoff.wrapId, handoff);
-              setHandoffs(Array.from(handoffsRef.current.values()));
+            if (msg) {
+              messagesRef.current.set(msg.wrapId, msg);
+              setMessages(Array.from(messagesRef.current.values()));
+              setIsFetching(false);
+              return;
+            }
 
-              // Persist the new key at rest, encrypted to our own pubkey
-              if (recipientSecret) {
+            if (recipientSecret) {
+              const handoff = tryUnwrapHandoff(
+                { id: event.id, pubkey: event.pubkey, content: event.content },
+                recipientSecret,
+              );
+              if (handoff) {
+                const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
+                keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
+                handoffsRef.current.set(handoff.wrapId, handoff);
+                setHandoffs(Array.from(handoffsRef.current.values()));
+
                 const ownerPk = getPublicKey(recipientSecret);
                 const ck = nip44.v2.utils.getConversationKey(recipientSecret, ownerPk);
-                const encrypt = async (_pk: string, pt: string) =>
+                const encryptFn = async (_pk: string, pt: string) =>
                   nip44.v2.encrypt(pt, ck);
                 let storage: StorageAdapter | null = null;
                 try { storage = localStorage; } catch { /* unavailable */ }
                 if (storage) {
-                  saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encrypt, storage)
+                  saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encryptFn, storage)
                     .catch(() => {});
                 }
               }
             }
-          }
 
-          setIsFetching(false);
-        },
-        onEose: () => setIsFetching(false),
-      }, { closeOnEose: false });
+            setIsFetching(false);
+          },
+          onEose: () => setIsFetching(false),
+        }, { closeOnEose: false });
 
-      subRef.current = { unsubscribe: () => subscription.stop() };
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bucket subscription failed');
-      setIsFetching(false);
+        subRef.current = { unsubscribe: () => subscription.stop() };
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Bucket subscription failed');
+        setIsFetching(false);
+      }
+    };
+
+    const localReal = Array.from(new Set([...realCurr, ...realPrev]));
+
+    // When no local secret but a NIP-46 signer is available, ask the signer
+    // for handoff buckets via cloistr_ecdh_tag.
+    if (!recipientSecret && signer && granterPubkeys.length > 0) {
+      Promise.all([
+        signerHandoffBuckets(signer, granterPubkeys, currWindow),
+        signerHandoffBuckets(signer, granterPubkeys, prevWindow),
+      ]).then(([currHB, prevHB]) => {
+        doSubscribe(Array.from(new Set([...localReal, ...currHB, ...prevHB])));
+      }).catch(() => {
+        doSubscribe(localReal);
+      });
+      return;
     }
+
+    doSubscribe(localReal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSubscribe, subscribe, recipientSecret, granterKey, keyStore]);
+  }, [canSubscribe, subscribe, recipientSecret, signer, granterKey, keyStore]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => startSubscription(), 0);
