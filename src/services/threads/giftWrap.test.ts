@@ -1,15 +1,3 @@
-/**
- * @fileoverview Tests for kind 1059 gift-wrap construction and trial decryption.
- *
- * Covers the three core operations:
- * 1. Wrapping a thread message (author writes)
- * 2. Trial-decrypting a message (member reads)
- * 3. Wrapping and unwrapping a key handoff (granter grants, member receives)
- *
- * ADMISSION cases (member opens, bystander cannot) are tested alongside
- * refusal cases (wrong key, wrong thread) as required by the task definition.
- */
-
 import { describe, it, expect } from 'vitest';
 import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools';
 import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
@@ -20,221 +8,201 @@ import {
   tryUnwrapMessage,
   wrapKeyHandoff,
   tryUnwrapHandoff,
-  type ThreadRumor,
 } from './giftWrap';
-import { getWindowId, WINDOW_SECONDS } from './bucketCrypto';
-
-// Test fixtures
-function makeRumor(authorSk: Uint8Array, content: string): ThreadRumor {
-  return {
-    kind: 1111,
-    pubkey: getPublicKey(authorSk),
-    content,
-    tags: [['subject', 'Test thread']],
-    created_at: Math.floor(Date.now() / 1000),
-  };
-}
+import { getWindowId, WINDOW_SECONDS, expiryTimestamp } from './bucketCrypto';
 
 describe('wrapThreadMessage', () => {
   const threadSk = generateSecretKey();
-  const authorSk = generateSecretKey();
-  const rumor = makeRumor(authorSk, 'Hello sealed world');
+  const threadSecretHex = bytesToHex(threadSk);
+  const authorPk = getPublicKey(generateSecretKey());
+  const now = 1727222400 + 43200;
 
   it('produces a kind 1059 event', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
     expect(wrap.kind).toBe(GIFT_WRAP_KIND);
   });
 
   it('is signed by a one-time key, not the author', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
-    expect(wrap.pubkey).not.toBe(rumor.pubkey);
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    expect(wrap.pubkey).not.toBe(authorPk);
     expect(verifyEvent(wrap)).toBe(true);
   });
 
-  it('carries only a bucket tag, no p/h/thread/author tags', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
-    const tagNames = wrap.tags.map((t: string[]) => t[0]);
-    expect(tagNames).toEqual(['bucket']);
-    expect(tagNames).not.toContain('p');
-    expect(tagNames).not.toContain('h');
-    expect(tagNames).not.toContain('thread');
+  it('carries exactly t and expiration tags', () => {
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const tagNames = wrap.tags.map((t: string[]) => t[0]).sort();
+    expect(tagNames).toEqual(['expiration', 't']);
+  });
+
+  it('t tag is a 2-char hex bucket value', () => {
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const tTag = wrap.tags.find((t: string[]) => t[0] === 't');
+    expect(tTag![1]).toMatch(/^[0-9a-f]{2}$/);
+  });
+
+  it('expiration tag is (window+2)*86400', () => {
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const expTag = wrap.tags.find((t: string[]) => t[0] === 'expiration');
+    const wid = getWindowId(now);
+    expect(expTag![1]).toBe(String(expiryTimestamp(wid)));
   });
 
   it('uses a different one-time key each time', () => {
-    const a = wrapThreadMessage(rumor, threadSk);
-    const b = wrapThreadMessage(rumor, threadSk);
+    const a = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const b = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
     expect(a.pubkey).not.toBe(b.pubkey);
   });
 
-  it('timestamp falls within the window', () => {
-    const wid = getWindowId();
-    const wrap = wrapThreadMessage(rumor, threadSk, wid);
-    const windowStart = wid * WINDOW_SECONDS;
-    const windowEnd = windowStart + WINDOW_SECONDS;
+  it('timestamp falls between window start and now', () => {
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const windowStart = getWindowId(now) * WINDOW_SECONDS;
     expect(wrap.created_at).toBeGreaterThanOrEqual(windowStart);
-    expect(wrap.created_at).toBeLessThan(windowEnd);
+    expect(wrap.created_at).toBeLessThanOrEqual(now);
+  });
+
+  it('carries no p, h, thread, or author tags', () => {
+    const wrap = wrapThreadMessage('hello', authorPk, threadSecretHex, now);
+    const tagNames = wrap.tags.map((t: string[]) => t[0]);
+    expect(tagNames).not.toContain('p');
+    expect(tagNames).not.toContain('h');
+    expect(tagNames).not.toContain('thread');
   });
 });
 
 describe('tryUnwrapMessage', () => {
   const threadSk = generateSecretKey();
+  const threadSecretHex = bytesToHex(threadSk);
   const threadPubkey = getPublicKey(threadSk);
-  const authorSk = generateSecretKey();
-  const rumor = makeRumor(authorSk, 'Sealed message content');
+  const authorPk = getPublicKey(generateSecretKey());
+  const now = 1727222400 + 43200;
 
   it('ADMISSION: member with the thread key decrypts the message', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
+    const wrap = wrapThreadMessage('sealed content', authorPk, threadSecretHex, now);
     const store = new ThreadKeyStore();
     store.set(threadPubkey, threadSk);
 
     const result = tryUnwrapMessage(wrap, store);
     expect(result).not.toBeNull();
-    expect(result!.rumor.content).toBe('Sealed message content');
-    expect(result!.rumor.pubkey).toBe(getPublicKey(authorSk));
-    expect(result!.threadPubkey).toBe(threadPubkey);
+    expect(result!.plaintext).toBe('sealed content');
+    expect(result!.authorHex).toBe(authorPk);
+    expect(result!.threadId).toBe(threadPubkey);
   });
 
   it('NEGATIVE: bystander without the thread key gets null', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
+    const wrap = wrapThreadMessage('sealed', authorPk, threadSecretHex, now);
     const store = new ThreadKeyStore();
-    // Store has a DIFFERENT thread key
     const otherSk = generateSecretKey();
     store.set(getPublicKey(otherSk), otherSk);
 
-    const result = tryUnwrapMessage(wrap, store);
-    expect(result).toBeNull();
+    expect(tryUnwrapMessage(wrap, store)).toBeNull();
   });
 
   it('NEGATIVE: empty key store gets null', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
-    const store = new ThreadKeyStore();
-
-    const result = tryUnwrapMessage(wrap, store);
-    expect(result).toBeNull();
+    const wrap = wrapThreadMessage('sealed', authorPk, threadSecretHex, now);
+    expect(tryUnwrapMessage(wrap, new ThreadKeyStore())).toBeNull();
   });
 
   it('finds the right key among many', () => {
-    const wrap = wrapThreadMessage(rumor, threadSk);
+    const wrap = wrapThreadMessage('target', authorPk, threadSecretHex, now);
     const store = new ThreadKeyStore();
-
-    // Add several wrong keys
     for (let i = 0; i < 5; i++) {
       const sk = generateSecretKey();
       store.set(getPublicKey(sk), sk);
     }
-    // Add the right one
     store.set(threadPubkey, threadSk);
 
     const result = tryUnwrapMessage(wrap, store);
     expect(result).not.toBeNull();
-    expect(result!.rumor.content).toBe('Sealed message content');
-  });
-
-  it('preserves all inner event fields', () => {
-    const fullRumor: ThreadRumor = {
-      kind: 1111,
-      pubkey: getPublicKey(authorSk),
-      content: 'Full rumor test',
-      tags: [
-        ['subject', 'My Thread'],
-        ['E', 'rootid123', '', getPublicKey(authorSk)],
-      ],
-      created_at: 1700000000,
-    };
-    const wrap = wrapThreadMessage(fullRumor, threadSk);
-    const store = new ThreadKeyStore();
-    store.set(threadPubkey, threadSk);
-
-    const result = tryUnwrapMessage(wrap, store);
-    expect(result!.rumor.kind).toBe(1111);
-    expect(result!.rumor.tags).toEqual(fullRumor.tags);
-    expect(result!.rumor.created_at).toBe(1700000000);
+    expect(result!.plaintext).toBe('target');
   });
 });
 
 describe('wrapKeyHandoff', () => {
   const threadSk = generateSecretKey();
+  const threadSecretHex = bytesToHex(threadSk);
   const granterSk = generateSecretKey();
+  const granterPk = getPublicKey(granterSk);
   const recipientSk = generateSecretKey();
-  const recipientPubkey = getPublicKey(recipientSk);
+  const recipientPk = getPublicKey(recipientSk);
+  const now = 1727222400 + 43200;
 
-  it('produces a kind 1059 event with a bucket tag', () => {
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
+  it('produces a kind 1059 event with t and expiration tags', () => {
+    const wrap = wrapKeyHandoff('thread-1', threadSecretHex, granterSk, recipientPk, now);
     expect(wrap.kind).toBe(GIFT_WRAP_KIND);
-    expect(wrap.tags.map((t: string[]) => t[0])).toEqual(['bucket']);
+    const tagNames = wrap.tags.map((t: string[]) => t[0]).sort();
+    expect(tagNames).toEqual(['expiration', 't']);
   });
 
   it('is signed by a one-time key, not the granter', () => {
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
-    expect(wrap.pubkey).not.toBe(getPublicKey(granterSk));
+    const wrap = wrapKeyHandoff('thread-1', threadSecretHex, granterSk, recipientPk, now);
+    expect(wrap.pubkey).not.toBe(granterPk);
     expect(verifyEvent(wrap)).toBe(true);
   });
 
   it('carries no p tag (recipient is hidden)', () => {
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
-    const pTags = wrap.tags.filter((t: string[]) => t[0] === 'p');
-    expect(pTags).toHaveLength(0);
+    const wrap = wrapKeyHandoff('thread-1', threadSecretHex, granterSk, recipientPk, now);
+    expect(wrap.tags.filter((t: string[]) => t[0] === 'p')).toHaveLength(0);
   });
 });
 
 describe('tryUnwrapHandoff', () => {
   const threadSk = generateSecretKey();
-  const threadPubkey = getPublicKey(threadSk);
+  const threadSecretHex = bytesToHex(threadSk);
   const granterSk = generateSecretKey();
+  const granterPk = getPublicKey(granterSk);
   const recipientSk = generateSecretKey();
-  const recipientPubkey = getPublicKey(recipientSk);
+  const recipientPk = getPublicKey(recipientSk);
+  const now = 1727222400 + 43200;
 
-  it('ADMISSION: recipient unwraps the thread key', () => {
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
+  it('ADMISSION: recipient unwraps the thread key and tid', () => {
+    const wrap = wrapKeyHandoff('my-thread', threadSecretHex, granterSk, recipientPk, now);
     const result = tryUnwrapHandoff(wrap, recipientSk);
-
     expect(result).not.toBeNull();
-    expect(result!.threadPubkey).toBe(threadPubkey);
-    expect(result!.threadSecretHex).toBe(bytesToHex(threadSk));
+    expect(result!.threadId).toBe('my-thread');
+    expect(result!.threadSecretHex).toBe(threadSecretHex);
+    expect(result!.granterPubkey).toBe(granterPk);
   });
 
   it('NEGATIVE: bystander cannot unwrap', () => {
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
+    const wrap = wrapKeyHandoff('t1', threadSecretHex, granterSk, recipientPk, now);
     const bystander = generateSecretKey();
-    const result = tryUnwrapHandoff(wrap, bystander);
-
-    expect(result).toBeNull();
+    expect(tryUnwrapHandoff(wrap, bystander)).toBeNull();
   });
 
-  it('unwrapped key actually decrypts thread messages', () => {
-    // Full round trip: grant key, unwrap it, use it to read a message
-    const wrap = wrapKeyHandoff(threadSk, granterSk, recipientPubkey);
+  it('rejects when granter does not match expected list', () => {
+    const wrap = wrapKeyHandoff('t1', threadSecretHex, granterSk, recipientPk, now);
+    const otherPk = getPublicKey(generateSecretKey());
+    expect(tryUnwrapHandoff(wrap, recipientSk, [otherPk])).toBeNull();
+  });
+
+  it('accepts when granter is in the expected list', () => {
+    const wrap = wrapKeyHandoff('t1', threadSecretHex, granterSk, recipientPk, now);
+    const result = tryUnwrapHandoff(wrap, recipientSk, [granterPk]);
+    expect(result).not.toBeNull();
+  });
+
+  it('unwrapped key decrypts thread messages', () => {
+    const wrap = wrapKeyHandoff('t1', threadSecretHex, granterSk, recipientPk, now);
     const handoff = tryUnwrapHandoff(wrap, recipientSk)!;
 
-    // Use the unwrapped key to read a message
-    const recoveredSk = hexToBytes(handoff.threadSecretHex);
     const store = new ThreadKeyStore();
-    store.set(handoff.threadPubkey, recoveredSk);
+    store.set(getPublicKey(hexToBytes(handoff.threadSecretHex)), hexToBytes(handoff.threadSecretHex));
 
-    const authorSk = generateSecretKey();
-    const rumor = makeRumor(authorSk, 'Post-handoff message');
-    const msgWrap = wrapThreadMessage(rumor, threadSk);
-
+    const authorPk = getPublicKey(generateSecretKey());
+    const msgWrap = wrapThreadMessage('post-handoff', authorPk, threadSecretHex, now);
     const result = tryUnwrapMessage(msgWrap, store);
     expect(result).not.toBeNull();
-    expect(result!.rumor.content).toBe('Post-handoff message');
+    expect(result!.plaintext).toBe('post-handoff');
   });
 
   it('NEGATIVE: removed member cannot read post-rotation messages', () => {
-    // The old key worked, then the thread key rotated
-    const oldThreadSk = threadSk;
-    const newThreadSk = generateSecretKey();
-
-    // Member was removed: they still hold oldThreadSk but not newThreadSk
+    const oldSk = threadSk;
+    const newSk = generateSecretKey();
     const store = new ThreadKeyStore();
-    store.set(getPublicKey(oldThreadSk), oldThreadSk);
+    store.set(getPublicKey(oldSk), oldSk);
 
-    // New message encrypted with the rotated key
-    const authorSk = generateSecretKey();
-    const rumor = makeRumor(authorSk, 'After rotation');
-    const msgWrap = wrapThreadMessage(rumor, newThreadSk);
-
-    const result = tryUnwrapMessage(msgWrap, store);
-    expect(result).toBeNull();
+    const authorPk = getPublicKey(generateSecretKey());
+    const msgWrap = wrapThreadMessage('after rotation', authorPk, bytesToHex(newSk), now);
+    expect(tryUnwrapMessage(msgWrap, store)).toBeNull();
   });
 });

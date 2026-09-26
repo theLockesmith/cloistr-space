@@ -55,7 +55,6 @@ export {
   tryUnwrapMessage,
   wrapKeyHandoff,
   tryUnwrapHandoff,
-  type ThreadRumor,
   type UnwrappedMessage,
   type UnwrappedHandoff,
 } from './giftWrap';
@@ -70,3 +69,11 @@ export {
   useBucketWriter,
   type BucketWriterReturn,
 } from './useBucketWriter';
+
+export {
+  saveThreadKey,
+  loadThreadKeys,
+  clearThreadKeys,
+  type StorageAdapter,
+  type PersistedKey,
+} from './threadKeyPersistence';

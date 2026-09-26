@@ -1,28 +1,29 @@
 /**
- * @fileoverview Bucket-based subscription and trial decryption for sealed threads.
+ * Bucket-based subscription and trial decryption for sealed threads.
  *
- * Subscribes to K=16 buckets per window. Real buckets come from held thread
- * keys (for messages) and ECDH with expected granters (for key handoffs).
- * Random padding fills the rest so every reader's subscription looks identical.
+ * Subscribes to K=16 buckets for both current AND previous window (the kit
+ * publishes into the current window but a message near midnight may arrive
+ * after the window rotates). since = previous window start.
  *
  * Every incoming kind 1059 event is tried against each held thread key.
- * Whatever opens is a message for one of the reader's threads. Events that
- * don't open as messages are tried as key handoffs.
+ * Whatever opens is a message for one of the reader's threads.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { nip44 } from 'nostr-tools';
 import { hexToBytes } from 'nostr-tools/utils';
+import { bytesToHex } from 'nostr-tools/utils';
+import { nip44 } from 'nostr-tools';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { type ThreadKeyStore } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
+import { saveThreadKey, type StorageAdapter } from './threadKeyPersistence';
 import {
   getWindowId,
   computeThreadBucket,
   computeHandoffBucket,
+  ecdhHex,
   generateBucketSet,
-  bucketToTag,
   WINDOW_SECONDS,
 } from './bucketCrypto';
 import {
@@ -34,42 +35,33 @@ import {
 } from './giftWrap';
 
 export interface BucketReaderReturn {
-  /** Decrypted thread messages. */
   messages: UnwrappedMessage[];
-  /** Key handoffs received. Each one has already been added to the key store. */
   handoffs: UnwrappedHandoff[];
   isLoading: boolean;
   error: string | null;
-  /** Force a resubscription (recomputes buckets, refetches). */
   refresh: () => void;
 }
 
 /**
  * Compute the real buckets a reader needs for a given window.
- *
- * Pure, exported for testing.
- *
- * @param keyStore        Thread keys held
- * @param windowId        Current window
- * @param recipientSecret Reader's secret key (for ECDH handoff buckets)
- * @param granterPubkeys  Keys the reader expects handoffs from
+ * Returns hex string bucket values.
  */
 export function computeRealBuckets(
   keyStore: ThreadKeyStore,
   windowId: number,
   recipientSecret: Uint8Array | null,
   granterPubkeys: string[],
-): number[] {
-  const buckets = new Set<number>();
+): string[] {
+  const buckets = new Set<string>();
 
   for (const [, threadSk] of keyStore.entries()) {
-    buckets.add(computeThreadBucket(threadSk, windowId));
+    buckets.add(computeThreadBucket(bytesToHex(threadSk), windowId));
   }
 
   if (recipientSecret) {
     for (const granterPk of granterPubkeys) {
-      const shared = nip44.v2.utils.getConversationKey(recipientSecret, granterPk);
-      buckets.add(computeHandoffBucket(shared, windowId));
+      const ecdh = ecdhHex(recipientSecret, granterPk);
+      buckets.add(computeHandoffBucket(ecdh, windowId));
     }
   }
 
@@ -78,10 +70,6 @@ export function computeRealBuckets(
 
 /**
  * Subscribe to bucketed gift wraps and trial-decrypt them.
- *
- * @param recipientSecret  Reader's 32-byte secret key. Required for handoff
- *   discovery; without it, only messages for already-held thread keys are read.
- * @param granterPubkeys   Keys the reader expects handoffs from.
  */
 export function useBucketReader(
   recipientSecret: Uint8Array | null,
@@ -101,13 +89,8 @@ export function useBucketReader(
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   const canSubscribe = Boolean(subscribe && isConnected);
-
-  // Content identity so a new array with the same keys doesn't resubscribe
   const granterKey = granterPubkeys.slice().sort().join(',');
 
-  // Extracted into a callback so the state resets (setMessages, setIsFetching,
-  // etc.) are not synchronous setState calls inside the effect body. Same
-  // pattern as useThreads.
   const startSubscription = useCallback(() => {
     if (!canSubscribe || !subscribe) return;
 
@@ -119,14 +102,21 @@ export function useBucketReader(
     setIsFetching(true);
     setError(null);
 
-    const windowId = getWindowId();
-    const realBuckets = computeRealBuckets(keyStore, windowId, recipientSecret, granterPubkeys);
-    const bucketSet = generateBucketSet(realBuckets);
-    const bucketTags = bucketSet.map(bucketToTag);
+    const now = Math.floor(Date.now() / 1000);
+    const currWindow = getWindowId(now);
+    const prevWindow = currWindow - 1;
+    const since = prevWindow * WINDOW_SECONDS;
+
+    // Collect real buckets from both current and previous window
+    const realCurr = computeRealBuckets(keyStore, currWindow, recipientSecret, granterPubkeys);
+    const realPrev = computeRealBuckets(keyStore, prevWindow, recipientSecret, granterPubkeys);
+    const allReal = Array.from(new Set([...realCurr, ...realPrev]));
+    const bucketSet = generateBucketSet(allReal);
 
     const filter: NDKFilter = {
       kinds: [GIFT_WRAP_KIND as number],
-      '#bucket': bucketTags,
+      '#t': bucketSet,
+      since,
     };
 
     try {
@@ -134,7 +124,6 @@ export function useBucketReader(
         onEvent: (event: NDKEvent) => {
           if (messagesRef.current.has(event.id) || handoffsRef.current.has(event.id)) return;
 
-          // Try as thread message first
           const msg = tryUnwrapMessage(
             { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags },
             keyStore,
@@ -146,16 +135,30 @@ export function useBucketReader(
             return;
           }
 
-          // Try as key handoff
           if (recipientSecret) {
             const handoff = tryUnwrapHandoff(
               { id: event.id, pubkey: event.pubkey, content: event.content },
               recipientSecret,
             );
             if (handoff) {
-              keyStore.set(handoff.threadPubkey, hexToBytes(handoff.threadSecretHex));
+              const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
+              keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
               handoffsRef.current.set(handoff.wrapId, handoff);
               setHandoffs(Array.from(handoffsRef.current.values()));
+
+              // Persist the new key at rest, encrypted to our own pubkey
+              if (recipientSecret) {
+                const ownerPk = getPublicKey(recipientSecret);
+                const ck = nip44.v2.utils.getConversationKey(recipientSecret, ownerPk);
+                const encrypt = async (_pk: string, pt: string) =>
+                  nip44.v2.encrypt(pt, ck);
+                let storage: StorageAdapter | null = null;
+                try { storage = localStorage; } catch { /* unavailable */ }
+                if (storage) {
+                  saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encrypt, storage)
+                    .catch(() => {});
+                }
+              }
             }
           }
 
@@ -169,7 +172,6 @@ export function useBucketReader(
       setError(err instanceof Error ? err.message : 'Bucket subscription failed');
       setIsFetching(false);
     }
-    // granterKey is the content identity of granterPubkeys
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSubscribe, subscribe, recipientSecret, granterKey, keyStore]);
 
@@ -181,7 +183,6 @@ export function useBucketReader(
     };
   }, [startSubscription, refreshKey]);
 
-  // Resubscribe when the window rotates (buckets change daily)
   useEffect(() => {
     const now = Math.floor(Date.now() / 1000);
     const wid = getWindowId(now);
@@ -202,3 +203,6 @@ export function useBucketReader(
     refresh,
   };
 }
+
+// Re-export for the module; getPublicKey is used inside the hook
+import { getPublicKey } from 'nostr-tools';

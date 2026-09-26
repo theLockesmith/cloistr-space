@@ -7,12 +7,19 @@
  * The store is cleared on logout (pubkey change).
  */
 
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
+import { bytesToHex } from 'nostr-tools/utils';
 import { useNdk } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useAuthStore } from '@/stores/authStore';
 import { ThreadKeyStore, KEY_WRAP_KIND } from './threadKeyStore';
+import {
+  saveThreadKey,
+  loadThreadKeys,
+  clearThreadKeys,
+  type StorageAdapter,
+} from './threadKeyPersistence';
 
 /**
  * Singleton — one store per app lifetime, cleared on logout.
@@ -50,6 +57,18 @@ export function useThreadKeyStore(): ThreadKeyStore {
  * read sealed threads, which is the correct degradation (they can still read
  * plaintext threads).
  */
+function getStorageAdapter(): StorageAdapter | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.getItem('__probe__');
+      return localStorage;
+    }
+  } catch {
+    // Private browsing or storage blocked
+  }
+  return null;
+}
+
 export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
   const { fetchEvents, isConnected } = useNdk();
   const { signer } = useAuth();
@@ -58,13 +77,43 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
   const [loaded, setLoaded] = useState(false);
   const [keyCount, setKeyCount] = useState(0);
 
+  // Phase 1: load persisted keys from encrypted local storage (fast, no relay)
   useEffect(() => {
     const decrypt = signer?.nip44Decrypt?.bind(signer);
+    if (!pubkey || !decrypt) return;
+
+    const storage = getStorageAdapter();
+    if (!storage) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const persisted = await loadThreadKeys(pubkey, decrypt, storage);
+        for (const { threadPubkey, secretHex } of persisted) {
+          if (cancelled) break;
+          if (!store.has(threadPubkey)) {
+            store.importHex(threadPubkey, secretHex);
+          }
+        }
+        if (!cancelled) setKeyCount(store.size);
+      } catch {
+        // Storage unavailable or corrupted — relay fetch will fill the gap
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pubkey, signer, store]);
+
+  // Phase 2: fetch key wraps from relay and persist any new keys
+  useEffect(() => {
+    const decrypt = signer?.nip44Decrypt?.bind(signer);
+    const encrypt = signer?.nip44Encrypt?.bind(signer);
     if (!fetchEvents || !isConnected || !pubkey || !decrypt) {
       return;
     }
 
-    // Already loaded for this pubkey
     if (loaded && store.size > 0) return;
 
     const filter: NDKFilter = {
@@ -72,6 +121,7 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
       '#p': [pubkey],
     };
 
+    const storage = getStorageAdapter();
     let cancelled = false;
 
     (async () => {
@@ -81,32 +131,25 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
         for (const event of events) {
           if (cancelled) break;
 
-          // The `d` tag carries the thread's public key — the identifier we
-          // key the store on.
           const dTag = event.tags.find((t: string[]) => t[0] === 'd');
           if (!dTag?.[1]) continue;
 
           const threadPubkey = dTag[1];
-
-          // Already have this key (from a prior load or a different wrap)
           if (store.has(threadPubkey)) continue;
 
           try {
-            // The event content is the thread's secret key, NIP-44 encrypted
-            // to the member (us). The sender is the event's author (the granter).
-            const secretKeyHex = await decrypt(
-              event.pubkey,
-              event.content
-            );
+            const secretKeyHex = await decrypt(event.pubkey, event.content);
 
             if (secretKeyHex && /^[0-9a-f]{64}$/i.test(secretKeyHex)) {
               store.importHex(threadPubkey, secretKeyHex);
               if (!cancelled) setKeyCount(store.size);
+
+              if (storage && encrypt) {
+                saveThreadKey(threadPubkey, secretKeyHex, pubkey, encrypt, storage).catch(() => {});
+              }
             }
           } catch {
-            // Decryption failure for this wrap — skip silently. Could be a
-            // key rotation where the old wrap has not been garbage-collected,
-            // or a wrap intended for a different key the user no longer holds.
+            // Decryption failure — skip
           }
         }
 
@@ -116,28 +159,24 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
-  // loaded is read inside but deliberately excluded from deps: adding it would
-  // re-trigger the effect every time it flips, creating an infinite loop. The
-  // guard `loaded && store.size > 0` is the intended short-circuit for a
-  // second mount/render, not a reactive dependency.
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchEvents, isConnected, pubkey, signer, store]);
 
-  // Derive loaded/keyCount reset from pubkey: when no user is logged in, the
-  // store is empty and loading has not happened. The store is cleared as a
-  // side effect (it is a singleton, not React state) and the derived values
-  // collapse to their initial state without calling setState.
   const effectiveLoaded = pubkey ? loaded : false;
   const effectiveKeyCount = pubkey ? keyCount : 0;
 
-  // Clear the singleton store when the user logs out.
+  const prevPubkeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!pubkey) {
+    if (!pubkey && prevPubkeyRef.current) {
       store.clear();
+      const storage = getStorageAdapter();
+      if (storage) {
+        clearThreadKeys(prevPubkeyRef.current, storage);
+      }
     }
+    prevPubkeyRef.current = pubkey;
   }, [pubkey, store]);
 
   return { loaded: effectiveLoaded, keyCount: effectiveKeyCount };

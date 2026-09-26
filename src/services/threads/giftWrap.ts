@@ -1,100 +1,72 @@
 /**
- * @fileoverview Kind 1059 gift-wrap construction and trial decryption.
+ * Kind 1059 gift-wrap construction and trial decryption.
  *
- * A thread message is the author's signed event, NIP-44 encrypted to the
- * thread's key, wrapped in a kind 1059 event signed by a fresh random key.
- * The only tag on the wrap is a deliberately crowded bucket tag.
- *
- * Trial decryption: the reader downloads everything in its bucket set and
- * tries each held thread key against each wrap. Whatever opens is theirs.
- * This is local and cheap; download is the real cost.
+ * Wire format matches the kit's thread_wrap.py:
+ *   message inner: JSON {"p": plaintext, "a": author_pubkey_hex}
+ *   handoff inner: JSON {"tid": thread_id, "sec": secret_hex, "g": granter_hex}
+ *   tags: [['t', bucket_hex], ['expiration', String((window+2)*86400)]]
  */
 
 import { generateSecretKey, getPublicKey, nip44, finalizeEvent } from 'nostr-tools';
-import { bytesToHex } from 'nostr-tools/utils';
+import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
 import {
   computeThreadBucket,
   computeHandoffBucket,
+  ecdhHex,
   getWindowId,
-  bucketToTag,
   jitteredTimestamp,
+  expiryTimestamp,
 } from './bucketCrypto';
 import type { ThreadKeyStore } from './threadKeyStore';
 
 export const GIFT_WRAP_KIND = 1059;
 
-/**
- * The inner event carried inside a gift wrap. This is what the author
- * actually wrote, visible only to holders of the thread key.
- */
-export interface ThreadRumor {
-  kind: number;
-  pubkey: string;
-  content: string;
-  tags: string[][];
-  created_at: number;
-}
-
-/**
- * Result of successfully unwrapping a gift-wrapped thread message.
- */
 export interface UnwrappedMessage {
-  /** The decrypted inner event */
-  rumor: ThreadRumor;
-  /** Which thread key opened it */
-  threadPubkey: string;
-  /** The wrap event's id (for deduplication) */
+  plaintext: string;
+  authorHex: string;
+  threadId: string;
   wrapId: string;
 }
 
-/**
- * Result of successfully unwrapping a key handoff.
- */
 export interface UnwrappedHandoff {
-  threadPubkey: string;
+  threadId: string;
   threadSecretHex: string;
-  /** The wrap event's id */
+  granterPubkey: string;
   wrapId: string;
 }
 
 /**
  * Wrap a thread message as a kind 1059 gift-wrapped event.
  *
- * The returned event is fully signed with the one-time key and ready to
- * publish. The caller does NOT sign it again with their own signer.
- *
- * @param rumor          The inner event (author's content, kind, tags)
- * @param threadSecret   The thread's 32-byte secret key
- * @param windowId       Explicit window, or current window
- * @returns A signed kind 1059 event ready for relay submission
+ * @param plaintext       The message text
+ * @param authorPubkey    The real author's pubkey (hex)
+ * @param threadSecretHex The thread's secret key as hex
+ * @param nowSec          Current timestamp in seconds (defaults to now)
  */
 export function wrapThreadMessage(
-  rumor: ThreadRumor,
-  threadSecret: Uint8Array,
-  windowId?: number,
+  plaintext: string,
+  authorPubkey: string,
+  threadSecretHex: string,
+  nowSec?: number,
 ): ReturnType<typeof finalizeEvent> {
-  const wid = windowId ?? getWindowId();
-  const threadPubkey = getPublicKey(threadSecret);
+  const now = nowSec ?? Math.floor(Date.now() / 1000);
+  const wid = getWindowId(now);
+  const threadPubkey = getPublicKey(hexToBytes(threadSecretHex));
 
-  // Fresh one-time keypair, used only for this wrap
   const oneTimeSk = generateSecretKey();
-
-  // Encrypt the rumor to the thread key.
-  // Conversation key = ECDH(oneTimeSk, threadPubkey).
-  // The reader reverses this with ECDH(threadSk, oneTimePubkey).
   const conversationKey = nip44.v2.utils.getConversationKey(oneTimeSk, threadPubkey);
-  const encrypted = nip44.v2.encrypt(JSON.stringify(rumor), conversationKey);
+  const inner = JSON.stringify({ p: plaintext, a: authorPubkey });
+  const encrypted = nip44.v2.encrypt(inner, conversationKey);
 
-  // Compute bucket for this thread + window
-  const bucket = computeThreadBucket(threadSecret, wid);
+  const bucket = computeThreadBucket(threadSecretHex, wid);
+  const expiry = expiryTimestamp(wid);
 
-  // Build and sign with the one-time key
   return finalizeEvent(
     {
       kind: GIFT_WRAP_KIND,
       content: encrypted,
-      tags: [['bucket', bucketToTag(bucket)]],
-      created_at: jitteredTimestamp(wid),
+      tags: [['t', bucket], ['expiration', String(expiry)]],
+      created_at: jitteredTimestamp(now),
     },
     oneTimeSk,
   );
@@ -102,84 +74,68 @@ export function wrapThreadMessage(
 
 /**
  * Try to unwrap a kind 1059 event as a thread message.
- *
- * Tries each held thread key in turn. Returns the first successful
- * decryption, or null if no key opens it (the wrap is for a thread
- * the reader is not a member of, or it is a handoff, not a message).
- *
- * @param wrapEvent  A kind 1059 event from the relay
- * @param keyStore   The reader's thread key store
- * @returns The unwrapped message, or null
+ * Trial-decrypts with each held thread key.
  */
 export function tryUnwrapMessage(
   wrapEvent: { id: string; pubkey: string; content: string; tags: string[][] },
   keyStore: ThreadKeyStore,
 ): UnwrappedMessage | null {
-  // Try each held thread key
   for (const [threadPubkey, threadSk] of keyStore.entries()) {
     try {
       const conversationKey = nip44.v2.utils.getConversationKey(threadSk, wrapEvent.pubkey);
       const decrypted = nip44.v2.decrypt(wrapEvent.content, conversationKey);
-      const rumor = JSON.parse(decrypted) as ThreadRumor;
+      const inner = JSON.parse(decrypted);
 
-      // Sanity check: the inner event must have a pubkey and content
-      if (rumor.pubkey && rumor.content !== undefined) {
-        return { rumor, threadPubkey, wrapId: wrapEvent.id };
+      if (typeof inner.p === 'string' && typeof inner.a === 'string') {
+        return {
+          plaintext: inner.p,
+          authorHex: inner.a,
+          threadId: threadPubkey,
+          wrapId: wrapEvent.id,
+        };
       }
     } catch {
-      // This key did not open this wrap. Try the next one.
+      // Wrong key or not a message. Try the next.
     }
   }
-
   return null;
 }
 
 /**
  * Wrap a thread key handoff as a kind 1059 gift-wrapped event.
  *
- * The handoff contains the thread's secret key, encrypted to the
- * recipient's pubkey, and bucketed by the ECDH shared secret between
- * granter and recipient so only they can find it.
- *
- * @param threadSecret     The thread's 32-byte secret key to hand off
- * @param granterSecret    The granter's 32-byte secret key (for ECDH bucket + encryption)
- * @param recipientPubkey  The new member's public key (hex)
- * @param windowId         Explicit window, or current window
+ * @param threadId         Application-level thread identifier
+ * @param threadSecretHex  The thread's secret key to hand off (hex)
+ * @param granterSk        The granter's secret key (for ECDH bucket computation)
+ * @param memberPubkey     The new member's public key (hex)
+ * @param nowSec           Current timestamp in seconds (defaults to now)
  */
 export function wrapKeyHandoff(
-  threadSecret: Uint8Array,
-  granterSecret: Uint8Array,
-  recipientPubkey: string,
-  windowId?: number,
+  threadId: string,
+  threadSecretHex: string,
+  granterSk: Uint8Array,
+  memberPubkey: string,
+  nowSec?: number,
 ): ReturnType<typeof finalizeEvent> {
-  const wid = windowId ?? getWindowId();
-  const threadPubkey = getPublicKey(threadSecret);
+  const now = nowSec ?? Math.floor(Date.now() / 1000);
+  const wid = getWindowId(now);
+  const granterPubkey = getPublicKey(granterSk);
 
-  // ECDH between granter and recipient for the bucket
-  const ecdhShared = nip44.v2.utils.getConversationKey(granterSecret, recipientPubkey);
-  const bucket = computeHandoffBucket(ecdhShared, wid);
+  const ecdh = ecdhHex(granterSk, memberPubkey);
+  const bucket = computeHandoffBucket(ecdh, wid);
+  const expiry = expiryTimestamp(wid);
 
-  // Fresh one-time key for the wrap
   const oneTimeSk = generateSecretKey();
-
-  // Encrypt the thread key to the recipient.
-  // Uses ECDH(oneTimeSk, recipientPubkey) so the recipient can decrypt
-  // with ECDH(recipientSk, oneTimePubkey).
-  const payload = JSON.stringify({
-    threadPubkey,
-    threadSecret: bytesToHex(threadSecret),
-    type: 'thread-key-handoff',
-  });
-
-  const conversationKey = nip44.v2.utils.getConversationKey(oneTimeSk, recipientPubkey);
+  const conversationKey = nip44.v2.utils.getConversationKey(oneTimeSk, memberPubkey);
+  const payload = JSON.stringify({ tid: threadId, sec: threadSecretHex, g: granterPubkey });
   const encrypted = nip44.v2.encrypt(payload, conversationKey);
 
   return finalizeEvent(
     {
       kind: GIFT_WRAP_KIND,
       content: encrypted,
-      tags: [['bucket', bucketToTag(bucket)]],
-      created_at: jitteredTimestamp(wid),
+      tags: [['t', bucket], ['expiration', String(expiry)]],
+      created_at: jitteredTimestamp(now),
     },
     oneTimeSk,
   );
@@ -188,18 +144,14 @@ export function wrapKeyHandoff(
 /**
  * Try to unwrap a kind 1059 event as a key handoff.
  *
- * Uses the recipient's secret key to attempt decryption. Returns the
- * thread key if successful, null otherwise.
- *
- * For NIP-46 signers that do not expose the raw secret key, the caller
- * must use signer.nip44Decrypt instead and parse the result manually.
- *
- * @param wrapEvent       A kind 1059 event from the relay
- * @param recipientSecret The recipient's 32-byte secret key
+ * @param wrapEvent         The kind 1059 event
+ * @param recipientSecret   The recipient's secret key
+ * @param expectedGranters  If provided, reject handoffs from unknown granters
  */
 export function tryUnwrapHandoff(
   wrapEvent: { id: string; pubkey: string; content: string },
   recipientSecret: Uint8Array,
+  expectedGranters?: string[],
 ): UnwrappedHandoff | null {
   try {
     const conversationKey = nip44.v2.utils.getConversationKey(
@@ -210,20 +162,23 @@ export function tryUnwrapHandoff(
     const payload = JSON.parse(decrypted);
 
     if (
-      payload.type === 'thread-key-handoff' &&
-      payload.threadPubkey &&
-      payload.threadSecret &&
-      /^[0-9a-f]{64}$/i.test(payload.threadSecret)
+      typeof payload.tid === 'string' &&
+      typeof payload.sec === 'string' &&
+      typeof payload.g === 'string' &&
+      /^[0-9a-f]{64}$/i.test(payload.sec)
     ) {
+      if (expectedGranters && !expectedGranters.includes(payload.g)) {
+        return null;
+      }
       return {
-        threadPubkey: payload.threadPubkey,
-        threadSecretHex: payload.threadSecret,
+        threadId: payload.tid,
+        threadSecretHex: payload.sec,
+        granterPubkey: payload.g,
         wrapId: wrapEvent.id,
       };
     }
   } catch {
-    // Not a handoff for us, or not a handoff at all.
+    // Not a handoff for us.
   }
-
   return null;
 }

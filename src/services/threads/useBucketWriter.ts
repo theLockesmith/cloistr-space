@@ -1,5 +1,5 @@
 /**
- * @fileoverview Publish sealed thread messages and key handoffs as bucketed gift wraps.
+ * Publish sealed thread messages and key handoffs as bucketed gift wraps.
  *
  * Each message is wrapped under a one-time key, encrypted to the thread,
  * and tagged with a bucket that rotates daily. The relay sees a kind 1059
@@ -14,34 +14,22 @@ import { useNdk } from '@/services/nostr';
 import {
   wrapThreadMessage,
   wrapKeyHandoff,
-  type ThreadRumor,
 } from './giftWrap';
 
 export interface BucketWriterReturn {
-  /**
-   * Wrap a thread message and publish it.
-   *
-   * The caller builds the ThreadRumor (inner event); this function wraps it
-   * in a kind 1059 gift wrap signed by a fresh one-time key and publishes
-   * the wrap. The user's signer is NOT used for signing.
-   */
   sendMessage: (
-    rumor: ThreadRumor,
-    threadSecret: Uint8Array,
-    windowId?: number,
+    plaintext: string,
+    authorPubkey: string,
+    threadSecretHex: string,
+    nowSec?: number,
   ) => Promise<void>;
 
-  /**
-   * Wrap a key handoff and publish it.
-   *
-   * Grants a thread key to a new member. The handoff is bucketed by
-   * ECDH(granter, recipient), so only they can find it.
-   */
   grantKey: (
-    threadSecret: Uint8Array,
-    granterSecret: Uint8Array,
+    threadId: string,
+    threadSecretHex: string,
+    granterSk: Uint8Array,
     recipientPubkey: string,
-    windowId?: number,
+    nowSec?: number,
   ) => Promise<void>;
 
   canPublish: boolean;
@@ -51,9 +39,6 @@ export function useBucketWriter(): BucketWriterReturn {
   const { createEvent, publish, isConnected } = useNdk();
   const canPublish = Boolean(publish && isConnected);
 
-  // Publish a pre-signed event through NDK. Gift wraps are signed by a
-  // one-time key (not the user's signer), so we construct an NDKEvent with
-  // all fields pre-set. NDK skips signing when sig is already present.
   const publishPreSigned = useCallback(
     async (raw: {
       id: string;
@@ -83,8 +68,13 @@ export function useBucketWriter(): BucketWriterReturn {
   );
 
   const sendMessage = useCallback(
-    async (rumor: ThreadRumor, threadSecret: Uint8Array, windowId?: number) => {
-      const wrap = wrapThreadMessage(rumor, threadSecret, windowId);
+    async (
+      plaintext: string,
+      authorPubkey: string,
+      threadSecretHex: string,
+      nowSec?: number,
+    ) => {
+      const wrap = wrapThreadMessage(plaintext, authorPubkey, threadSecretHex, nowSec);
       await publishPreSigned(wrap);
     },
     [publishPreSigned],
@@ -92,17 +82,13 @@ export function useBucketWriter(): BucketWriterReturn {
 
   const grantKey = useCallback(
     async (
-      threadSecret: Uint8Array,
-      granterSecret: Uint8Array,
+      threadId: string,
+      threadSecretHex: string,
+      granterSk: Uint8Array,
       recipientPubkey: string,
-      windowId?: number,
+      nowSec?: number,
     ) => {
-      const wrap = wrapKeyHandoff(
-        threadSecret,
-        granterSecret,
-        recipientPubkey,
-        windowId,
-      );
+      const wrap = wrapKeyHandoff(threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
       await publishPreSigned(wrap);
     },
     [publishPreSigned],

@@ -1,9 +1,6 @@
-/**
- * @fileoverview Tests for bucket computation primitives.
- */
-
 import { describe, it, expect } from 'vitest';
-import { generateSecretKey, getPublicKey as getPublicKeyDirect, nip44 } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
+import { bytesToHex } from 'nostr-tools/utils';
 import {
   BUCKET_BITS,
   WINDOW_SECONDS,
@@ -11,15 +8,15 @@ import {
   getWindowId,
   computeThreadBucket,
   computeHandoffBucket,
+  ecdhHex,
   generateBucketSet,
-  bucketToTag,
-  tagToBucket,
   jitteredTimestamp,
+  expiryTimestamp,
 } from './bucketCrypto';
 
 describe('getWindowId', () => {
   it('returns the same value for two timestamps in the same 24h window', () => {
-    const midnight = 1727222400; // some midnight UTC
+    const midnight = 1727222400;
     expect(getWindowId(midnight)).toBe(getWindowId(midnight + 3600));
     expect(getWindowId(midnight)).toBe(getWindowId(midnight + 86399));
   });
@@ -37,77 +34,76 @@ describe('getWindowId', () => {
 });
 
 describe('computeThreadBucket', () => {
-  const threadSk = generateSecretKey();
-
-  it('returns a value in [0, 255] for B=8', () => {
-    const bucket = computeThreadBucket(threadSk, 1000);
-    expect(bucket).toBeGreaterThanOrEqual(0);
-    expect(bucket).toBeLessThan(1 << BUCKET_BITS);
+  it('matches kit vector: sha256(hex_secret + decimal_window) first byte as 2-hex', () => {
+    expect(computeThreadBucket('a'.repeat(64), 20000)).toBe('05');
   });
 
-  it('is deterministic: same inputs produce the same bucket', () => {
-    const a = computeThreadBucket(threadSk, 1000);
-    const b = computeThreadBucket(threadSk, 1000);
-    expect(a).toBe(b);
+  it('returns a 2-char lowercase hex string', () => {
+    const sk = generateSecretKey();
+    const b = computeThreadBucket(bytesToHex(sk), 1000);
+    expect(b).toMatch(/^[0-9a-f]{2}$/);
+  });
+
+  it('is deterministic', () => {
+    const hex = bytesToHex(generateSecretKey());
+    expect(computeThreadBucket(hex, 1000)).toBe(computeThreadBucket(hex, 1000));
   });
 
   it('changes when the window changes', () => {
-    // With high probability, different windows produce different buckets
-    // for the same thread. Test over 10 windows to avoid false failures.
-    const buckets = new Set<number>();
+    const hex = bytesToHex(generateSecretKey());
+    const buckets = new Set<string>();
     for (let w = 0; w < 10; w++) {
-      buckets.add(computeThreadBucket(threadSk, w));
+      buckets.add(computeThreadBucket(hex, w));
     }
     expect(buckets.size).toBeGreaterThan(1);
   });
+});
 
-  it('different threads produce different buckets (usually)', () => {
-    const other = generateSecretKey();
-    const buckets = new Set<number>();
-    for (let w = 0; w < 10; w++) {
-      buckets.add(computeThreadBucket(threadSk, w));
-      buckets.add(computeThreadBucket(other, w));
-    }
-    expect(buckets.size).toBeGreaterThan(2);
+describe('ecdhHex', () => {
+  it('matches kit vector: sha256(ECDH x-coordinate) as 64-hex', () => {
+    const sk = new Uint8Array(32);
+    sk[31] = 1;
+    const gx = '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+    expect(ecdhHex(sk, gx)).toBe(
+      '132f39a98c31baaddba6525f5d43f2954472097fa15265f45130bfdb70e51def',
+    );
+  });
+
+  it('is symmetric: both parties compute the same value', () => {
+    const alice = generateSecretKey();
+    const bob = generateSecretKey();
+    expect(ecdhHex(alice, getPublicKey(bob))).toBe(ecdhHex(bob, getPublicKey(alice)));
+  });
+
+  it('returns 64-char lowercase hex', () => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(generateSecretKey());
+    expect(ecdhHex(sk, pk)).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
 describe('computeHandoffBucket', () => {
-  it('returns a value in [0, 255]', () => {
-    const shared = new Uint8Array(32);
-    globalThis.crypto.getRandomValues(shared);
-    const bucket = computeHandoffBucket(shared, 1000);
-    expect(bucket).toBeGreaterThanOrEqual(0);
-    expect(bucket).toBeLessThan(1 << BUCKET_BITS);
+  it('matches kit vector: sha256(ecdh_hex + "handoff" + decimal_window) first byte', () => {
+    expect(computeHandoffBucket('b'.repeat(64), 20000)).toBe('bd');
   });
 
-  it('is deterministic', () => {
-    const shared = new Uint8Array(32);
-    globalThis.crypto.getRandomValues(shared);
-    expect(computeHandoffBucket(shared, 500)).toBe(computeHandoffBucket(shared, 500));
-  });
-
-  it('ECDH is symmetric: both parties compute the same bucket', () => {
+  it('ECDH-derived: both parties compute the same handoff bucket', () => {
     const alice = generateSecretKey();
     const bob = generateSecretKey();
-    const aliceSide = nip44.v2.utils.getConversationKey(alice, getPublicKeyDirect(bob));
-    const bobSide = nip44.v2.utils.getConversationKey(bob, getPublicKeyDirect(alice));
-
-    const windowId = 2000;
-    expect(computeHandoffBucket(aliceSide, windowId)).toBe(
-      computeHandoffBucket(bobSide, windowId),
-    );
+    const e1 = ecdhHex(alice, getPublicKey(bob));
+    const e2 = ecdhHex(bob, getPublicKey(alice));
+    expect(computeHandoffBucket(e1, 2000)).toBe(computeHandoffBucket(e2, 2000));
   });
 });
 
 describe('generateBucketSet', () => {
   it('always returns exactly K buckets', () => {
-    const set = generateBucketSet([10, 20, 30]);
+    const set = generateBucketSet(['0a', '1b', '2c']);
     expect(set).toHaveLength(BUCKETS_PER_READER);
   });
 
   it('includes all real buckets', () => {
-    const real = [10, 20, 30];
+    const real = ['0a', '1b', '2c'];
     const set = generateBucketSet(real);
     for (const b of real) {
       expect(set).toContain(b);
@@ -119,48 +115,33 @@ describe('generateBucketSet', () => {
     expect(set).toHaveLength(BUCKETS_PER_READER);
   });
 
-  it('handles more real buckets than K by including all', () => {
-    const real = Array.from({ length: 20 }, (_, i) => i);
-    const set = generateBucketSet(real);
-    // All 20 real buckets must be present, even though K=16
-    for (const b of real) {
-      expect(set).toContain(b);
-    }
-  });
-
-  it('all values are in [0, 255]', () => {
-    const set = generateBucketSet([5]);
+  it('all values are 2-char hex', () => {
+    const set = generateBucketSet(['05']);
     for (const b of set) {
-      expect(b).toBeGreaterThanOrEqual(0);
-      expect(b).toBeLessThan(256);
+      expect(b).toMatch(/^[0-9a-f]{2}$/);
     }
-  });
-});
-
-describe('bucketToTag / tagToBucket', () => {
-  it('round-trips', () => {
-    for (const n of [0, 1, 15, 16, 127, 255]) {
-      expect(tagToBucket(bucketToTag(n))).toBe(n);
-    }
-  });
-
-  it('produces 2-char hex', () => {
-    expect(bucketToTag(0)).toBe('00');
-    expect(bucketToTag(15)).toBe('0f');
-    expect(bucketToTag(255)).toBe('ff');
   });
 });
 
 describe('jitteredTimestamp', () => {
-  it('falls within the window', () => {
-    const windowId = 20000;
-    const windowStart = windowId * WINDOW_SECONDS;
-    const windowEnd = windowStart + WINDOW_SECONDS;
-
+  it('falls between window start and the given timestamp', () => {
+    const now = 1727222400 + 43200; // midday
+    const windowStart = getWindowId(now) * WINDOW_SECONDS;
     for (let i = 0; i < 20; i++) {
-      const ts = jitteredTimestamp(windowId);
+      const ts = jitteredTimestamp(now);
       expect(ts).toBeGreaterThanOrEqual(windowStart);
-      expect(ts).toBeLessThan(windowEnd);
+      expect(ts).toBeLessThanOrEqual(now);
     }
+  });
+
+  it('returns window start when timestamp is exactly at window start', () => {
+    const windowStart = 20000 * WINDOW_SECONDS;
+    expect(jitteredTimestamp(windowStart)).toBe(windowStart);
+  });
+});
+
+describe('expiryTimestamp', () => {
+  it('is 2 windows after the given window', () => {
+    expect(expiryTimestamp(20000)).toBe(20002 * WINDOW_SECONDS);
   });
 });
