@@ -140,6 +140,14 @@ export class ThreadKeyStore {
     const sk = this.keys.get(threadPubkey);
     return sk ? bytesToHex(sk) : undefined;
   }
+
+  /**
+   * Iterate over all held keys. Used by trial decryption to try each
+   * thread key against an incoming gift-wrapped event.
+   */
+  entries(): IterableIterator<[string, Uint8Array]> {
+    return this.keys.entries();
+  }
 }
 
 /**
