@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
+import { generateSecretKey, getPublicKey } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import {
-  BUCKET_BITS,
   WINDOW_SECONDS,
   BUCKETS_PER_READER,
   getWindowId,

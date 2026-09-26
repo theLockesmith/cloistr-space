@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
-import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
+import { bytesToHex } from 'nostr-tools/utils';
 import {
   computeThreadBucket,
   computeHandoffBucket,
@@ -57,7 +57,6 @@ describe('cross-implementation: inner payload format', () => {
   it('message inner is JSON {p, a}', () => {
     const threadSk = generateSecretKey();
     const threadHex = bytesToHex(threadSk);
-    const threadPk = getPublicKey(threadSk);
     const authorPk = getPublicKey(generateSecretKey());
     const now = 1727222400 + 43200;
 

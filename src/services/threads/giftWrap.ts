@@ -8,7 +8,7 @@
  */
 
 import { generateSecretKey, getPublicKey, nip44, finalizeEvent } from 'nostr-tools';
-import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
+import { hexToBytes } from 'nostr-tools/utils';
 import {
   computeThreadBucket,
   computeHandoffBucket,

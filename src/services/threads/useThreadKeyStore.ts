@@ -9,7 +9,7 @@
 
 import { useMemo, useEffect, useState, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { bytesToHex } from 'nostr-tools/utils';
+
 import { useNdk } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useAuthStore } from '@/stores/authStore';
@@ -103,7 +103,7 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
     })();
 
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [pubkey, signer, store]);
 
   // Phase 2: fetch key wraps from relay and persist any new keys
@@ -160,7 +160,7 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
     })();
 
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [fetchEvents, isConnected, pubkey, signer, store]);
 
   const effectiveLoaded = pubkey ? loaded : false;
