@@ -77,3 +77,8 @@ export {
   type StorageAdapter,
   type PersistedKey,
 } from './threadKeyPersistence';
+
+export {
+  signerEcdhTag,
+  signerHandoffBuckets,
+} from './signerEcdh';
