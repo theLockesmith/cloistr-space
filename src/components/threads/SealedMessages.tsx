@@ -1,0 +1,203 @@
+/**
+ * Sealed thread messages view: reads from the bucketed blind mailbox.
+ *
+ * Subscribes to K=16 buckets, trial-decrypts incoming kind 1059 wraps
+ * against held thread keys, and displays the plaintext. Messages whose
+ * key the user does not hold are invisible — they never leave the
+ * relay's encrypted form.
+ */
+
+import { useState, useCallback, useMemo } from 'react';
+import { useAuthStore } from '@/stores/authStore';
+import {
+  useThreadKeyStore,
+  useThreadKeyLoader,
+  useBucketReader,
+  useBucketWriter,
+  type UnwrappedMessage,
+} from '@/services/threads';
+import { useAuthorProfiles } from '@/services/profile';
+
+export function SealedMessages() {
+  const { pubkey } = useAuthStore();
+  const { loaded, keyCount } = useThreadKeyLoader();
+  const { messages, handoffs, isLoading, error, refresh } = useBucketReader(null, []);
+
+  const authorPubkeys = useMemo(
+    () => [...new Set(messages.map((m) => m.authorHex))],
+    [messages],
+  );
+  const profiles = useAuthorProfiles(authorPubkeys);
+
+  const byThread = useMemo(() => {
+    const map = new Map<string, UnwrappedMessage[]>();
+    for (const msg of messages) {
+      const list = map.get(msg.threadId) ?? [];
+      list.push(msg);
+      map.set(msg.threadId, list);
+    }
+    return map;
+  }, [messages]);
+
+  if (!pubkey) {
+    return (
+      <div className="p-8 text-center text-sm text-cloistr-light/60">
+        Log in to read sealed messages.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-cloistr-light/10 p-4">
+        <div>
+          <h3 className="text-sm font-medium text-cloistr-light">Sealed Messages</h3>
+          <p className="text-xs text-cloistr-light/50">
+            {keyCount} thread {keyCount === 1 ? 'key' : 'keys'} ·{' '}
+            {messages.length} {messages.length === 1 ? 'message' : 'messages'} ·{' '}
+            {handoffs.length} {handoffs.length === 1 ? 'handoff' : 'handoffs'}
+          </p>
+        </div>
+        <button
+          onClick={refresh}
+          className="rounded px-3 py-1.5 text-xs text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="m-4 rounded border border-cloistr-error/40 bg-cloistr-error/10 p-3 text-sm text-cloistr-light/80">
+          {error}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto">
+        {isLoading && !messages.length && (
+          <p className="p-4 text-sm text-cloistr-light/50">
+            {!loaded ? 'Loading thread keys…' : 'Scanning buckets…'}
+          </p>
+        )}
+
+        {!isLoading && keyCount === 0 && (
+          <div className="p-8 text-center">
+            <p className="text-sm text-cloistr-light">No thread keys held</p>
+            <p className="mt-1 text-xs text-cloistr-light/50">
+              You need to receive a thread key handoff before you can read sealed messages.
+            </p>
+          </div>
+        )}
+
+        {!isLoading && keyCount > 0 && messages.length === 0 && (
+          <div className="p-8 text-center">
+            <p className="text-sm text-cloistr-light">No sealed messages found</p>
+            <p className="mt-1 text-xs text-cloistr-light/50">
+              Holding {keyCount} {keyCount === 1 ? 'key' : 'keys'}, scanning {16} buckets per window.
+            </p>
+          </div>
+        )}
+
+        {Array.from(byThread.entries()).map(([threadId, msgs]) => (
+          <div key={threadId} className="border-b border-cloistr-light/5">
+            <div className="bg-cloistr-light/5 px-4 py-2 text-xs text-cloistr-light/50">
+              Thread {threadId.slice(0, 12)}…
+            </div>
+            <div className="space-y-2 p-4">
+              {msgs.map((msg) => {
+                const profile = profiles.get(msg.authorHex);
+                const name = profile?.displayName || profile?.name || msg.authorHex.slice(0, 8) + '…';
+                return (
+                  <div key={msg.wrapId} className="rounded border border-cloistr-light/10 bg-cloistr-light/5 p-3">
+                    <div className="flex items-center gap-2 text-xs text-cloistr-light/50">
+                      <span>{name}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">
+                      {msg.plaintext}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {keyCount > 0 && <ComposeBar />}
+    </div>
+  );
+}
+
+function ComposeBar() {
+  const { pubkey } = useAuthStore();
+  const keyStore = useThreadKeyStore();
+  const { sendMessage, canPublish } = useBucketWriter();
+
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const threadEntries = useMemo(
+    () => Array.from(keyStore.entries()),
+    [keyStore],
+  );
+  const [selectedThread, setSelectedThread] = useState<string>('');
+  const activeThread = selectedThread || (threadEntries.length > 0 ? threadEntries[0][0] : '');
+
+  const send = useCallback(async () => {
+    if (!text.trim() || !pubkey || !activeThread || busy) return;
+
+    const entry = threadEntries.find(([pk]) => pk === activeThread);
+    if (!entry) return;
+
+    setBusy(true);
+    setErr(null);
+    try {
+      const [, threadSk] = entry;
+      const { bytesToHex } = await import('nostr-tools/utils');
+      await sendMessage(text.trim(), pubkey, bytesToHex(threadSk));
+      setText('');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to send');
+    } finally {
+      setBusy(false);
+    }
+  }, [text, pubkey, activeThread, threadEntries, busy, sendMessage]);
+
+  if (!canPublish) return null;
+
+  return (
+    <div className="border-t border-cloistr-light/10 p-4">
+      {threadEntries.length > 1 && (
+        <select
+          value={activeThread}
+          onChange={(e) => setSelectedThread(e.target.value)}
+          className="mb-2 w-full rounded border border-cloistr-light/10 bg-cloistr-light/5 p-1.5 text-xs text-cloistr-light"
+        >
+          {threadEntries.map(([pk]) => (
+            <option key={pk} value={pk}>
+              Thread {pk.slice(0, 12)}…
+            </option>
+          ))}
+        </select>
+      )}
+      {err && <div className="mb-2 text-xs text-cloistr-error">{err}</div>}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={text}
+          placeholder="Sealed message…"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && text.trim() && void send()}
+          className="flex-1 rounded border border-cloistr-light/10 bg-cloistr-light/5 p-2 text-sm text-cloistr-light"
+        />
+        <button
+          onClick={() => void send()}
+          disabled={busy || !text.trim()}
+          className="rounded bg-cloistr-primary px-4 text-sm text-cloistr-dark disabled:opacity-50"
+        >
+          {busy ? '…' : 'Send'}
+        </button>
+      </div>
+    </div>
+  );
+}
