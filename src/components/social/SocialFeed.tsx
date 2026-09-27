@@ -10,7 +10,7 @@ import { useFeed, useCompose, useNoteActions } from '@/services/social';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
 import { reactionPayload, isRenderable, type EmojiEntry } from '@/services/social/emojiSets';
 import { useMirrorSign, type MirrorMap } from '@/services/cloistr/useMirrorSign';
-import { useLongPressMenu } from '@/services/social/useLongPressMenu';
+import { useContextMenuTrigger } from '@cloistr/ui';
 import { ReactionPicker } from './ReactionPicker';
 import { ShareMenu } from './ShareMenu';
 import { RepostMenu } from './RepostMenu';
@@ -494,7 +494,7 @@ function NoteCard({
 
   // Plain click still sends the default heart. Hold, right-click or ArrowDown
   // open the picker instead.
-  const { handlers: reactHandlers } = useLongPressMenu({
+  const { handlers: reactHandlers } = useContextMenuTrigger({
     onOpen: () => setPickerOpen(true),
     onActivate: onReact,
     disabled: !canAct,

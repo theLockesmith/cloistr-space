@@ -2,7 +2,7 @@
  * @fileoverview Pick a reaction emoji.
  *
  * Opened by holding, right-clicking, or ArrowDown on the reaction button --
- * see useLongPressMenu. A plain click never reaches here; it still sends the
+ * see useContextMenuTrigger (@cloistr/ui). A plain click never reaches here; it still sends the
  * default heart, unchanged.
  *
  * Custom emoji images are served through the blossom mirror at
