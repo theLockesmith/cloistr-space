@@ -17,11 +17,27 @@ import {
   type UnwrappedMessage,
 } from '@/services/threads';
 import { useAuthorProfiles } from '@/services/profile';
+import { useGroupMembers } from '@/services/groups/useGroupMembers';
+import { config } from '@/config/environment';
 
-export function SealedMessages() {
+interface SealedMessagesProps {
+  groupId: string;
+}
+
+export function SealedMessages({ groupId }: SealedMessagesProps) {
   const { pubkey } = useAuthStore();
   const { loaded, keyCount } = useThreadKeyLoader();
-  const { messages, handoffs, isLoading, error, refresh } = useBucketReader(null, []);
+  const { members } = useGroupMembers(groupId);
+
+  const granterPubkeys = useMemo(() => {
+    const set = new Set(config.threadGranters);
+    for (const m of members) {
+      if (m.isAdmin) set.add(m.pubkey);
+    }
+    return Array.from(set);
+  }, [members]);
+
+  const { messages, handoffs, isLoading, error, refresh } = useBucketReader(null, granterPubkeys);
 
   const authorPubkeys = useMemo(
     () => [...new Set(messages.map((m) => m.authorHex))],
