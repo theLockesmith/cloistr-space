@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -36,6 +36,10 @@ vi.mock('@/services/threads', () => ({
     reply: vi.fn(),
     refresh: vi.fn(),
   }),
+}));
+
+vi.mock('./SealedMessages', () => ({
+  SealedMessages: () => <div data-testid="sealed-stub">Sealed stub</div>,
 }));
 
 const { ThreadsView } = await import('./ThreadsView');
@@ -86,6 +90,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ThreadsView sealed indicators', () => {
+  function switchToDiscussions() {
+    fireEvent.click(screen.getByRole('button', { name: /discussions/i }));
+  }
+
   it('shows lock emoji on sealed threads', () => {
     groupFixtures = [{ id: 'devs', name: 'Developers' }];
     allThreadFixtures = [
@@ -100,6 +108,7 @@ describe('ThreadsView sealed indicators', () => {
     ];
 
     render(<ThreadsView />);
+    switchToDiscussions();
 
     expect(screen.getByTitle('Encrypted thread')).toBeInTheDocument();
     expect(screen.getByText('Private discussion')).toBeInTheDocument();
@@ -118,6 +127,7 @@ describe('ThreadsView sealed indicators', () => {
     ];
 
     render(<ThreadsView />);
+    switchToDiscussions();
 
     expect(screen.getByText('Encrypted thread')).toBeInTheDocument();
     expect(screen.queryByText(FAKE_CIPHERTEXT)).not.toBeInTheDocument();
@@ -137,6 +147,7 @@ describe('ThreadsView sealed indicators', () => {
     ];
 
     render(<ThreadsView />);
+    switchToDiscussions();
 
     expect(screen.getByText('Sprint retro')).toBeInTheDocument();
     expect(screen.queryByText(FAKE_CIPHERTEXT)).not.toBeInTheDocument();
@@ -154,6 +165,7 @@ describe('ThreadsView sealed indicators', () => {
     ];
 
     render(<ThreadsView />);
+    switchToDiscussions();
 
     expect(screen.getByText(/Lunch plans for Friday/)).toBeInTheDocument();
     expect(screen.queryByTitle('Encrypted thread')).not.toBeInTheDocument();

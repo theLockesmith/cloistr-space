@@ -12,11 +12,15 @@ import { useNavigate } from 'react-router-dom';
 import { useAllThreads } from '@/services/threads';
 import { useThreads } from '@/services/threads';
 import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
+import { SealedMessages } from './SealedMessages';
+
+type ThreadsTab = 'discussions' | 'sealed';
 
 export function ThreadsView() {
   const { threads, groups, isLoading, error } = useAllThreads();
   const navigate = useNavigate();
 
+  const [activeTab, setActiveTab] = useState<ThreadsTab>('sealed');
   const [composing, setComposing] = useState(false);
   const [targetGroup, setTargetGroup] = useState<string>('');
   const [subject, setSubject] = useState('');
@@ -34,10 +38,12 @@ export function ThreadsView() {
         <div>
           <h1 className="text-xl font-medium text-cloistr-light">Threads</h1>
           <p className="mt-1 text-sm text-cloistr-light/60">
-            Longer discussions from your projects, kept separate from the chat.
+            {activeTab === 'sealed'
+              ? 'End-to-end encrypted messages, visible only to key holders.'
+              : 'Longer discussions from your projects, kept separate from the chat.'}
           </p>
         </div>
-        {groups.length > 0 && (
+        {activeTab === 'discussions' && groups.length > 0 && (
           <button
             onClick={() => setComposing((c) => !c)}
             className="shrink-0 rounded bg-cloistr-primary px-3 py-1.5 text-sm text-cloistr-dark"
@@ -46,6 +52,34 @@ export function ThreadsView() {
           </button>
         )}
       </div>
+
+      <div className="flex gap-1 border-b border-cloistr-light/10">
+        <button
+          onClick={() => setActiveTab('sealed')}
+          className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            activeTab === 'sealed'
+              ? 'border-cloistr-primary text-cloistr-primary'
+              : 'border-transparent text-cloistr-light/60 hover:text-cloistr-light'
+          }`}
+        >
+          Sealed
+        </button>
+        <button
+          onClick={() => setActiveTab('discussions')}
+          className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            activeTab === 'discussions'
+              ? 'border-cloistr-primary text-cloistr-primary'
+              : 'border-transparent text-cloistr-light/60 hover:text-cloistr-light'
+          }`}
+        >
+          Discussions
+        </button>
+      </div>
+
+      {activeTab === 'sealed' && <SealedMessages />}
+
+      {activeTab === 'discussions' && (<>
+
 
       {composing && selectedGroup && (
         <NewThreadForm
@@ -123,6 +157,7 @@ export function ThreadsView() {
           </li>
         ))}
       </ul>
+      </>)}
     </div>
   );
 }

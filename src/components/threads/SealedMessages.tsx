@@ -21,13 +21,13 @@ import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
 
 interface SealedMessagesProps {
-  groupId: string;
+  groupId?: string;
 }
 
 export function SealedMessages({ groupId }: SealedMessagesProps) {
   const { pubkey } = useAuthStore();
   const { loaded, keyCount } = useThreadKeyLoader();
-  const { members } = useGroupMembers(groupId);
+  const { members } = useGroupMembers(groupId ?? '');
 
   const granterPubkeys = useMemo(() => {
     const set = new Set(config.threadGranters);
