@@ -163,7 +163,7 @@ export function GroupWorkspace({ groupId, groupName, onLeaveGroup }: GroupWorksp
           <GroupThreads groupId={groupId} />
         )}
         {activeTab === 'sealed' && (
-          <SealedMessages />
+          <SealedMessages groupId={groupId} />
         )}
         {activeTab === 'files' && (
           <GroupFiles groupId={groupId} />

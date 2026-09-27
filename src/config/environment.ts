@@ -17,6 +17,12 @@ export const config = {
   blossomApiUrl: import.meta.env.VITE_BLOSSOM_API ?? 'https://files.cloistr.xyz',
   discoveryApiUrl: import.meta.env.VITE_DISCOVERY_API ?? 'https://discover.cloistr.xyz/api',
 
+  // Thread handoff granters (comma-separated hex pubkeys)
+  threadGranters: ((import.meta.env.VITE_THREAD_GRANTERS as string | undefined) ?? '3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   // Feature flags
   enableDevTools: import.meta.env.DEV,
 } as const;
