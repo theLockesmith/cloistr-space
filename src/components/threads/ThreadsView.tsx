@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAllThreads } from '@/services/threads';
 import { useThreads } from '@/services/threads';
 import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
+import { SealedMessages } from './SealedMessages';
 
 export function ThreadsView() {
   const { threads, groups, isLoading, error } = useAllThreads();
@@ -123,6 +124,10 @@ export function ThreadsView() {
           </li>
         ))}
       </ul>
+
+      <div className="rounded-lg border border-cloistr-light/10">
+        <SealedMessages />
+      </div>
     </div>
   );
 }

@@ -51,6 +51,22 @@ beforeEach(() => {
   });
 });
 
+describe('SealedMessages without groupId (top-level Threads page)', () => {
+  it('uses only fleet granters when no groupId is provided', () => {
+    render(<SealedMessages />);
+
+    const [, granters] = mockUseBucketReader.mock.calls[0];
+    expect(granters).toContain('3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4');
+    expect(granters).toHaveLength(1);
+  });
+
+  it('does not call useGroupMembers with a real group id when groupId is absent', () => {
+    render(<SealedMessages />);
+
+    expect(mockMembers).toHaveBeenCalledWith('');
+  });
+});
+
 describe('SealedMessages granter list', () => {
   it('passes admin pubkeys and fleet granters to useBucketReader', () => {
     render(<SealedMessages groupId="test-group" />);

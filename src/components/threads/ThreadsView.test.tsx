@@ -36,6 +36,28 @@ vi.mock('@/services/threads', () => ({
     reply: vi.fn(),
     refresh: vi.fn(),
   }),
+  useThreadKeyStore: () => new Map(),
+  useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
+  useBucketReader: () => ({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn() }),
+  useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: false }),
+}));
+
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: () => ({ pubkey: 'aabbcc' }),
+}));
+
+vi.mock('@/services/groups/useGroupMembers', () => ({
+  useGroupMembers: () => ({ members: [], isLoading: false, error: null, unverifiable: false, refresh: vi.fn() }),
+}));
+
+vi.mock('@/services/profile', () => ({
+  useAuthorProfiles: () => new Map(),
+}));
+
+vi.mock('@/config/environment', () => ({
+  config: {
+    threadGranters: ['3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4'],
+  },
 }));
 
 const { ThreadsView } = await import('./ThreadsView');
@@ -84,6 +106,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 // Cross-group listing sealed indicators
 // ---------------------------------------------------------------------------
+
+describe('ThreadsView sealed messages section', () => {
+  it('renders SealedMessages on the top-level Threads page without requiring a group', () => {
+    groupFixtures = [];
+    allThreadFixtures = [];
+
+    render(<ThreadsView />);
+
+    expect(screen.getByText('Sealed Messages')).toBeInTheDocument();
+  });
+});
 
 describe('ThreadsView sealed indicators', () => {
   it('shows lock emoji on sealed threads', () => {
