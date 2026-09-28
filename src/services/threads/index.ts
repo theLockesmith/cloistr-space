@@ -63,6 +63,7 @@ export {
   useBucketReader,
   computeRealBuckets,
   type BucketReaderReturn,
+  type BucketReaderDebug,
 } from './useBucketReader';
 
 export {

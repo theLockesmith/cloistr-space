@@ -39,7 +39,7 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
     return Array.from(set);
   }, [members, groupId]);
 
-  const { messages, handoffs, isLoading, error, refresh } = useBucketReader(null, granterPubkeys);
+  const { messages, handoffs, isLoading, error, refresh, debug } = useBucketReader(null, granterPubkeys);
 
   const authorPubkeys = useMemo(
     () => [...new Set(messages.map((m) => m.authorHex))],
@@ -75,6 +75,12 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
             {messages.length} {messages.length === 1 ? 'message' : 'messages'} ·{' '}
             {handoffs.length} {handoffs.length === 1 ? 'handoff' : 'handoffs'}
           </p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs text-cloistr-light/30">diag</summary>
+            <pre className="mt-1 max-h-32 overflow-auto rounded bg-cloistr-dark/50 p-2 text-xs text-cloistr-light/40">
+{JSON.stringify(debug, null, 2)}
+            </pre>
+          </details>
         </div>
         <button
           onClick={refresh}

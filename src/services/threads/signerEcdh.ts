@@ -13,7 +13,10 @@ export async function signerEcdhTag(
   peerPubkey: string,
   windowId: number,
 ): Promise<string | null> {
-  if (!isNip46Signer(signer)) return null;
+  if (!isNip46Signer(signer)) {
+    console.warn('[signerEcdhTag] signer has no sendRequest method');
+    return null;
+  }
 
   try {
     const result = await signer.sendRequest('cloistr_ecdh_tag', [
@@ -21,8 +24,10 @@ export async function signerEcdhTag(
       String(windowId),
     ]);
     if (/^[0-9a-f]{2}$/.test(result)) return result;
+    console.warn('[signerEcdhTag] result did not match 2-hex pattern:', result);
     return null;
-  } catch {
+  } catch (err) {
+    console.warn('[signerEcdhTag] call failed:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }

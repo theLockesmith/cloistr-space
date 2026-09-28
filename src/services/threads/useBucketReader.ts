@@ -36,12 +36,23 @@ import {
   type UnwrappedHandoff,
 } from './giftWrap';
 
+export interface BucketReaderDebug {
+  hasSigner: boolean;
+  isNip46: boolean;
+  granterCount: number;
+  handoffBuckets: string[];
+  realBuckets: string[];
+  windowId: number;
+  signerError: string | null;
+}
+
 export interface BucketReaderReturn {
   messages: UnwrappedMessage[];
   handoffs: UnwrappedHandoff[];
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
+  debug: BucketReaderDebug;
 }
 
 /**
@@ -86,6 +97,15 @@ export function useBucketReader(
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [debug, setDebug] = useState<BucketReaderDebug>({
+    hasSigner: false,
+    isNip46: false,
+    granterCount: 0,
+    handoffBuckets: [],
+    realBuckets: [],
+    windowId: 0,
+    signerError: null,
+  });
 
   const messagesRef = useRef(new Map<string, UnwrappedMessage>());
   const handoffsRef = useRef(new Map<string, UnwrappedHandoff>());
@@ -174,19 +194,46 @@ export function useBucketReader(
 
     const localReal = Array.from(new Set([...realCurr, ...realPrev]));
 
-    // When no local secret but a NIP-46 signer is available, ask the signer
-    // for handoff buckets via cloistr_ecdh_tag.
     if (!recipientSecret && signer && granterPubkeys.length > 0) {
+      const hasReq = typeof (signer as unknown as Record<string, unknown>).sendRequest === 'function';
+      setDebug(prev => ({
+        ...prev,
+        hasSigner: true,
+        isNip46: hasReq,
+        granterCount: granterPubkeys.length,
+        windowId: currWindow,
+      }));
       Promise.all([
         signerHandoffBuckets(signer, granterPubkeys, currWindow),
         signerHandoffBuckets(signer, granterPubkeys, prevWindow),
       ]).then(([currHB, prevHB]) => {
-        doSubscribe(Array.from(new Set([...localReal, ...currHB, ...prevHB])));
-      }).catch(() => {
+        const allHB = [...currHB, ...prevHB];
+        const allReal = Array.from(new Set([...localReal, ...allHB]));
+        setDebug(prev => ({
+          ...prev,
+          handoffBuckets: allHB,
+          realBuckets: allReal,
+          signerError: null,
+        }));
+        doSubscribe(allReal);
+      }).catch((e) => {
+        setDebug(prev => ({
+          ...prev,
+          signerError: e instanceof Error ? e.message : String(e),
+        }));
         doSubscribe(localReal);
       });
       return;
     }
+
+    setDebug(prev => ({
+      ...prev,
+      hasSigner: !!signer,
+      isNip46: false,
+      granterCount: granterPubkeys.length,
+      windowId: currWindow,
+      realBuckets: localReal,
+    }));
 
     doSubscribe(localReal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,6 +265,7 @@ export function useBucketReader(
     isLoading: canSubscribe && isFetching,
     error,
     refresh,
+    debug,
   };
 }
 
