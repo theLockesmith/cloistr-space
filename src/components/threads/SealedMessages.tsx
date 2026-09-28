@@ -143,7 +143,7 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
         {Array.from(byThread.entries()).map(([threadId, msgs]) => (
           <div key={threadId} className="border-b border-cloistr-light/5">
             <div className="bg-cloistr-light/5 px-4 py-2 text-xs text-cloistr-light/50">
-              Thread {threadId.slice(0, 12)}…
+              {msgs.map((m) => parseFleetEnvelope(m.plaintext)?.thread).find(Boolean) ?? `Thread ${threadId.slice(0, 12)}…`}
             </div>
             <div className="space-y-2 p-4">
               {msgs.map((msg) => {

@@ -189,3 +189,26 @@ describe('SealedMessages renders the kit envelope', () => {
     expect(queryByText(/^3331f3b0/)).toBeNull();
   });
 });
+
+describe('SealedMessages thread names', () => {
+  const base = { handoffs: [], isLoading: false, error: null, refresh: vi.fn() };
+  it('labels a thread with the name carried in the envelope', () => {
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({ ...base, messages: [{
+      plaintext: '{"v":"arbiter-fleet-msg-v1","body":"hi","from":"conscience-orch","thread":"conscience-group-wrap"}',
+      authorHex: 'aa', threadId: 'c8e8289dec3e0000', wrapId: 'w1',
+    }] });
+    const { getByText, queryByText } = render(<SealedMessages />);
+    expect(getByText('conscience-group-wrap')).toBeTruthy();
+    expect(queryByText(/Thread c8e8289dec3e/)).toBeNull();
+  });
+  it('falls back to the key label for older messages without a name', () => {
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({ ...base, messages: [{
+      plaintext: '{"v":"arbiter-fleet-msg-v1","body":"old","from":"cloistr-orchestrator"}',
+      authorHex: 'aa', threadId: 'c8e8289dec3e0000', wrapId: 'w2',
+    }] });
+    const { getByText } = render(<SealedMessages />);
+    expect(getByText(/Thread c8e8289dec3e/)).toBeTruthy();
+  });
+});
