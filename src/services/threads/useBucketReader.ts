@@ -32,6 +32,7 @@ import {
   GIFT_WRAP_KIND,
   tryUnwrapMessage,
   tryUnwrapHandoff,
+  parseHandoffPayload,
   type UnwrappedMessage,
   type UnwrappedHandoff,
 } from './giftWrap';
@@ -130,6 +131,37 @@ export function useBucketReader(
     const prevWindow = currWindow - 1;
     const since = prevWindow * WINDOW_SECONDS;
 
+    // Buckets that carry hand-offs addressed to this reader. A signer user can
+    // only open a wrap through a signer round trip, so we try that only for
+    // wraps in these buckets, never for every message-bucket wrap.
+    const handoffBuckets = new Set<string>();
+    if (recipientSecret) {
+      for (const w of [currWindow, prevWindow]) {
+        for (const g of granterPubkeys) handoffBuckets.add(computeHandoffBucket(ecdhHex(recipientSecret, g), w));
+      }
+    }
+
+    // Accept a thread key from a hand-off. A NEW key restarts the subscription,
+    // because the message buckets it was opened with did not include this
+    // thread's bucket; without the restart the key arrives and no message does.
+    const acceptHandoff = (
+      handoff: UnwrappedHandoff,
+      ownerPk: string,
+      encryptFn: (pk: string, pt: string) => Promise<string>,
+    ) => {
+      const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
+      const isNew = !keyStore.get(threadPk);
+      keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
+      handoffsRef.current.set(handoff.wrapId, handoff);
+      setHandoffs(Array.from(handoffsRef.current.values()));
+      let storage: StorageAdapter | null = null;
+      try { storage = localStorage; } catch { /* unavailable */ }
+      if (storage) {
+        saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encryptFn, storage).catch(() => {});
+      }
+      if (isNew) setRefreshKey((k) => k + 1);
+    };
+
     const realCurr = computeRealBuckets(keyStore, currWindow, recipientSecret, granterPubkeys);
     const realPrev = computeRealBuckets(keyStore, prevWindow, recipientSecret, granterPubkeys);
 
@@ -160,23 +192,32 @@ export function useBucketReader(
               const handoff = tryUnwrapHandoff(
                 { id: event.id, pubkey: event.pubkey, content: event.content },
                 recipientSecret,
+                granterPubkeys,
               );
               if (handoff) {
-                const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
-                keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
-                handoffsRef.current.set(handoff.wrapId, handoff);
-                setHandoffs(Array.from(handoffsRef.current.values()));
-
                 const ownerPk = getPublicKey(recipientSecret);
                 const ck = nip44.v2.utils.getConversationKey(recipientSecret, ownerPk);
-                const encryptFn = async (_pk: string, pt: string) =>
-                  nip44.v2.encrypt(pt, ck);
-                let storage: StorageAdapter | null = null;
-                try { storage = localStorage; } catch { /* unavailable */ }
-                if (storage) {
-                  saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encryptFn, storage)
-                    .catch(() => {});
-                }
+                acceptHandoff(handoff, ownerPk, async (_pk: string, pt: string) => nip44.v2.encrypt(pt, ck));
+              }
+            } else if (signer?.nip44Decrypt && signer.nip44Encrypt) {
+              // Signer (NIP-46) users hold no raw key: open the hand-off through
+              // the signer. Until 2026-09-28 this branch did not exist, so every
+              // signer user's hand-off was found and silently dropped.
+              const bucket = event.tags.find((t) => t[0] === 't')?.[1];
+              if (bucket && handoffBuckets.has(bucket)) {
+                const decrypt = signer.nip44Decrypt.bind(signer);
+                const encrypt = signer.nip44Encrypt.bind(signer);
+                void (async () => {
+                  try {
+                    const plaintext = await decrypt(event.pubkey, event.content);
+                    const handoff = parseHandoffPayload(plaintext, event.id, granterPubkeys);
+                    if (!handoff) return;
+                    const ownerPk = await signer.getPublicKey();
+                    acceptHandoff(handoff, ownerPk, encrypt);
+                  } catch {
+                    // Not addressed to us (shared bucket) or the signer refused.
+                  }
+                })();
               }
             }
 
@@ -208,6 +249,7 @@ export function useBucketReader(
         signerHandoffBuckets(signer, granterPubkeys, prevWindow),
       ]).then(([currHB, prevHB]) => {
         const allHB = [...currHB, ...prevHB];
+        for (const b of allHB) handoffBuckets.add(b);
         const allReal = Array.from(new Set([...localReal, ...allHB]));
         setDebug(prev => ({
           ...prev,
