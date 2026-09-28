@@ -25,7 +25,7 @@ import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
 import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
 import { useMirrorSign } from '@/services/cloistr/useMirrorSign';
-import { useLongPressMenu } from '@/services/social/useLongPressMenu';
+import { useContextMenuTrigger } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { ReactionPicker } from './ReactionPicker';
 import { RepostMenu } from './RepostMenu';
@@ -393,7 +393,7 @@ function NoteActions({ note }: { note: Note }) {
 
   // Plain click sends the default heart. Hold, right-click or ArrowDown
   // open the emoji picker.
-  const { handlers: reactHandlers } = useLongPressMenu({
+  const { handlers: reactHandlers } = useContextMenuTrigger({
     onOpen: () => setPickerOpen(true),
     onActivate: () => void handleReact(),
     disabled: !canAct,
