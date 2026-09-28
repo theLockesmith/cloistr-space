@@ -15,7 +15,7 @@ import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
 import { SealedMessages } from './SealedMessages';
 
 export function ThreadsView() {
-  const { threads, groups, isLoading, error } = useAllThreads();
+  const { threads, groups, allAdminPubkeys, isLoading, error } = useAllThreads();
   const navigate = useNavigate();
 
   const [composing, setComposing] = useState(false);
@@ -126,7 +126,7 @@ export function ThreadsView() {
       </ul>
 
       <div className="rounded-lg border border-cloistr-light/10">
-        <SealedMessages />
+        <SealedMessages additionalGranters={allAdminPubkeys} />
       </div>
     </div>
   );

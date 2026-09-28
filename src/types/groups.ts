@@ -100,6 +100,8 @@ export interface GroupMembership {
   isAdmin: boolean;
   /** User's admin permissions (if admin) */
   permissions: AdminPermission[];
+  /** All admin pubkeys for this group */
+  adminPubkeys: string[];
   /** Pending join request (if any) */
   pendingRequest?: JoinRequest;
 }

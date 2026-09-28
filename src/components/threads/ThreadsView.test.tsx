@@ -25,6 +25,7 @@ vi.mock('@/services/threads', () => ({
   useAllThreads: () => ({
     threads: allThreadFixtures,
     groups: groupFixtures,
+    allAdminPubkeys: [],
     isLoading: false,
     error: null,
   }),

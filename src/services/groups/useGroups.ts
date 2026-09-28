@@ -112,6 +112,7 @@ export function useGroups(options: UseGroupsOptions = {}): UseGroupsReturn {
           isMember,
           isAdmin,
           permissions,
+          adminPubkeys: adminList ? Array.from(adminList.keys()) : [],
         });
       }
     }

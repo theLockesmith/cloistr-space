@@ -54,7 +54,25 @@ beforeEach(() => {
 });
 
 describe('SealedMessages without groupId (top-level Threads page)', () => {
-  it('uses only fleet granters when no groupId is provided', () => {
+  it('includes additionalGranters alongside fleet granters when no groupId is provided', () => {
+    render(<SealedMessages additionalGranters={['admin-from-group-a', 'admin-from-group-b']} />);
+
+    const [, granters] = mockUseBucketReader.mock.calls[0];
+    expect(granters).toContain('3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4');
+    expect(granters).toContain('admin-from-group-a');
+    expect(granters).toContain('admin-from-group-b');
+  });
+
+  it('deduplicates additionalGranters against fleet list', () => {
+    const fleet = '3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4';
+    render(<SealedMessages additionalGranters={[fleet, 'unique-admin']} />);
+
+    const [, granters] = mockUseBucketReader.mock.calls[0];
+    expect(granters.filter((g: string) => g === fleet)).toHaveLength(1);
+    expect(granters).toContain('unique-admin');
+  });
+
+  it('falls back to fleet granters alone when additionalGranters is omitted', () => {
     render(<SealedMessages />);
 
     const [, granters] = mockUseBucketReader.mock.calls[0];

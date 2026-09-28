@@ -33,6 +33,7 @@ const mockGroups: GroupMembership[] = [
     isAdmin: false,
     isMember: true,
     permissions: [],
+    adminPubkeys: [],
   },
   {
     group: {
@@ -50,6 +51,7 @@ const mockGroups: GroupMembership[] = [
     isAdmin: true,
     isMember: true,
     permissions: ['add-user', 'remove-user'] as AdminPermission[],
+    adminPubkeys: [],
   },
 ]
 

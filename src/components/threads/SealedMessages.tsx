@@ -22,9 +22,10 @@ import { config } from '@/config/environment';
 
 interface SealedMessagesProps {
   groupId?: string;
+  additionalGranters?: string[];
 }
 
-export function SealedMessages({ groupId }: SealedMessagesProps) {
+export function SealedMessages({ groupId, additionalGranters }: SealedMessagesProps) {
   const { pubkey } = useAuthStore();
   const { loaded, keyCount } = useThreadKeyLoader();
   const { members } = useGroupMembers(groupId ?? '');
@@ -36,8 +37,11 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
         if (m.isAdmin) set.add(m.pubkey);
       }
     }
+    if (additionalGranters) {
+      for (const pk of additionalGranters) set.add(pk);
+    }
     return Array.from(set);
-  }, [members, groupId]);
+  }, [members, groupId, additionalGranters]);
 
   const { messages, handoffs, isLoading, error, refresh, debug } = useBucketReader(null, granterPubkeys);
 

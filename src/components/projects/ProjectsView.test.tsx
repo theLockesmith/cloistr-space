@@ -64,6 +64,7 @@ const oneGroupReturn = {
       isMember: true,
       isAdmin: false,
       permissions: [],
+      adminPubkeys: [],
     },
   ],
   refresh: vi.fn(),

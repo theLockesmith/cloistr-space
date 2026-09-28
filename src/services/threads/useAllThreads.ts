@@ -37,6 +37,8 @@ export interface UseAllThreadsReturn {
   threads: ThreadWithGroup[];
   /** Groups the user is in, for the create-thread picker. */
   groups: { id: string; name: string }[];
+  /** Admin pubkeys across all the user's groups, deduplicated. */
+  allAdminPubkeys: string[];
   isLoading: boolean;
   error: string | null;
 }
@@ -107,6 +109,11 @@ export function useAllThreads(): UseAllThreadsReturn {
   const groups = useMemo(
     () => memberships.map((m) => ({ id: m.group.identifier, name: m.group.name })),
     [memberships]
+  );
+
+  const allAdminPubkeys = useMemo(
+    () => Array.from(new Set(memberships.flatMap((m) => m.adminPubkeys))),
+    [memberships],
   );
 
   // Content identity, not array identity: useGroups hands back a new array on
@@ -190,6 +197,7 @@ export function useAllThreads(): UseAllThreadsReturn {
   return {
     threads,
     groups,
+    allAdminPubkeys,
     // Still loading while groups resolve: with no groups yet there is nothing
     // to subscribe to, and reporting "no threads" then would be the same lie as
     // every other empty-versus-unloaded confusion this app has had.
