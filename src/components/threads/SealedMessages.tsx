@@ -41,6 +41,20 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
 
   const { messages, handoffs, isLoading, error, refresh, debug } = useBucketReader(null, granterPubkeys);
 
+  // Keys held NOW. The loader's keyCount is read once, from storage, when the
+
+  // page loads; keys that arrive later by hand-off never updated it, so the
+
+  // panel said "No thread keys held" above a message it had just decrypted and
+
+  // hid the reply box (seen live 2026-09-28). This re-renders on every new
+
+  // message or hand-off, which is exactly when the store changes.
+
+  const keyStore = useThreadKeyStore();
+
+  const heldKeys = Math.max(keyCount, keyStore.size);
+
   const authorPubkeys = useMemo(
     () => [...new Set(messages.map((m) => m.authorHex))],
     [messages],
@@ -71,7 +85,7 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
         <div>
           <h3 className="text-sm font-medium text-cloistr-light">Sealed Messages</h3>
           <p className="text-xs text-cloistr-light/50">
-            {keyCount} thread {keyCount === 1 ? 'key' : 'keys'} ·{' '}
+            {heldKeys} thread {heldKeys === 1 ? 'key' : 'keys'} ·{' '}
             {messages.length} {messages.length === 1 ? 'message' : 'messages'} ·{' '}
             {handoffs.length} {handoffs.length === 1 ? 'handoff' : 'handoffs'}
           </p>
@@ -103,7 +117,7 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
           </p>
         )}
 
-        {!isLoading && keyCount === 0 && (
+        {!isLoading && heldKeys === 0 && (
           <div className="p-8 text-center">
             <p className="text-sm text-cloistr-light">No thread keys held</p>
             <p className="mt-1 text-xs text-cloistr-light/50">
@@ -112,11 +126,11 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
           </div>
         )}
 
-        {!isLoading && keyCount > 0 && messages.length === 0 && (
+        {!isLoading && heldKeys > 0 && messages.length === 0 && (
           <div className="p-8 text-center">
             <p className="text-sm text-cloistr-light">No sealed messages found</p>
             <p className="mt-1 text-xs text-cloistr-light/50">
-              Holding {keyCount} {keyCount === 1 ? 'key' : 'keys'}, scanning {16} buckets per window.
+              Holding {heldKeys} {heldKeys === 1 ? 'key' : 'keys'}, scanning {16} buckets per window.
             </p>
           </div>
         )}
@@ -146,7 +160,7 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
         ))}
       </div>
 
-      {keyCount > 0 && <ComposeBar />}
+      {heldKeys > 0 && <ComposeBar />}
     </div>
   );
 }

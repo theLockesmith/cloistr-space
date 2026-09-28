@@ -3,12 +3,13 @@ import { render } from '@testing-library/react';
 import { SealedMessages } from './SealedMessages';
 
 const mockUseBucketReader = vi.fn();
+const heldStore = { current: new Map<string, Uint8Array>() };
 
 vi.mock('@/services/threads', () => ({
-  useThreadKeyStore: () => new Map(),
+  useThreadKeyStore: () => heldStore.current,
   useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
   useBucketReader: (...args: unknown[]) => mockUseBucketReader(...args),
-  useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: false }),
+  useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: true }),
 }));
 
 vi.mock('@/services/profile', () => ({
@@ -42,6 +43,7 @@ vi.mock('@/config/environment', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  heldStore.current = new Map();
   mockUseBucketReader.mockReturnValue({
     messages: [],
     handoffs: [],
@@ -119,5 +121,30 @@ describe('SealedMessages granter list', () => {
     const [, granters] = mockUseBucketReader.mock.calls[0];
     const fleet = '3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4';
     expect(granters.filter((g: string) => g === fleet)).toHaveLength(1);
+  });
+});
+
+describe('SealedMessages key count', () => {
+  it('counts keys that arrived by hand-off after page load, and offers the reply box', () => {
+    // Loader read storage at page load and found nothing (keyCount 0); a
+    // hand-off then delivered a key and a message decrypted with it. This is
+    // the operator's screen on 2026-09-28.
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({
+      messages: [{ plaintext: 'hello from the kit', authorHex: '3331f3b0', threadId: 'threadpk', wrapId: 'w1' }],
+      handoffs: [{ threadId: 't', threadSecretHex: '00'.repeat(32), granterPubkey: '3331f3b0', wrapId: 'h1' }],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    const { queryByText, getByText, container } = render(<SealedMessages />);
+    expect(queryByText('No thread keys held')).toBeNull();
+    expect(getByText(/1 thread key\b/)).toBeTruthy();
+    expect(container.querySelector('textarea, input[type="text"]')).not.toBeNull();
+  });
+
+  it('still says no keys when there genuinely are none', () => {
+    const { getByText } = render(<SealedMessages />);
+    expect(getByText('No thread keys held')).toBeTruthy();
   });
 });
