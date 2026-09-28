@@ -148,3 +148,26 @@ describe('SealedMessages key count', () => {
     expect(getByText('No thread keys held')).toBeTruthy();
   });
 });
+
+describe('SealedMessages renders the kit envelope', () => {
+  it('shows the message text and sending role, not raw JSON', () => {
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({
+      messages: [{
+        plaintext: '{"v":"arbiter-fleet-msg-v1","body":"Fresh test from cloistr-orchestrator.","task":null,"role":"operator","from":"cloistr-orchestrator"}',
+        authorHex: '3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4',
+        threadId: 'threadpk',
+        wrapId: 'w1',
+      }],
+      handoffs: [],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    const { getByText, queryByText } = render(<SealedMessages />);
+    expect(getByText('Fresh test from cloistr-orchestrator.')).toBeTruthy();
+    expect(getByText('cloistr-orchestrator')).toBeTruthy();
+    expect(queryByText(/arbiter-fleet-msg-v1/)).toBeNull();
+    expect(queryByText(/^3331f3b0/)).toBeNull();
+  });
+});

@@ -19,6 +19,7 @@ import {
 import { useAuthorProfiles } from '@/services/profile';
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
+import { parseFleetEnvelope } from '@/services/threads/fleetEnvelope';
 
 interface SealedMessagesProps {
   groupId?: string;
@@ -143,14 +144,15 @@ export function SealedMessages({ groupId }: SealedMessagesProps) {
             <div className="space-y-2 p-4">
               {msgs.map((msg) => {
                 const profile = profiles.get(msg.authorHex);
-                const name = profile?.displayName || profile?.name || msg.authorHex.slice(0, 8) + '…';
+                const envelope = parseFleetEnvelope(msg.plaintext);
+                const name = envelope?.from || profile?.displayName || profile?.name || msg.authorHex.slice(0, 8) + '…';
                 return (
                   <div key={msg.wrapId} className="rounded border border-cloistr-light/10 bg-cloistr-light/5 p-3">
                     <div className="flex items-center gap-2 text-xs text-cloistr-light/50">
                       <span>{name}</span>
                     </div>
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">
-                      {msg.plaintext}
+                      {envelope ? envelope.body : msg.plaintext}
                     </p>
                   </div>
                 );
