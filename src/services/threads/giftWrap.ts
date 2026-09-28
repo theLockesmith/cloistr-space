@@ -148,6 +148,38 @@ export function wrapKeyHandoff(
  * @param recipientSecret   The recipient's secret key
  * @param expectedGranters  If provided, reject handoffs from unknown granters
  */
+/**
+ * Validate a decrypted hand-off payload ({tid, sec, g}, the kit's format).
+ * Shared by the local-key path and the signer path, so both apply the same
+ * checks, including that the granter is one we expect.
+ */
+export function parseHandoffPayload(
+  decrypted: string,
+  wrapId: string,
+  expectedGranters?: string[],
+): UnwrappedHandoff | null {
+  try {
+    const payload = JSON.parse(decrypted);
+    if (
+      typeof payload.tid === 'string' &&
+      typeof payload.sec === 'string' &&
+      typeof payload.g === 'string' &&
+      /^[0-9a-f]{64}$/i.test(payload.sec)
+    ) {
+      if (expectedGranters && !expectedGranters.includes(payload.g)) return null;
+      return {
+        threadId: payload.tid,
+        threadSecretHex: payload.sec,
+        granterPubkey: payload.g,
+        wrapId,
+      };
+    }
+  } catch {
+    // Not JSON: not a hand-off.
+  }
+  return null;
+}
+
 export function tryUnwrapHandoff(
   wrapEvent: { id: string; pubkey: string; content: string },
   recipientSecret: Uint8Array,
@@ -159,26 +191,9 @@ export function tryUnwrapHandoff(
       wrapEvent.pubkey,
     );
     const decrypted = nip44.v2.decrypt(wrapEvent.content, conversationKey);
-    const payload = JSON.parse(decrypted);
-
-    if (
-      typeof payload.tid === 'string' &&
-      typeof payload.sec === 'string' &&
-      typeof payload.g === 'string' &&
-      /^[0-9a-f]{64}$/i.test(payload.sec)
-    ) {
-      if (expectedGranters && !expectedGranters.includes(payload.g)) {
-        return null;
-      }
-      return {
-        threadId: payload.tid,
-        threadSecretHex: payload.sec,
-        granterPubkey: payload.g,
-        wrapId: wrapEvent.id,
-      };
-    }
+    return parseHandoffPayload(decrypted, wrapEvent.id, expectedGranters);
   } catch {
     // Not a handoff for us.
+    return null;
   }
-  return null;
 }
