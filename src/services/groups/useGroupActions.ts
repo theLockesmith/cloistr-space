@@ -1,19 +1,22 @@
 /**
  * @fileoverview Group actions hook
  * Join, leave, and create groups
+ *
+ * Delegates to groupService.ts for the actual event construction and
+ * publishing. This hook provides the NDK-backed NostrClient adapter and
+ * the React-facing return shape.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import type { NostrClient } from '../headless';
 import {
-  GROUP_METADATA_KIND,
-  GROUP_ADMINS_KIND,
-  GROUP_MEMBERS_KIND,
-  GROUP_JOIN_REQUEST_KIND,
-  GROUP_LEAVE_REQUEST_KIND,
-} from '@/types/groups';
-import { buildGroupIdentifier } from './ownership';
+  joinGroup as joinGroupPure,
+  leaveGroup as leaveGroupPure,
+  createGroup as createGroupPure,
+  type CreateGroupOptions,
+} from './groupService';
 
 interface UseGroupActionsReturn {
   /** Request to join a group */
@@ -26,19 +29,6 @@ interface UseGroupActionsReturn {
   canAct: boolean;
 }
 
-interface CreateGroupOptions {
-  /** Group name */
-  name: string;
-  /** Description */
-  description?: string;
-  /** Picture URL */
-  picture?: string;
-  /** Public (visible) vs private (hidden) */
-  isPublic?: boolean;
-  /** Open (anyone joins) vs closed (approval needed) */
-  isOpen?: boolean;
-}
-
 /**
  * Hook for group management actions
  */
@@ -48,108 +38,59 @@ export function useGroupActions(): UseGroupActionsReturn {
 
   const canAct = Boolean(publish && isConnected && isAuthenticated && pubkey);
 
-  // Request to join a group
-  const joinGroup = useCallback(async (groupId: string, message?: string) => {
-    if (!publish || !createEvent || !pubkey) {
-      throw new Error('Not connected');
-    }
-
-    const event = createEvent();
-    if (!event) throw new Error('Failed to create event');
-
-    event.kind = GROUP_JOIN_REQUEST_KIND;
-    event.content = message || '';
-    event.tags = [
-      ['h', groupId],
-    ];
-
-    await publish(event);
+  const client: NostrClient | null = useMemo(() => {
+    if (!publish || !createEvent || !pubkey) return null;
+    return {
+      getPublicKey: async () => pubkey,
+      signAndPublish: async (template) => {
+        const event = createEvent();
+        if (!event) throw new Error('Failed to create event');
+        event.kind = template.kind;
+        event.content = template.content;
+        event.tags = template.tags;
+        const accepted = await publish(event);
+        return accepted.size;
+      },
+      publishSigned: async (raw) => {
+        const event = createEvent();
+        if (!event) throw new Error('Failed to create event');
+        event.kind = raw.kind;
+        event.content = raw.content;
+        event.tags = raw.tags;
+        event.created_at = raw.created_at;
+        event.pubkey = raw.pubkey;
+        event.id = raw.id;
+        event.sig = raw.sig;
+        const accepted = await publish(event);
+        return accepted.size;
+      },
+      fetch: async () => [],
+    };
   }, [publish, createEvent, pubkey]);
 
-  // Leave a group
-  const leaveGroup = useCallback(async (groupId: string) => {
-    if (!publish || !createEvent || !pubkey) {
-      throw new Error('Not connected');
-    }
+  const joinGroup = useCallback(
+    async (groupId: string, message?: string) => {
+      if (!client) throw new Error('Not connected');
+      await joinGroupPure(client, groupId, message);
+    },
+    [client],
+  );
 
-    const event = createEvent();
-    if (!event) throw new Error('Failed to create event');
+  const leaveGroup = useCallback(
+    async (groupId: string) => {
+      if (!client) throw new Error('Not connected');
+      await leaveGroupPure(client, groupId);
+    },
+    [client],
+  );
 
-    event.kind = GROUP_LEAVE_REQUEST_KIND;
-    event.content = '';
-    event.tags = [
-      ['h', groupId],
-    ];
-
-    await publish(event);
-  }, [publish, createEvent, pubkey]);
-
-  // Create a new group
-  const createGroup = useCallback(async (options: CreateGroupOptions): Promise<string> => {
-    if (!publish || !createEvent || !pubkey) {
-      throw new Error('Not connected');
-    }
-
-    const { name, description, picture, isPublic = true, isOpen = false } = options;
-
-    // Generate a pubkey-aware group identifier.
-    //
-    // The creator's pubkey (first 16 hex chars) is embedded in the d-tag so
-    // ownership is verifiable from the identifier itself — no event history
-    // query, no reliance on created_at (which authors control). See ownership.ts
-    // for the full reasoning and for why the earlier "earliest kind:39000 wins"
-    // scheme failed.
-    const identifier = buildGroupIdentifier(name, pubkey);
-
-    // Create group metadata event (kind:39000)
-    const metadataEvent = createEvent();
-    if (!metadataEvent) throw new Error('Failed to create event');
-
-    metadataEvent.kind = GROUP_METADATA_KIND;
-    metadataEvent.content = description || '';
-    
-    const metadataTags: string[][] = [
-      ['d', identifier],
-      ['name', name],
-    ];
-    
-    if (description) metadataTags.push(['about', description]);
-    if (picture) metadataTags.push(['picture', picture]);
-    metadataTags.push([isPublic ? 'public' : 'private']);
-    metadataTags.push([isOpen ? 'open' : 'closed']);
-
-    metadataEvent.tags = metadataTags;
-
-    await publish(metadataEvent);
-
-    // Create admin list with creator as admin (kind:39001)
-    const adminEvent = createEvent();
-    if (!adminEvent) throw new Error('Failed to create event');
-
-    adminEvent.kind = GROUP_ADMINS_KIND;
-    adminEvent.content = '';
-    adminEvent.tags = [
-      ['d', identifier],
-      ['p', pubkey, 'add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'],
-    ];
-
-    await publish(adminEvent);
-
-    // Create member list with creator as member (kind:39002)
-    const memberEvent = createEvent();
-    if (!memberEvent) throw new Error('Failed to create event');
-
-    memberEvent.kind = GROUP_MEMBERS_KIND;
-    memberEvent.content = '';
-    memberEvent.tags = [
-      ['d', identifier],
-      ['p', pubkey],
-    ];
-
-    await publish(memberEvent);
-
-    return identifier;
-  }, [publish, createEvent, pubkey]);
+  const createGroup = useCallback(
+    async (options: CreateGroupOptions): Promise<string> => {
+      if (!client) throw new Error('Not connected');
+      return createGroupPure(client, options);
+    },
+    [client],
+  );
 
   return {
     joinGroup,
