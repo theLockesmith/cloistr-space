@@ -93,12 +93,14 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
             {messages.length} {messages.length === 1 ? 'message' : 'messages'} ·{' '}
             {handoffs.length} {handoffs.length === 1 ? 'handoff' : 'handoffs'}
           </p>
-          <details className="mt-1">
-            <summary className="cursor-pointer text-xs text-cloistr-light/30">diag</summary>
-            <pre className="mt-1 max-h-32 overflow-auto rounded bg-cloistr-dark/50 p-2 text-xs text-cloistr-light/40">
+          {config.enableDevTools && (
+            <details className="mt-1">
+              <summary className="cursor-pointer text-xs text-cloistr-light/30">diag</summary>
+              <pre className="mt-1 max-h-32 overflow-auto rounded bg-cloistr-dark/50 p-2 text-xs text-cloistr-light/40">
 {JSON.stringify(debug, null, 2)}
-            </pre>
-          </details>
+              </pre>
+            </details>
+          )}
         </div>
         <button
           onClick={refresh}
