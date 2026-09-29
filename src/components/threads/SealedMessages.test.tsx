@@ -142,6 +142,23 @@ describe('SealedMessages granter list', () => {
   });
 });
 
+describe('SealedMessages diagnostics panel', () => {
+  it('does not render the diag panel in production', () => {
+    mockUseBucketReader.mockReturnValue({
+      messages: [],
+      handoffs: [],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+      debug: { hasSigner: false, isNip46: false, granterCount: 1, handoffBuckets: [], realBuckets: [], windowId: 123, signerError: null },
+    });
+
+    const { container } = render(<SealedMessages />);
+
+    expect(container.querySelector('details')).toBeNull();
+  });
+});
+
 describe('SealedMessages key count', () => {
   it('counts keys that arrived by hand-off after page load, and offers the reply box', () => {
     // Loader read storage at page load and found nothing (keyCount 0); a
