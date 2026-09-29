@@ -5,11 +5,15 @@
  * This is the "headless parity proof" requested by cloistr-orchestrator:
  * a group post and a thread message, built and signed by a throwaway key,
  * without any React dependency in the call chain.
+ *
+ * The signer is a plain SignerInterface from @cloistr/auth/core, backed
+ * by nostr-tools' finalizeEvent. No NDK, no hooks.
  */
 import { describe, it, expect } from 'vitest';
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
-import type { NostrClient, SignedNostrEvent } from './headless';
+import type { SignerInterface, RelayClient } from './headless';
+import type { Event, UnsignedEvent } from 'nostr-tools';
 import {
   GROUP_METADATA_KIND,
   GROUP_ADMINS_KIND,
@@ -18,27 +22,22 @@ import {
 } from '@/types/groups';
 import { GIFT_WRAP_KIND } from './threads/giftWrap';
 
-function createHeadlessClient(secretKey: Uint8Array): NostrClient & { events: SignedNostrEvent[] } {
+function createHeadlessSigner(secretKey: Uint8Array): SignerInterface {
   const pubkey = getPublicKey(secretKey);
-  const events: SignedNostrEvent[] = [];
+  return {
+    getPublicKey: async () => pubkey,
+    signEvent: async (unsigned: UnsignedEvent): Promise<Event> =>
+      finalizeEvent(unsigned, secretKey) as Event,
+    encrypt: async () => { throw new Error('not needed'); },
+    decrypt: async () => { throw new Error('not needed'); },
+  };
+}
 
+function createHeadlessRelay(): RelayClient & { events: Event[] } {
+  const events: Event[] = [];
   return {
     events,
-    getPublicKey: async () => pubkey,
-    signAndPublish: async (template) => {
-      const event = finalizeEvent(
-        {
-          kind: template.kind,
-          content: template.content,
-          tags: template.tags,
-          created_at: Math.floor(Date.now() / 1000),
-        },
-        secretKey,
-      );
-      events.push(event as SignedNostrEvent);
-      return 1;
-    },
-    publishSigned: async (event) => {
+    publish: async (event: Event) => {
       events.push(event);
       return 1;
     },
@@ -51,21 +50,21 @@ describe('headless parity proof', () => {
     const { createGroup } = await import('./groups/groupService');
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const client = createHeadlessClient(sk);
+    const signer = createHeadlessSigner(sk);
+    const relay = createHeadlessRelay();
 
-    const groupId = await createGroup(client, {
+    const groupId = await createGroup(signer, relay, {
       name: 'headless-test',
       description: 'Created without React',
     });
 
     expect(groupId).toContain(pk.slice(0, 16));
-    expect(client.events).toHaveLength(3);
-    expect(client.events[0].kind).toBe(GROUP_METADATA_KIND);
-    expect(client.events[1].kind).toBe(GROUP_ADMINS_KIND);
-    expect(client.events[2].kind).toBe(GROUP_MEMBERS_KIND);
+    expect(relay.events).toHaveLength(3);
+    expect(relay.events[0].kind).toBe(GROUP_METADATA_KIND);
+    expect(relay.events[1].kind).toBe(GROUP_ADMINS_KIND);
+    expect(relay.events[2].kind).toBe(GROUP_MEMBERS_KIND);
 
-    // Every event is validly signed (has id and sig)
-    for (const event of client.events) {
+    for (const event of relay.events) {
       expect(event.id).toHaveLength(64);
       expect(event.sig).toHaveLength(128);
       expect(event.pubkey).toBe(pk);
@@ -76,15 +75,16 @@ describe('headless parity proof', () => {
     const { joinGroup } = await import('./groups/groupService');
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
-    const client = createHeadlessClient(sk);
+    const signer = createHeadlessSigner(sk);
+    const relay = createHeadlessRelay();
 
-    await joinGroup(client, 'some-group-id', 'hello');
+    await joinGroup(signer, relay, 'some-group-id', 'hello');
 
-    expect(client.events).toHaveLength(1);
-    expect(client.events[0].kind).toBe(GROUP_JOIN_REQUEST_KIND);
-    expect(client.events[0].pubkey).toBe(pk);
-    expect(client.events[0].tags).toEqual([['h', 'some-group-id']]);
-    expect(client.events[0].content).toBe('hello');
+    expect(relay.events).toHaveLength(1);
+    expect(relay.events[0].kind).toBe(GROUP_JOIN_REQUEST_KIND);
+    expect(relay.events[0].pubkey).toBe(pk);
+    expect(relay.events[0].tags).toEqual([['h', 'some-group-id']]);
+    expect(relay.events[0].content).toBe('hello');
   });
 
   it('sends a thread message with a throwaway key, no React', async () => {
@@ -92,19 +92,18 @@ describe('headless parity proof', () => {
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
     const threadSecret = bytesToHex(generateSecretKey());
-    const client = createHeadlessClient(sk);
+    const relay = createHeadlessRelay();
 
-    await publishMessage(client, 'headless thread message', pk, threadSecret);
+    await publishMessage(relay, 'headless thread message', pk, threadSecret);
 
-    expect(client.events).toHaveLength(1);
-    expect(client.events[0].kind).toBe(GIFT_WRAP_KIND);
+    expect(relay.events).toHaveLength(1);
+    expect(relay.events[0].kind).toBe(GIFT_WRAP_KIND);
     // One-time key, not the user's key
-    expect(client.events[0].pubkey).not.toBe(pk);
-    expect(client.events[0].id).toHaveLength(64);
-    expect(client.events[0].sig).toHaveLength(128);
+    expect(relay.events[0].pubkey).not.toBe(pk);
+    expect(relay.events[0].id).toHaveLength(64);
+    expect(relay.events[0].sig).toHaveLength(128);
 
-    // Tagged with a bucket
-    const tTag = client.events[0].tags.find((t: string[]) => t[0] === 't');
+    const tTag = relay.events[0].tags.find((t: string[]) => t[0] === 't');
     expect(tTag).toBeDefined();
     expect(tTag![1]).toMatch(/^[0-9a-f]{2}$/);
   });
@@ -115,11 +114,11 @@ describe('headless parity proof', () => {
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const threadSecret = bytesToHex(generateSecretKey());
-    const client = createHeadlessClient(granterSk);
+    const relay = createHeadlessRelay();
 
-    await publishKeyHandoff(client, 'thread-123', threadSecret, granterSk, recipientPk);
+    await publishKeyHandoff(relay, 'thread-123', threadSecret, granterSk, recipientPk);
 
-    expect(client.events).toHaveLength(1);
-    expect(client.events[0].kind).toBe(GIFT_WRAP_KIND);
+    expect(relay.events).toHaveLength(1);
+    expect(relay.events[0].kind).toBe(GIFT_WRAP_KIND);
   });
 });

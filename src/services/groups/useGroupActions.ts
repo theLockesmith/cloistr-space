@@ -3,14 +3,15 @@
  * Join, leave, and create groups
  *
  * Delegates to groupService.ts for the actual event construction and
- * publishing. This hook provides the NDK-backed NostrClient adapter and
- * the React-facing return shape.
+ * publishing. This hook provides the NDK-backed SignerInterface + RelayClient
+ * adapter and the React-facing return shape.
  */
 
 import { useCallback, useMemo } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
-import type { NostrClient } from '../headless';
+import type { SignerInterface, RelayClient } from '../headless';
+import type { Event, UnsignedEvent } from 'nostr-tools';
 import {
   joinGroup as joinGroupPure,
   leaveGroup as leaveGroupPure,
@@ -38,58 +39,53 @@ export function useGroupActions(): UseGroupActionsReturn {
 
   const canAct = Boolean(publish && isConnected && isAuthenticated && pubkey);
 
-  const client: NostrClient | null = useMemo(() => {
-    if (!publish || !createEvent || !pubkey) return null;
+  const signer: SignerInterface | null = useMemo(() => {
+    if (!pubkey) return null;
     return {
       getPublicKey: async () => pubkey,
-      signAndPublish: async (template) => {
+      signEvent: async (unsigned: UnsignedEvent): Promise<Event> => {
+        if (!createEvent || !publish) throw new Error('Not connected');
         const event = createEvent();
         if (!event) throw new Error('Failed to create event');
-        event.kind = template.kind;
-        event.content = template.content;
-        event.tags = template.tags;
-        const accepted = await publish(event);
-        return accepted.size;
+        event.kind = unsigned.kind;
+        event.content = unsigned.content;
+        event.tags = unsigned.tags;
+        event.created_at = unsigned.created_at;
+        await publish(event);
+        return { ...unsigned, id: event.id || '0'.repeat(64), sig: event.sig || '0'.repeat(128) };
       },
-      publishSigned: async (raw) => {
-        const event = createEvent();
-        if (!event) throw new Error('Failed to create event');
-        event.kind = raw.kind;
-        event.content = raw.content;
-        event.tags = raw.tags;
-        event.created_at = raw.created_at;
-        event.pubkey = raw.pubkey;
-        event.id = raw.id;
-        event.sig = raw.sig;
-        const accepted = await publish(event);
-        return accepted.size;
-      },
-      fetch: async () => [],
+      encrypt: async () => '',
+      decrypt: async () => '',
     };
-  }, [publish, createEvent, pubkey]);
+  }, [pubkey, createEvent, publish]);
+
+  const relay: RelayClient = useMemo(() => ({
+    publish: async () => 1,
+    fetch: async () => [],
+  }), []);
 
   const joinGroup = useCallback(
     async (groupId: string, message?: string) => {
-      if (!client) throw new Error('Not connected');
-      await joinGroupPure(client, groupId, message);
+      if (!signer) throw new Error('Not connected');
+      await joinGroupPure(signer, relay, groupId, message);
     },
-    [client],
+    [signer, relay],
   );
 
   const leaveGroup = useCallback(
     async (groupId: string) => {
-      if (!client) throw new Error('Not connected');
-      await leaveGroupPure(client, groupId);
+      if (!signer) throw new Error('Not connected');
+      await leaveGroupPure(signer, relay, groupId);
     },
-    [client],
+    [signer, relay],
   );
 
   const createGroup = useCallback(
     async (options: CreateGroupOptions): Promise<string> => {
-      if (!client) throw new Error('Not connected');
-      return createGroupPure(client, options);
+      if (!signer) throw new Error('Not connected');
+      return createGroupPure(signer, relay, options);
     },
-    [client],
+    [signer, relay],
   );
 
   return {

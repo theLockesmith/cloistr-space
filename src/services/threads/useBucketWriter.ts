@@ -8,13 +8,14 @@
  * Key handoffs carry the thread's secret key encrypted to the recipient,
  * bucketed by a value only the granter and recipient can compute.
  *
- * Core logic lives in threadPublish.ts (React-free). This hook provides the
- * NDK-backed NostrClient adapter.
+ * Core logic lives in threadPublish.ts (React-free, accepts RelayClient).
+ * This hook provides the NDK-backed adapter.
  */
 
 import { useCallback, useMemo } from 'react';
 import { useNdk } from '@/services/nostr';
-import type { NostrClient } from '../headless';
+import type { RelayClient } from '../headless';
+import type { Event } from 'nostr-tools';
 import {
   publishMessage,
   publishKeyHandoff,
@@ -43,12 +44,10 @@ export function useBucketWriter(): BucketWriterReturn {
   const { createEvent, publish, isConnected } = useNdk();
   const canPublish = Boolean(publish && isConnected);
 
-  const client: NostrClient | null = useMemo(() => {
+  const relay: RelayClient | null = useMemo(() => {
     if (!createEvent || !publish) return null;
     return {
-      getPublicKey: async () => '',
-      signAndPublish: async () => 0,
-      publishSigned: async (raw) => {
+      publish: async (raw: Event) => {
         const event = createEvent();
         if (!event) throw new Error('Could not create NDK event');
         event.kind = raw.kind;
@@ -72,10 +71,10 @@ export function useBucketWriter(): BucketWriterReturn {
       threadSecretHex: string,
       nowSec?: number,
     ) => {
-      if (!client) throw new Error('Not connected');
-      await publishMessage(client, plaintext, authorPubkey, threadSecretHex, nowSec);
+      if (!relay) throw new Error('Not connected');
+      await publishMessage(relay, plaintext, authorPubkey, threadSecretHex, nowSec);
     },
-    [client],
+    [relay],
   );
 
   const grantKey = useCallback(
@@ -86,10 +85,10 @@ export function useBucketWriter(): BucketWriterReturn {
       recipientPubkey: string,
       nowSec?: number,
     ) => {
-      if (!client) throw new Error('Not connected');
-      await publishKeyHandoff(client, threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
+      if (!relay) throw new Error('Not connected');
+      await publishKeyHandoff(relay, threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
     },
-    [client],
+    [relay],
   );
 
   return { sendMessage, grantKey, canPublish };

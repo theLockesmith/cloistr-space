@@ -1,12 +1,13 @@
 /**
  * Pure group operations, callable without React.
  *
- * Each function accepts a NostrClient (the headless abstraction over
- * signer + relay). The React hooks in useGroupActions and useGroupAdmin
- * delegate here; a headless caller provides its own NostrClient.
+ * Each function accepts a SignerInterface (from @cloistr/auth/core) and a
+ * RelayClient. The React hooks in useGroupActions and useGroupAdmin provide
+ * NDK-backed implementations; a headless caller provides its own.
  */
 
-import type { NostrClient, NostrEventLike } from '../headless';
+import type { UnsignedEvent } from 'nostr-tools';
+import type { SignerInterface, RelayClient } from '../headless';
 import type { AdminPermission } from '@/types/groups';
 import {
   GROUP_METADATA_KIND,
@@ -40,12 +41,30 @@ export interface GroupMetadataEdit {
   picture?: string;
 }
 
+async function signAndPublish(
+  signer: SignerInterface,
+  relay: RelayClient,
+  template: { kind: number; content: string; tags: string[][] },
+): Promise<number> {
+  const pubkey = await signer.getPublicKey();
+  const unsigned: UnsignedEvent = {
+    kind: template.kind,
+    content: template.content,
+    tags: template.tags,
+    created_at: Math.floor(Date.now() / 1000),
+    pubkey,
+  };
+  const signed = await signer.signEvent(unsigned);
+  return relay.publish(signed);
+}
+
 export async function joinGroup(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
   message?: string,
 ): Promise<void> {
-  await client.signAndPublish({
+  await signAndPublish(signer, relay, {
     kind: GROUP_JOIN_REQUEST_KIND,
     content: message || '',
     tags: [['h', groupId]],
@@ -53,10 +72,11 @@ export async function joinGroup(
 }
 
 export async function leaveGroup(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
 ): Promise<void> {
-  await client.signAndPublish({
+  await signAndPublish(signer, relay, {
     kind: GROUP_LEAVE_REQUEST_KIND,
     content: '',
     tags: [['h', groupId]],
@@ -64,10 +84,11 @@ export async function leaveGroup(
 }
 
 export async function createGroup(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   options: CreateGroupOptions,
 ): Promise<string> {
-  const pubkey = await client.getPublicKey();
+  const pubkey = await signer.getPublicKey();
   const { name, description, picture, isPublic = true, isOpen = false } = options;
   const identifier = buildGroupIdentifier(name, pubkey);
 
@@ -80,13 +101,13 @@ export async function createGroup(
   metadataTags.push([isPublic ? 'public' : 'private']);
   metadataTags.push([isOpen ? 'open' : 'closed']);
 
-  await client.signAndPublish({
+  await signAndPublish(signer, relay, {
     kind: GROUP_METADATA_KIND,
     content: description || '',
     tags: metadataTags,
   });
 
-  await client.signAndPublish({
+  await signAndPublish(signer, relay, {
     kind: GROUP_ADMINS_KIND,
     content: '',
     tags: [
@@ -95,7 +116,7 @@ export async function createGroup(
     ],
   });
 
-  await client.signAndPublish({
+  await signAndPublish(signer, relay, {
     kind: GROUP_MEMBERS_KIND,
     content: '',
     tags: [
@@ -110,18 +131,17 @@ export async function createGroup(
 // --- Read operations ---
 
 export async function readGroupMembers(
-  client: NostrClient,
+  relay: RelayClient,
   groupId: string,
 ): Promise<MemberRead> {
   try {
-    const events = await client.fetch({
+    const events = await relay.fetch({
       kinds: [GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND],
       '#d': [groupId],
     });
 
     // Safe cast: resolveTrustedWriters only reads kind, pubkey, tags,
-    // created_at, id — all present on NostrEventLike. The NDKEvent type
-    // is a packaging artifact, not a runtime dependency.
+    // created_at, id. nostr-tools Event has all of these.
     const writers = resolveTrustedWriters(groupId, events as any);
 
     if (writers.status === 'resolved') {
@@ -130,7 +150,7 @@ export async function readGroupMembers(
 
     const latest = events
       .filter((e) => e.kind === GROUP_MEMBERS_KIND)
-      .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
+      .sort((a, b) => b.created_at - a.created_at)[0];
 
     if (!latest) return { ok: true, members: [] };
 
@@ -144,15 +164,16 @@ export async function readGroupMembers(
 }
 
 export async function addGroupMember(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
   pubkey: string,
 ): Promise<{ ok: true } | { ok: false; reason: EditRefusal }> {
-  const read = await readGroupMembers(client, groupId);
+  const read = await readGroupMembers(relay, groupId);
   const result = membersAfterAdd(read, pubkey);
   if (!result.ok) return result;
 
-  const count = await client.signAndPublish({
+  const count = await signAndPublish(signer, relay, {
     kind: GROUP_MEMBERS_KIND,
     content: '',
     tags: buildMemberTags(groupId, result.members),
@@ -162,15 +183,16 @@ export async function addGroupMember(
 }
 
 export async function removeGroupMember(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
   pubkey: string,
 ): Promise<{ ok: true } | { ok: false; reason: EditRefusal }> {
-  const read = await readGroupMembers(client, groupId);
+  const read = await readGroupMembers(relay, groupId);
   const result = membersAfterRemove(read, pubkey);
   if (!result.ok) return result;
 
-  const count = await client.signAndPublish({
+  const count = await signAndPublish(signer, relay, {
     kind: GROUP_MEMBERS_KIND,
     content: '',
     tags: buildMemberTags(groupId, result.members),
@@ -180,7 +202,7 @@ export async function removeGroupMember(
 }
 
 export async function readGroupAdmins(
-  client: NostrClient,
+  relay: RelayClient,
   groupId: string,
 ): Promise<{
   ok: boolean;
@@ -188,7 +210,7 @@ export async function readGroupAdmins(
   ownerPubkey?: string;
 }> {
   try {
-    const events = await client.fetch({
+    const events = await relay.fetch({
       kinds: [GROUP_METADATA_KIND, GROUP_ADMINS_KIND],
       '#d': [groupId],
     });
@@ -200,8 +222,8 @@ export async function readGroupAdmins(
     }
 
     const latest = events
-      .filter((e: NostrEventLike) => e.kind === GROUP_ADMINS_KIND)
-      .sort((a: NostrEventLike, b: NostrEventLike) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
+      .filter((e) => e.kind === GROUP_ADMINS_KIND)
+      .sort((a, b) => b.created_at - a.created_at)[0];
 
     if (!latest) return { ok: true, entries: [] };
 
@@ -217,12 +239,13 @@ export async function readGroupAdmins(
 }
 
 export async function setGroupPermissions(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
   pubkey: string,
   permissions: AdminPermission[],
 ): Promise<{ ok: boolean; reason?: string }> {
-  const read = await readGroupAdmins(client, groupId);
+  const read = await readGroupAdmins(relay, groupId);
   if (!read.ok) {
     return { ok: false, reason: 'Could not read the current permissions, so nothing was changed.' };
   }
@@ -230,7 +253,7 @@ export async function setGroupPermissions(
   const others = read.entries.filter((e) => e.pubkey !== pubkey);
   const next = [...others, { pubkey, permissions }];
 
-  const count = await client.signAndPublish({
+  const count = await signAndPublish(signer, relay, {
     kind: GROUP_ADMINS_KIND,
     content: '',
     tags: buildAdminTags(groupId, next),
@@ -240,7 +263,8 @@ export async function setGroupPermissions(
 }
 
 export async function updateGroupMetadata(
-  client: NostrClient,
+  signer: SignerInterface,
+  relay: RelayClient,
   groupId: string,
   edit: GroupMetadataEdit,
 ): Promise<{ ok: boolean; reason?: string }> {
@@ -253,7 +277,7 @@ export async function updateGroupMetadata(
   if (edit.about?.trim()) tags.push(['about', edit.about.trim()]);
   if (edit.picture?.trim()) tags.push(['picture', edit.picture.trim()]);
 
-  const count = await client.signAndPublish({
+  const count = await signAndPublish(signer, relay, {
     kind: GROUP_METADATA_KIND,
     content: '',
     tags,

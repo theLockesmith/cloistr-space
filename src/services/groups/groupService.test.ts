@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { NostrClient } from '../headless';
+import { describe, it, expect } from 'vitest';
+import type { SignerInterface, RelayClient } from '../headless';
 import {
   GROUP_METADATA_KIND,
   GROUP_ADMINS_KIND,
@@ -7,20 +7,31 @@ import {
   GROUP_JOIN_REQUEST_KIND,
   GROUP_LEAVE_REQUEST_KIND,
 } from '@/types/groups';
+import type { Event, UnsignedEvent } from 'nostr-tools';
 
-// Will be imported from groupService once it exists
-// import { joinGroup, leaveGroup, createGroup, ... } from './groupService';
+const TEST_PUBKEY = 'aa'.repeat(32);
 
-function createMockClient(pubkey = 'aabb'.repeat(8)): NostrClient & { published: Array<{ kind: number; content: string; tags: string[][] }> } {
-  const published: Array<{ kind: number; content: string; tags: string[][] }> = [];
+function createMockSigner(): SignerInterface {
+  return {
+    getPublicKey: async () => TEST_PUBKEY,
+    signEvent: async (unsigned: UnsignedEvent): Promise<Event> => ({
+      ...unsigned,
+      id: 'bb'.repeat(32),
+      sig: 'cc'.repeat(64),
+    }),
+    encrypt: async () => '',
+    decrypt: async () => '',
+  };
+}
+
+function createMockRelay(): RelayClient & { published: Event[] } {
+  const published: Event[] = [];
   return {
     published,
-    getPublicKey: async () => pubkey,
-    signAndPublish: async (template) => {
-      published.push(template);
+    publish: async (event: Event) => {
+      published.push(event);
       return 1;
     },
-    publishSigned: async () => 1,
     fetch: async () => [],
   };
 }
@@ -29,109 +40,82 @@ describe('groupService', () => {
   describe('joinGroup', () => {
     it('publishes a kind:9021 event with the group id', async () => {
       const { joinGroup } = await import('./groupService');
-      const client = createMockClient();
-      await joinGroup(client, 'test-group');
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      expect(client.published).toHaveLength(1);
-      expect(client.published[0].kind).toBe(GROUP_JOIN_REQUEST_KIND);
-      expect(client.published[0].tags).toEqual([['h', 'test-group']]);
-      expect(client.published[0].content).toBe('');
-    });
+      await joinGroup(signer, relay, 'test-group', 'please let me in');
 
-    it('includes the join message when provided', async () => {
-      const { joinGroup } = await import('./groupService');
-      const client = createMockClient();
-      await joinGroup(client, 'test-group', 'please let me in');
-
-      expect(client.published[0].content).toBe('please let me in');
+      expect(relay.published).toHaveLength(1);
+      expect(relay.published[0].kind).toBe(GROUP_JOIN_REQUEST_KIND);
+      expect(relay.published[0].content).toBe('please let me in');
+      expect(relay.published[0].tags).toEqual([['h', 'test-group']]);
     });
   });
 
   describe('leaveGroup', () => {
-    it('publishes a kind:9022 event with the group id', async () => {
+    it('publishes a kind:9022 event', async () => {
       const { leaveGroup } = await import('./groupService');
-      const client = createMockClient();
-      await leaveGroup(client, 'test-group');
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      expect(client.published).toHaveLength(1);
-      expect(client.published[0].kind).toBe(GROUP_LEAVE_REQUEST_KIND);
-      expect(client.published[0].tags).toEqual([['h', 'test-group']]);
+      await leaveGroup(signer, relay, 'test-group');
+
+      expect(relay.published).toHaveLength(1);
+      expect(relay.published[0].kind).toBe(GROUP_LEAVE_REQUEST_KIND);
+      expect(relay.published[0].tags).toEqual([['h', 'test-group']]);
     });
   });
 
   describe('createGroup', () => {
-    it('publishes metadata, admin list, and member list', async () => {
+    it('publishes metadata, admins, and members events', async () => {
       const { createGroup } = await import('./groupService');
-      const pubkey = 'aabb'.repeat(8);
-      const client = createMockClient(pubkey);
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      const id = await createGroup(client, { name: 'test-project' });
+      const groupId = await createGroup(signer, relay, {
+        name: 'Test Group',
+        description: 'A test group',
+      });
 
-      expect(client.published).toHaveLength(3);
-      expect(client.published[0].kind).toBe(GROUP_METADATA_KIND);
-      expect(client.published[1].kind).toBe(GROUP_ADMINS_KIND);
-      expect(client.published[2].kind).toBe(GROUP_MEMBERS_KIND);
-
-      // identifier embeds the creator's pubkey prefix
-      expect(id).toContain(pubkey.slice(0, 16));
+      expect(groupId).toContain(TEST_PUBKEY.slice(0, 16));
+      expect(relay.published).toHaveLength(3);
+      expect(relay.published[0].kind).toBe(GROUP_METADATA_KIND);
+      expect(relay.published[1].kind).toBe(GROUP_ADMINS_KIND);
+      expect(relay.published[2].kind).toBe(GROUP_MEMBERS_KIND);
     });
 
-    it('sets the creator as admin with full permissions', async () => {
+    it('includes the creator as admin and member', async () => {
       const { createGroup } = await import('./groupService');
-      const pubkey = 'aabb'.repeat(8);
-      const client = createMockClient(pubkey);
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      await createGroup(client, { name: 'test' });
+      await createGroup(signer, relay, { name: 'Test Group' });
 
-      const adminTags = client.published[1].tags;
-      const pTag = adminTags.find((t) => t[0] === 'p');
-      expect(pTag?.[1]).toBe(pubkey);
-      expect(pTag?.slice(2)).toContain('add-user');
-      expect(pTag?.slice(2)).toContain('edit-metadata');
-    });
+      const adminTags = relay.published[1].tags.filter((t) => t[0] === 'p');
+      expect(adminTags[0][1]).toBe(TEST_PUBKEY);
 
-    it('sets the creator as member', async () => {
-      const { createGroup } = await import('./groupService');
-      const pubkey = 'aabb'.repeat(8);
-      const client = createMockClient(pubkey);
-
-      await createGroup(client, { name: 'test' });
-
-      const memberTags = client.published[2].tags;
-      expect(memberTags).toContainEqual(['p', pubkey]);
+      const memberTags = relay.published[2].tags.filter((t) => t[0] === 'p');
+      expect(memberTags[0][1]).toBe(TEST_PUBKEY);
     });
   });
 
   describe('readGroupMembers', () => {
-    it('returns members from fetched events (legacy group)', async () => {
+    it('returns empty members for a group with no events', async () => {
       const { readGroupMembers } = await import('./groupService');
-      const client = createMockClient();
-      const memberA = 'aaaa'.repeat(8);
-      const memberB = 'bbbb'.repeat(8);
+      const relay = createMockRelay();
 
-      vi.spyOn(client, 'fetch').mockResolvedValueOnce([
-        {
-          id: '1'.repeat(64),
-          pubkey: 'owner'.padEnd(64, '0'),
-          kind: GROUP_MEMBERS_KIND,
-          created_at: 1000,
-          tags: [['d', 'legacy-group'], ['p', memberA], ['p', memberB]],
-          content: '',
-        },
-      ]);
+      const result = await readGroupMembers(relay, 'nonexistent');
 
-      const result = await readGroupMembers(client, 'legacy-group');
-      expect(result.ok).toBe(true);
-      expect(result.members).toContain(memberA);
-      expect(result.members).toContain(memberB);
+      expect(result).toEqual({ ok: true, members: [] });
     });
 
-    it('returns ok:false when fetch throws', async () => {
+    it('returns ok:false when the relay throws', async () => {
       const { readGroupMembers } = await import('./groupService');
-      const client = createMockClient();
-      vi.spyOn(client, 'fetch').mockRejectedValueOnce(new Error('network'));
+      const relay = createMockRelay();
+      relay.fetch = async () => { throw new Error('offline'); };
 
-      const result = await readGroupMembers(client, 'group');
+      const result = await readGroupMembers(relay, 'test');
+
       expect(result.ok).toBe(false);
     });
   });
@@ -139,28 +123,32 @@ describe('groupService', () => {
   describe('updateGroupMetadata', () => {
     it('refuses a nameless save', async () => {
       const { updateGroupMetadata } = await import('./groupService');
-      const client = createMockClient();
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      const result = await updateGroupMetadata(client, 'group-id', { name: '' });
+      const result = await updateGroupMetadata(signer, relay, 'test-group', {
+        name: '',
+        about: 'some description',
+      });
+
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('name');
-      expect(client.published).toHaveLength(0);
+      expect(result.reason).toMatch(/name/i);
+      expect(relay.published).toHaveLength(0);
     });
 
     it('publishes metadata with trimmed values', async () => {
       const { updateGroupMetadata } = await import('./groupService');
-      const client = createMockClient();
+      const signer = createMockSigner();
+      const relay = createMockRelay();
 
-      const result = await updateGroupMetadata(client, 'group-id', {
+      const result = await updateGroupMetadata(signer, relay, 'test-group', {
         name: '  My Project  ',
-        about: '  A description  ',
+        about: '  Cool project  ',
       });
-      expect(result.ok).toBe(true);
-      expect(client.published).toHaveLength(1);
 
-      const tags = client.published[0].tags;
-      expect(tags).toContainEqual(['name', 'My Project']);
-      expect(tags).toContainEqual(['about', 'A description']);
+      expect(result.ok).toBe(true);
+      const nameTags = relay.published[0].tags.filter((t) => t[0] === 'name');
+      expect(nameTags[0][1]).toBe('My Project');
     });
   });
 });

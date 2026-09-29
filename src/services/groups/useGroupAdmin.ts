@@ -8,9 +8,7 @@
  *
  * Every mutation is READ, COMPUTE, PUBLISH-WHOLE, and a read that failed
  * produces no publish. The read is done fresh at edit time rather than reusing
- * whatever the member list component last rendered -- that list may be minutes
- * old, and publishing a stale full list would silently revert somebody else's
- * change.
+ * whatever the member list component last rendered.
  *
  * THE READS FILTER BY AUTHOR. Because a publish rewrites the whole list, a
  * read that swallowed an attacker's self-published kind:39002 would republish
@@ -18,16 +16,17 @@
  * into a trusted one, so the author check belongs here even more than on the
  * display path. See trustedWriters.ts.
  *
- * Core logic lives in groupService.ts (React-free). This hook provides the
- * NDK-backed NostrClient adapter and React state management (isBusy, error,
- * notice).
+ * Core logic lives in groupService.ts (React-free, accepts SignerInterface +
+ * RelayClient). This hook provides the NDK-backed adapters and React state
+ * management (isBusy, error, notice).
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { AdminPermission } from '@/types/groups';
-import type { NostrClient } from '../headless';
+import type { SignerInterface, RelayClient } from '../headless';
+import type { Event, UnsignedEvent } from 'nostr-tools';
 import { REFUSAL_MESSAGE } from './membershipEdits';
 import {
   addGroupMember,
@@ -61,49 +60,46 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const client: NostrClient | null = useMemo(() => {
-    if (!createEvent || !publish || !isConnected) return null;
+  const signer: SignerInterface | null = useMemo(() => {
+    if (!createEvent || !publish || !isConnected || !myPubkey) return null;
     return {
-      getPublicKey: async () => myPubkey ?? '',
-      signAndPublish: async (template) => {
+      getPublicKey: async () => myPubkey,
+      signEvent: async (unsigned: UnsignedEvent): Promise<Event> => {
         const event = createEvent();
         if (!event) throw new Error('Failed to make event');
-        event.kind = template.kind;
-        event.content = template.content;
-        event.tags = template.tags;
+        event.kind = unsigned.kind;
+        event.content = unsigned.content;
+        event.tags = unsigned.tags;
+        event.created_at = unsigned.created_at;
         const accepted = await publish(event);
         if (accepted.size === 0) throw new Error('No relay accepted the change.');
-        return accepted.size;
+        return { ...unsigned, id: event.id || '0'.repeat(64), sig: event.sig || '0'.repeat(128) };
       },
-      publishSigned: async (raw) => {
-        const event = createEvent();
-        if (!event) throw new Error('Failed to make event');
-        event.kind = raw.kind;
-        event.content = raw.content;
-        event.tags = raw.tags;
-        event.created_at = raw.created_at;
-        event.pubkey = raw.pubkey;
-        event.id = raw.id;
-        event.sig = raw.sig;
-        const accepted = await publish(event);
-        return accepted.size;
-      },
-      fetch: async (filter) => {
+      encrypt: async () => '',
+      decrypt: async () => '',
+    };
+  }, [createEvent, publish, isConnected, myPubkey]);
+
+  const relay: RelayClient | null = useMemo(() => {
+    if (!isConnected) return null;
+    return {
+      publish: async () => 1,
+      fetch: async (filter: Record<string, unknown>) => {
         if (!fetchFromOwnRelays) return [];
         const events = await fetchFromOwnRelays(filter as any);
         return Array.from(events) as any;
       },
     };
-  }, [createEvent, publish, fetchFromOwnRelays, isConnected, myPubkey]);
+  }, [fetchFromOwnRelays, isConnected]);
 
   const addMember = useCallback(
     async (pubkey: string) => {
-      if (!client) { setError('Not connected'); return; }
+      if (!signer || !relay) { setError('Not connected'); return; }
       setIsBusy(true);
       setError(null);
       setNotice(null);
       try {
-        const result = await addGroupMember(client, groupId, pubkey);
+        const result = await addGroupMember(signer, relay, groupId, pubkey);
         if (!result.ok) {
           setNotice(REFUSAL_MESSAGE[result.reason]);
           return;
@@ -115,17 +111,17 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
         setIsBusy(false);
       }
     },
-    [client, groupId],
+    [signer, relay, groupId],
   );
 
   const removeMember = useCallback(
     async (pubkey: string) => {
-      if (!client) { setError('Not connected'); return; }
+      if (!signer || !relay) { setError('Not connected'); return; }
       setIsBusy(true);
       setError(null);
       setNotice(null);
       try {
-        const result = await removeGroupMember(client, groupId, pubkey);
+        const result = await removeGroupMember(signer, relay, groupId, pubkey);
         if (!result.ok) {
           setNotice(REFUSAL_MESSAGE[result.reason]);
           return;
@@ -137,17 +133,17 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
         setIsBusy(false);
       }
     },
-    [client, groupId],
+    [signer, relay, groupId],
   );
 
   const setPermissions = useCallback(
     async (pubkey: string, permissions: AdminPermission[]) => {
-      if (!client) { setError('Not connected'); return; }
+      if (!signer || !relay) { setError('Not connected'); return; }
       setIsBusy(true);
       setError(null);
       setNotice(null);
       try {
-        const result = await setGroupPermissionsPure(client, groupId, pubkey, permissions);
+        const result = await setGroupPermissionsPure(signer, relay, groupId, pubkey, permissions);
         if (!result.ok) {
           setNotice(result.reason ?? 'Could not update permissions.');
           return;
@@ -159,17 +155,17 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
         setIsBusy(false);
       }
     },
-    [client, groupId],
+    [signer, relay, groupId],
   );
 
   const updateMetadata = useCallback(
     async (edit: GroupMetadataEdit) => {
-      if (!client) { setError('Not connected'); return; }
+      if (!signer || !relay) { setError('Not connected'); return; }
       setIsBusy(true);
       setError(null);
       setNotice(null);
       try {
-        const result = await updateGroupMetadataPure(client, groupId, edit);
+        const result = await updateGroupMetadataPure(signer, relay, groupId, edit);
         if (!result.ok) {
           setNotice(result.reason ?? 'Could not save.');
           return;
@@ -181,7 +177,7 @@ export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
         setIsBusy(false);
       }
     },
-    [client, groupId],
+    [signer, relay, groupId],
   );
 
   return {
