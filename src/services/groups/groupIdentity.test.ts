@@ -72,8 +72,8 @@ describe('group identity', () => {
   it('the service refuses a nameless save independently of the UI', () => {
     // A guard living only in a component is one refactor away from gone, and
     // the cost of being wrong is the name of somebody's project.
-    const admin = readFileSync(join(__dirname, 'useGroupAdmin.ts'), 'utf8');
+    const service = readFileSync(join(__dirname, 'groupService.ts'), 'utf8');
 
-    expect(admin).toMatch(/A project needs a name/);
+    expect(service).toMatch(/A project needs a name/);
   });
 });

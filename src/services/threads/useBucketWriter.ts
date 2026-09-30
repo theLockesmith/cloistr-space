@@ -7,14 +7,19 @@
  *
  * Key handoffs carry the thread's secret key encrypted to the recipient,
  * bucketed by a value only the granter and recipient can compute.
+ *
+ * Core logic lives in threadPublish.ts (React-free, accepts RelayClient).
+ * This hook provides the NDK-backed adapter.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useNdk } from '@/services/nostr';
+import type { RelayClient } from '../headless';
+import type { Event } from 'nostr-tools';
 import {
-  wrapThreadMessage,
-  wrapKeyHandoff,
-} from './giftWrap';
+  publishMessage,
+  publishKeyHandoff,
+} from './threadPublish';
 
 export interface BucketWriterReturn {
   sendMessage: (
@@ -39,33 +44,25 @@ export function useBucketWriter(): BucketWriterReturn {
   const { createEvent, publish, isConnected } = useNdk();
   const canPublish = Boolean(publish && isConnected);
 
-  const publishPreSigned = useCallback(
-    async (raw: {
-      id: string;
-      pubkey: string;
-      created_at: number;
-      kind: number;
-      tags: string[][];
-      content: string;
-      sig: string;
-    }) => {
-      if (!createEvent || !publish) throw new Error('Not connected');
-
-      const event = createEvent();
-      if (!event) throw new Error('Could not create NDK event');
-
-      event.kind = raw.kind;
-      event.content = raw.content;
-      event.tags = raw.tags;
-      event.created_at = raw.created_at;
-      event.pubkey = raw.pubkey;
-      event.id = raw.id;
-      event.sig = raw.sig;
-
-      await publish(event);
-    },
-    [createEvent, publish],
-  );
+  const relay: RelayClient | null = useMemo(() => {
+    if (!createEvent || !publish) return null;
+    return {
+      publish: async (raw: Event) => {
+        const event = createEvent();
+        if (!event) throw new Error('Could not create NDK event');
+        event.kind = raw.kind;
+        event.content = raw.content;
+        event.tags = raw.tags;
+        event.created_at = raw.created_at;
+        event.pubkey = raw.pubkey;
+        event.id = raw.id;
+        event.sig = raw.sig;
+        const accepted = await publish(event);
+        return accepted.size;
+      },
+      fetch: async () => [],
+    };
+  }, [createEvent, publish]);
 
   const sendMessage = useCallback(
     async (
@@ -74,10 +71,10 @@ export function useBucketWriter(): BucketWriterReturn {
       threadSecretHex: string,
       nowSec?: number,
     ) => {
-      const wrap = wrapThreadMessage(plaintext, authorPubkey, threadSecretHex, nowSec);
-      await publishPreSigned(wrap);
+      if (!relay) throw new Error('Not connected');
+      await publishMessage(relay, plaintext, authorPubkey, threadSecretHex, nowSec);
     },
-    [publishPreSigned],
+    [relay],
   );
 
   const grantKey = useCallback(
@@ -88,10 +85,10 @@ export function useBucketWriter(): BucketWriterReturn {
       recipientPubkey: string,
       nowSec?: number,
     ) => {
-      const wrap = wrapKeyHandoff(threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
-      await publishPreSigned(wrap);
+      if (!relay) throw new Error('Not connected');
+      await publishKeyHandoff(relay, threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
     },
-    [publishPreSigned],
+    [relay],
   );
 
   return { sendMessage, grantKey, canPublish };
