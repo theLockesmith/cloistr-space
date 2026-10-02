@@ -27,7 +27,7 @@
     "@cloistr/ui": "^0.42.2",
     "@noble/hashes": "^2.4.0",
     "@nostr-dev-kit/ndk": "^2.18.1",
-    "@tanstack/react-query": "^5.104.0",
+    "@tanstack/react-query": "^5.104.1",
     "nostr-tools": "^2.25.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
