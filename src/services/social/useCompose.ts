@@ -1,13 +1,15 @@
 /**
  * @fileoverview Compose hook
- * Post notes with optional media and replies
+ * Post notes with optional media and replies. Uploads happen here; event
+ * building lives in noteService.ts, which a headless caller can use directly.
  */
 
 import { useState, useCallback } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useNdk, useHeadlessAdapters } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { useFileUpload } from '@/services/cloistr/useFileUpload';
-import { NOTE_KIND, type ComposeOptions } from '@/types/social';
+import type { ComposeOptions } from '@/types/social';
+import { postNote, type UploadedMedia } from './noteService';
 
 interface UseComposeReturn {
   /** Post a note */
@@ -26,7 +28,8 @@ interface UseComposeReturn {
  * Hook for composing and posting notes
  */
 export function useCompose(): UseComposeReturn {
-  const { publish, createEvent, isConnected } = useNdk();
+  const { publish, isConnected } = useNdk();
+  const { signer, relay } = useHeadlessAdapters();
   const { pubkey, isAuthenticated } = useAuthStore();
   const { upload, isUploading, progress } = useFileUpload();
 
@@ -37,7 +40,7 @@ export function useCompose(): UseComposeReturn {
 
   const post = useCallback(
     async (content: string, options?: ComposeOptions): Promise<string> => {
-      if (!publish || !createEvent || !pubkey) {
+      if (!signer || !relay) {
         throw new Error('Not connected');
       }
 
@@ -49,73 +52,29 @@ export function useCompose(): UseComposeReturn {
       setError(null);
 
       try {
-        const tags: string[][] = [];
-        let finalContent = content;
-
-        // Handle media uploads
-        if (options?.media && options.media.length > 0) {
-          for (const file of options.media) {
-            const result = await upload(file, { publishMetadata: false });
-            if (result?.url) {
-              // Add URL to content
-              finalContent += `\n${result.url}`;
-
-              // Add imeta tag for rich media
-              const imetaTag = ['imeta', `url ${result.url}`];
-              if (file.type) {
-                imetaTag.push(`m ${file.type}`);
-              }
-              tags.push(imetaTag);
-            }
-          }
+        // Upload first; the note references the uploaded URLs.
+        // A failed upload stops the post: publishing without media the user
+        // attached claims a post they did not write.
+        const files = options?.media ?? [];
+        const media: UploadedMedia[] = [];
+        for (const file of files) {
+          const result = await upload(file, { publishMetadata: false });
+          if (result?.url) media.push({ url: result.url, mimeType: file.type || undefined });
         }
-
-        // Handle reply
-        if (options?.replyTo) {
-          // Add reply tag with marker
-          tags.push(['e', options.replyTo, '', 'reply']);
-
-          // If we have a root, add it too
-          // For now, treat replyTo as both root and reply for simple threads
-          if (!tags.some((t) => t[0] === 'e' && t[3] === 'root')) {
-            tags.push(['e', options.replyTo, '', 'root']);
-          }
-        }
-
-        // Handle quote
-        if (options?.quote) {
-          tags.push(['q', options.quote]);
-        }
-
-        // Handle mentions
-        if (options?.mentions) {
-          for (const mention of options.mentions) {
-            tags.push(['p', mention]);
-          }
-        }
-
-        // Extract hashtags from content
-        const hashtagMatches = finalContent.match(/#(\w+)/g) || [];
-        for (const tag of hashtagMatches) {
-          const hashtag = tag.slice(1).toLowerCase();
-          if (!tags.some((t) => t[0] === 't' && t[1] === hashtag)) {
-            tags.push(['t', hashtag]);
-          }
+        if (media.length < files.length) {
+          throw new Error(
+            `${files.length - media.length} of ${files.length} attachments failed to upload. Nothing was posted.`
+          );
         }
 
         // TODO: Extract mentions from content (@npub...) and convert to hex pubkeys
-        // For now, inline mention parsing is not implemented
-
-        const event = createEvent();
-        if (!event) throw new Error('Failed to make event');
-
-        event.kind = NOTE_KIND;
-        event.content = finalContent.trim();
-        event.tags = tags;
-
-        await publish(event);
-
-        return event.id ?? '';
+        const outcome = await postNote(signer, relay, content, {
+          replyTo: options?.replyTo,
+          quote: options?.quote,
+          mentions: options?.mentions,
+          media,
+        });
+        return outcome.eventId;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to post';
         setError(message);
@@ -124,7 +83,7 @@ export function useCompose(): UseComposeReturn {
         setIsPosting(false);
       }
     },
-    [publish, createEvent, pubkey, upload]
+    [signer, relay, upload]
   );
 
   return {

@@ -1,12 +1,14 @@
 /**
  * @fileoverview Note actions hook
- * React, reply, repost notes
+ * React, reply, repost notes. Event building lives in noteService.ts, which a
+ * headless caller can use directly.
  */
 
 import { useCallback } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useNdk, useHeadlessAdapters } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
-import { DELETE_KIND, NOTE_KIND, REACTION_KIND, REPOST_KIND } from '@/types/social';
+import type { PublishOutcome } from '../headless';
+import { reactToNote, replyToNote, retractEvent, repostNote } from './noteService';
 
 /**
  * Why an action cannot run right now, or null when it can.
@@ -55,45 +57,7 @@ export function actionBlockedReason(state: {
   return null;
 }
 
-/**
- * How a publish went.
- *
- * The user's relay list is mostly third-party, so "some relays took it" is the
- * normal good outcome and must not read as failure. Only zero acceptances is an
- * actual failure, and that is what throws.
- */
-export interface PublishOutcome {
-  /** Relays that accepted the event. Never zero -- zero throws instead. */
-  acceptedBy: number;
-  /**
-   * The id of the event we just published.
-   *
-   * Needed so a reaction or repost can be UNDONE without waiting for the relay
-   * echo to come back and tell us what we just sent. Undo is a NIP-09 kind:5
-   * referencing this id, and a user who taps a heart and immediately taps it
-   * again should not have to wait on a round trip to change their mind.
-   */
-  eventId: string;
-}
-
-/**
- * Turn NDK's relay set into a success or a throw.
- *
- * event.publish() resolves with the relays that ACCEPTED, and does not reject
- * when some refuse -- so a silent partial failure and a total failure are the
- * same value shape. Zero acceptances is the only real failure; anything above
- * zero means the event is on the network somewhere.
- *
- * This matters here specifically because relay.cloistr.xyz gates writes behind
- * PoW, NIP-42 auth and a whitelist, so it can refuse an event that eleven other
- * relays take without complaint.
- */
-function publishOrThrow(relays: Set<unknown>, eventId: string): PublishOutcome {
-  if (relays.size === 0) {
-    throw new Error('No relay accepted it. Check your relay list and connection.');
-  }
-  return { acceptedBy: relays.size, eventId };
-}
+export type { PublishOutcome } from '../headless';
 
 interface UseNoteActionsReturn {
   /** React to a note with + or emoji. Throws when no relay accepts it. */
@@ -138,7 +102,8 @@ interface UseNoteActionsReturn {
  * Hook for note interactions
  */
 export function useNoteActions(): UseNoteActionsReturn {
-  const { publish, createEvent, isConnected } = useNdk();
+  const { publish, isConnected } = useNdk();
+  const { signer, relay } = useHeadlessAdapters();
   const { pubkey, isAuthenticated } = useAuthStore();
 
   const blockedReason = actionBlockedReason({
@@ -150,103 +115,36 @@ export function useNoteActions(): UseNoteActionsReturn {
 
   const canAct = blockedReason === null;
 
-  // React to a note (kind:7)
   const react = useCallback(
-    async (
-      eventId: string,
-      eventPubkey: string,
-      content = '+',
-      extraTags: string[][] = []
-    ): Promise<PublishOutcome> => {
-      if (!publish || !createEvent || !pubkey) {
-        throw new Error('Not connected');
-      }
-
-      const event = createEvent();
-      if (!event) throw new Error('Failed to make event');
-
-      event.kind = REACTION_KIND;
-      event.content = content;
-      // extraTags carries the NIP-25 `["emoji", shortcode, url]` for a custom
-      // reaction. We never load that image ourselves, but the receiving client
-      // needs the tag to render what the user actually picked -- so declining
-      // to fetch must not become declining to publish.
-      event.tags = [
-        ['e', eventId],
-        ['p', eventPubkey],
-        ...extraTags,
-      ];
-
-      const accepted = await publish(event);
-      return publishOrThrow(accepted, event.id);
+    async (eventId: string, eventPubkey: string, content = '+', extraTags: string[][] = []) => {
+      if (!signer || !relay) throw new Error('Not connected');
+      return reactToNote(signer, relay, eventId, eventPubkey, content, extraTags);
     },
-    [publish, createEvent, pubkey]
+    [signer, relay]
   );
 
-  // Reply to a note (kind:1, NIP-10 markers supplied by the caller)
   const reply = useCallback(
-    async (content: string, tags: string[][]): Promise<PublishOutcome> => {
-      if (!publish || !createEvent || !pubkey) {
-        throw new Error('Not connected');
-      }
-      if (!content.trim()) {
-        throw new Error('A reply needs some text');
-      }
-
-      const event = createEvent();
-      if (!event) throw new Error('Failed to make event');
-
-      event.kind = NOTE_KIND;
-      event.content = content.trim();
-      event.tags = tags;
-
-      const accepted = await publish(event);
-      return publishOrThrow(accepted, event.id);
+    async (content: string, tags: string[][]) => {
+      if (!signer || !relay) throw new Error('Not connected');
+      return replyToNote(signer, relay, content, tags);
     },
-    [publish, createEvent, pubkey]
+    [signer, relay]
   );
 
-  // Retract one of our own events (kind:5, NIP-09)
   const undo = useCallback(
-    async (eventId: string): Promise<PublishOutcome> => {
-      if (!publish || !createEvent || !pubkey) {
-        throw new Error('Not connected');
-      }
-
-      const event = createEvent();
-      if (!event) throw new Error('Failed to make event');
-
-      event.kind = DELETE_KIND;
-      event.content = '';
-      event.tags = [['e', eventId]];
-
-      const accepted = await publish(event);
-      return publishOrThrow(accepted, event.id);
+    async (eventId: string) => {
+      if (!signer || !relay) throw new Error('Not connected');
+      return retractEvent(signer, relay, eventId);
     },
-    [publish, createEvent, pubkey]
+    [signer, relay]
   );
 
-  // Repost a note (kind:6)
   const repost = useCallback(
-    async (eventId: string, eventPubkey: string, relay?: string): Promise<PublishOutcome> => {
-      if (!publish || !createEvent || !pubkey) {
-        throw new Error('Not connected');
-      }
-
-      const event = createEvent();
-      if (!event) throw new Error('Failed to make event');
-
-      event.kind = REPOST_KIND;
-      event.content = '';
-      event.tags = [
-        ['e', eventId, relay ?? '', 'mention'],
-        ['p', eventPubkey],
-      ];
-
-      const accepted = await publish(event);
-      return publishOrThrow(accepted, event.id);
+    async (eventId: string, eventPubkey: string, relayHint?: string) => {
+      if (!signer || !relay) throw new Error('Not connected');
+      return repostNote(signer, relay, eventId, eventPubkey, relayHint);
     },
-    [publish, createEvent, pubkey]
+    [signer, relay]
   );
 
   return {
