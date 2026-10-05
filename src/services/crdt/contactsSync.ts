@@ -3,14 +3,15 @@
  * Synchronizes local contact list with relays using NIP-0A
  */
 
-import { NDKEvent, subscribeStream, type NdkService } from '@/services/nostr';
+import { subscribeStream, type NDKEvent, type NDKFilter, type NdkService } from '@/services/nostr';
+import { makeNdkRelay, makeNdkSigner } from '@/services/nostr/ndkAdapters';
+import type { Event } from 'nostr-tools';
+import { publishContactState } from './contactsService';
 import { useContactsStore } from '@/stores/contactsStore';
 import type { ContactsCrdtState } from '@/types/contacts';
 import {
   NIP0A_KIND,
   parseNip0aEvent,
-  buildNip0aTags,
-  buildNip0aContent,
   mergeNip0aEvents,
   getNip0aFilter,
   parseKind3Event,
@@ -99,8 +100,11 @@ export class ContactsSyncService {
       const pendingChanges = store.getPendingChanges();
       let published = false;
 
-      if (pendingChanges.length > 0 || remoteEvents.length === 0) {
-        // Publish full state to ensure consistency
+      // Publish only when this device has changes to send. An empty remote
+      // answer is NOT a reason: it may be a relay that did not answer, and
+      // publishing this device's copy would replace a fuller list held there
+      // (kind:33000 is addressable) -- the 2026-08-24 shape again.
+      if (pendingChanges.length > 0) {
         published = await this.publishContacts();
         if (published) {
           useContactsStore.getState().markSynced();
@@ -137,14 +141,15 @@ export class ContactsSyncService {
   /**
    * Fetch contact list events from relays
    */
-  async fetchRemoteContacts(pubkey: string): Promise<NDKEvent[]> {
-    const filter = getNip0aFilter(pubkey);
-    // Pinned to the user's own relays. This filter carries `authors`, and NDK
-    // routes those purely by the author's relay list -- so the query for a
-    // kind:33000 that exists ONLY on our relay could be sent everywhere except
-    // there. See NdkService.getOwnRelaySet.
-    const events = await this.ndkService.fetchFromOwnRelays(filter);
-    return Array.from(events);
+  async fetchRemoteContacts(pubkey: string): Promise<Event[]> {
+    // Pinned to the user's own relays (the adapter fetches through
+    // fetchFromOwnRelays). This filter carries `authors`, and NDK routes those
+    // purely by the author's relay list -- so the query for a kind:33000 that
+    // exists ONLY on our relay could be sent everywhere except there. See
+    // NdkService.getOwnRelaySet. Only the user's own lists count; anything
+    // else returned under the filter is not theirs to republish.
+    const events = await this.relay().fetch(getNip0aFilter(pubkey));
+    return events.filter((e) => e.kind === NIP0A_KIND && e.pubkey === pubkey);
   }
 
   /**
@@ -197,50 +202,36 @@ export class ContactsSyncService {
     if (!ndk.signer) {
       throw new Error('Signer not available - cannot publish');
     }
+    const ndkSigner = ndk.signer;
+    const signer = makeNdkSigner(this.source(), async () => (await ndkSigner.user()).pubkey);
 
-    // Create the NIP-0A event
-    const tags = buildNip0aTags(store.crdt);
-
-    // Never publish a contact list carrying nothing.
-    //
-    // This is the defect that cost the operator their follow list: sync() calls
-    // publishContacts when it finds no remote events, and with an empty local
-    // store that published a tagless kind:33000. Because kind:33000 is
-    // addressable on d=contacts, that empty event SUPERSEDED their real list --
+    // publishContactState refuses a list with no entries. That refusal is the
+    // second half of the fix for the operator's follow list: sync() publishes
+    // when it finds no remote events, and with an empty local store that used
+    // to publish a tagless kind:33000 which SUPERSEDED their real list --
     // measured on relay.cloistr.xyz as a populated event from 2026-08-02
-    // replaced by a tagless one from 2026-08-24.
-    //
-    // A tagless list is never something a user meant: deliberately unfollowing
-    // everyone leaves np tombstones behind, so a real "I follow nobody" is full
-    // of tags. Nothing is lost by refusing, because there was nothing to say.
-    //
-    // Counts entry tags, not all tags: the ['d', 'contacts'] identifier is
-    // always present, so the original `tags.length === 0` could never fire.
-    if (!tags.some((t) => t[0] === 'p' || t[0] === 'np')) {
+    // replaced by a tagless one from 2026-08-24. A real "I follow nobody" is
+    // full of np tombstones, so nothing is lost by refusing.
+    const outcome = await publishContactState(signer, this.relay(), store.crdt);
+    if (!outcome) {
       console.warn('[ContactsSync] Refusing to publish an empty contact list');
       return false;
     }
+    console.log(`[ContactsSync] Published to ${outcome.acceptedBy} relays`);
+    return true;
+  }
 
-    const event = new NDKEvent(ndk);
-    event.kind = NIP0A_KIND;
-    event.content = buildNip0aContent(store.crdt);
-    event.tags = tags;
+  private source() {
+    const service = this.ndkService;
+    return {
+      createEvent: () => service.createEvent(),
+      publish: (event: NDKEvent) => service.publish(event),
+      fetchFromOwnRelays: (filter: NDKFilter) => service.fetchFromOwnRelays(filter),
+    };
+  }
 
-    try {
-      // Sign and publish
-      await event.sign();
-      const relays = await event.publish();
-
-      if (relays.size === 0) {
-        throw new Error('Event not published to any relay');
-      }
-
-      console.log(`[ContactsSync] Published to ${relays.size} relays`);
-      return true;
-    } catch (error) {
-      console.error('[ContactsSync] Publish failed:', error);
-      throw error;
-    }
+  private relay() {
+    return makeNdkRelay(this.source());
   }
 
   /**

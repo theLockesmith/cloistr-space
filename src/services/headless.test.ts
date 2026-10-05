@@ -163,4 +163,24 @@ describe('headless parity proof', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('follows and unfollows with a throwaway key, no React', async () => {
+    const { followContact, unfollowContact } = await import('./crdt/contactsService');
+    const { verifyEvent } = await import('nostr-tools');
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const friend = getPublicKey(generateSecretKey());
+    const signer = createHeadlessSigner(sk);
+    // A relay that serves back what it was given, so the unfollow reads the follow.
+    const relay = createHeadlessRelay();
+    relay.fetch = async () => relay.events.slice(-1);
+
+    expect((await followContact(signer, relay, pk, friend, { createIfMissing: true })).ok).toBe(true);
+    expect((await unfollowContact(signer, relay, pk, friend)).ok).toBe(true);
+
+    const [follow, unfollow] = relay.events;
+    expect(verifyEvent(follow) && verifyEvent(unfollow)).toBe(true);
+    expect(follow.tags.find((t) => t[1] === friend)?.[0]).toBe('p');
+    expect(unfollow.tags.find((t) => t[1] === friend)?.[0]).toBe('np');
+  });
 });

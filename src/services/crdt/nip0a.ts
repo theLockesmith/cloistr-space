@@ -13,7 +13,14 @@
  */
 
 import type { ContactEntry, ContactsCrdtState } from '@/types/contacts';
-import type { NDKEvent } from '@nostr-dev-kit/ndk';
+/**
+ * The fields the parsers read. NDKEvent and a plain nostr-tools Event both
+ * satisfy it, so headless callers need no NDK.
+ */
+export interface ContactListEvent {
+  tags: string[][];
+  created_at?: number;
+}
 
 /** Kind for NIP-0A contact list events */
 export const NIP0A_KIND = 33000;
@@ -22,9 +29,21 @@ export const NIP0A_KIND = 33000;
 export const NIP0A_D_TAG = 'contacts';
 
 /**
+ * An entry's timestamp, or the event's when it is missing or not a number.
+ *
+ * NaN must never get in: it loses every comparison, so a NaN entry could not
+ * be replaced by any later follow or unfollow, and would be written back out
+ * as "NaN" on the next publish -- frozen for good.
+ */
+function parseTimestamp(raw: string | undefined, fallback: number | undefined): number {
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) ? n : fallback ?? 0;
+}
+
+/**
  * Parse a NIP-0A kind:33000 event into ContactsCrdtState
  */
-export function parseNip0aEvent(event: NDKEvent): ContactsCrdtState {
+export function parseNip0aEvent(event: ContactListEvent): ContactsCrdtState {
   const entries = new Map<string, ContactEntry>();
 
   for (const tag of event.tags) {
@@ -33,7 +52,7 @@ export function parseNip0aEvent(event: NDKEvent): ContactsCrdtState {
       const pubkey = tag[1];
       const relay = tag[2] || undefined;
       const petname = tag[3] || undefined;
-      const timestamp = tag[4] ? parseInt(tag[4], 10) : event.created_at ?? 0;
+      const timestamp = parseTimestamp(tag[4], event.created_at);
 
       entries.set(pubkey, {
         pubkey,
@@ -45,7 +64,7 @@ export function parseNip0aEvent(event: NDKEvent): ContactsCrdtState {
     } else if (tag[0] === 'np' && tag[1]) {
       // Tombstone (deleted): ["np", pubkey, timestamp?]
       const pubkey = tag[1];
-      const timestamp = tag[2] ? parseInt(tag[2], 10) : event.created_at ?? 0;
+      const timestamp = parseTimestamp(tag[2], event.created_at);
 
       // Only set tombstone if it's newer than existing entry
       const existing = entries.get(pubkey);
@@ -110,7 +129,7 @@ export function buildNip0aContent(state: ContactsCrdtState): string {
  * Merge multiple NIP-0A events into a single CRDT state
  * Uses LWW (Last-Write-Wins) semantics based on entry timestamps
  */
-export function mergeNip0aEvents(events: NDKEvent[]): ContactsCrdtState {
+export function mergeNip0aEvents(events: ContactListEvent[]): ContactsCrdtState {
   const merged: ContactsCrdtState = {
     entries: new Map(),
     version: 0,
@@ -177,7 +196,7 @@ export const NIP02_KIND = 3;
  *
  * NIP-02 format: ["p", pubkey, relay?, petname?]
  */
-export function parseKind3Event(event: NDKEvent): ContactsCrdtState {
+export function parseKind3Event(event: ContactListEvent): ContactsCrdtState {
   const entries = new Map<string, ContactEntry>();
   const timestamp = event.created_at ?? Math.floor(Date.now() / 1000);
 
@@ -220,7 +239,7 @@ export function getKind3Filter(pubkey: string) {
 /**
  * Count contacts in a kind:3 event without full parsing
  */
-export function countKind3Contacts(event: NDKEvent): number {
+export function countKind3Contacts(event: ContactListEvent): number {
   return event.tags.filter(
     (tag) => tag[0] === 'p' && tag[1] && isValidPubkey(tag[1])
   ).length;
