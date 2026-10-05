@@ -121,4 +121,24 @@ describe('headless parity proof', () => {
     expect(relay.events).toHaveLength(1);
     expect(relay.events[0].kind).toBe(GIFT_WRAP_KIND);
   });
+
+  it('posts, reacts and reposts with a throwaway key, no React', async () => {
+    const { postNote, reactToNote, repostNote } = await import('./social/noteService');
+    const { verifyEvent } = await import('nostr-tools');
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const signer = createHeadlessSigner(sk);
+    const relay = createHeadlessRelay();
+
+    const posted = await postNote(signer, relay, 'headless note #parity');
+    await reactToNote(signer, relay, posted.eventId, pk);
+    await repostNote(signer, relay, posted.eventId, pk);
+
+    expect(relay.events.map((e) => e.kind)).toEqual([1, 7, 6]);
+    for (const e of relay.events) {
+      expect(e.pubkey).toBe(pk);
+      expect(verifyEvent(e)).toBe(true);
+    }
+    expect(relay.events[1].tags).toContainEqual(['e', posted.eventId]);
+  });
 });

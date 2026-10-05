@@ -12,10 +12,8 @@
  * This hook provides the NDK-backed adapter.
  */
 
-import { useCallback, useMemo } from 'react';
-import { useNdk } from '@/services/nostr';
-import type { RelayClient } from '../headless';
-import type { Event } from 'nostr-tools';
+import { useCallback } from 'react';
+import { useNdk, useHeadlessAdapters } from '@/services/nostr';
 import {
   publishMessage,
   publishKeyHandoff,
@@ -41,28 +39,10 @@ export interface BucketWriterReturn {
 }
 
 export function useBucketWriter(): BucketWriterReturn {
-  const { createEvent, publish, isConnected } = useNdk();
+  const { publish, isConnected } = useNdk();
   const canPublish = Boolean(publish && isConnected);
 
-  const relay: RelayClient | null = useMemo(() => {
-    if (!createEvent || !publish) return null;
-    return {
-      publish: async (raw: Event) => {
-        const event = createEvent();
-        if (!event) throw new Error('Could not create NDK event');
-        event.kind = raw.kind;
-        event.content = raw.content;
-        event.tags = raw.tags;
-        event.created_at = raw.created_at;
-        event.pubkey = raw.pubkey;
-        event.id = raw.id;
-        event.sig = raw.sig;
-        const accepted = await publish(event);
-        return accepted.size;
-      },
-      fetch: async () => [],
-    };
-  }, [createEvent, publish]);
+  const { relay } = useHeadlessAdapters();
 
   const sendMessage = useCallback(
     async (

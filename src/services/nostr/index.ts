@@ -18,6 +18,7 @@ export {
   NdkProvider,
   useNdk,
 } from './NdkProvider';
+export { useHeadlessAdapters, type HeadlessAdapters } from './useHeadlessAdapters';
 
 export { RelayAuthPolicy, type RelayAuthPolicyState } from './authPolicy';
 

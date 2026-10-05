@@ -16,9 +16,11 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Event, UnsignedEvent } from 'nostr-tools';
 import { DELETE_KIND } from '@/types/social';
+import type { SignerInterface, RelayClient } from '../headless';
+import { reactToNote, retractEvent } from './noteService';
 
-const actions = readFileSync(join(__dirname, 'useNoteActions.ts'), 'utf8');
 const feed = readFileSync(join(__dirname, 'useFeed.ts'), 'utf8');
 const ui = readFileSync(
   join(__dirname, '..', '..', 'components', 'social', 'SocialFeed.tsx'),
@@ -26,25 +28,46 @@ const ui = readFileSync(
 );
 
 describe('undo', () => {
-  it('uses NIP-09 kind:5', () => {
+  // These three used to grep useNoteActions.ts for the event-building lines.
+  // The building moved to noteService.ts so headless callers share it, so they
+  // now call the real function instead of matching its source.
+  const ME = 'aa'.repeat(32);
+  const REACTION = 'bb'.repeat(32);
+  const signer: SignerInterface = {
+    getPublicKey: async () => ME,
+    signEvent: async (u: UnsignedEvent): Promise<Event> => ({ ...u, id: 'ff'.repeat(32), sig: 'cc'.repeat(64) }),
+    encrypt: async () => '',
+    decrypt: async () => '',
+  };
+  const relayThatAccepts = () => {
+    const published: Event[] = [];
+    const relay: RelayClient = { publish: async (e) => (published.push(e), 1), fetch: async () => [] };
+    return { relay, published };
+  };
+
+  it('uses NIP-09 kind:5', async () => {
+    const { relay, published } = relayThatAccepts();
+    await retractEvent(signer, relay, REACTION);
     expect(DELETE_KIND).toBe(5);
-    expect(actions).toMatch(/event\.kind = DELETE_KIND/);
+    expect(published[0].kind).toBe(DELETE_KIND);
   });
 
-  it('references the reaction event, not the note', () => {
+  it('references the reaction event, not the note', async () => {
     // A retraction names the kind:7 it retracts. Tagging the note would ask
     // relays to delete somebody else's post, which they would rightly ignore --
     // and which we should not be asking for.
-    const undoBlock = actions.slice(actions.indexOf('const undo = useCallback'));
-    expect(undoBlock).toMatch(/tags = \[\['e', eventId\]\]/);
+    const { relay, published } = relayThatAccepts();
+    await retractEvent(signer, relay, REACTION);
+    expect(published[0].tags).toEqual([['e', REACTION]]);
   });
 
-  it('returns the published event id so an action can be undone at once', () => {
+  it('returns the published event id so an action can be undone at once', async () => {
     // Without this, undo would have to wait for the relay echo to learn what it
     // just sent. Tapping a heart and immediately changing your mind is
     // ordinary, and should not depend on a round trip.
-    expect(actions).toMatch(/eventId: string;/);
-    expect(actions).toMatch(/publishOrThrow\(accepted, event\.id\)/);
+    const { relay } = relayThatAccepts();
+    const outcome = await reactToNote(signer, relay, 'ee'.repeat(32), 'dd'.repeat(32));
+    expect(outcome.eventId).toBe('ff'.repeat(32));
   });
 
   it('tracks which of our events belongs to which note', () => {

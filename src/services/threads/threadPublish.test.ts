@@ -56,6 +56,27 @@ describe('threadPublish', () => {
     });
   });
 
+  describe('when no relay accepts', () => {
+    it('publishMessage throws rather than reporting a send', async () => {
+      const { publishMessage } = await import('./threadPublish');
+      const relay = { ...createMockRelay(), publish: async () => 0 };
+
+      await expect(publishMessage(relay, 'hi', 'dd'.repeat(32), 'cc'.repeat(32))).rejects.toThrow(
+        /No relay accepted/,
+      );
+    });
+
+    it('publishKeyHandoff throws rather than reporting a grant', async () => {
+      const { publishKeyHandoff } = await import('./threadPublish');
+      const { generateSecretKey, getPublicKey } = await import('nostr-tools');
+      const relay = { ...createMockRelay(), publish: async () => 0 };
+
+      await expect(
+        publishKeyHandoff(relay, 't1', 'cc'.repeat(32), generateSecretKey(), getPublicKey(generateSecretKey())),
+      ).rejects.toThrow(/No relay accepted/);
+    });
+  });
+
   describe('publishKeyHandoff', () => {
     it('publishes a kind:1059 gift wrap for the handoff', async () => {
       const { publishKeyHandoff } = await import('./threadPublish');

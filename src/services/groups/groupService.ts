@@ -6,8 +6,7 @@
  * NDK-backed implementations; a headless caller provides its own.
  */
 
-import type { UnsignedEvent } from 'nostr-tools';
-import type { SignerInterface, RelayClient } from '../headless';
+import { signAndPublish, type SignerInterface, type RelayClient } from '../headless';
 import type { AdminPermission } from '@/types/groups';
 import {
   GROUP_METADATA_KIND,
@@ -39,23 +38,6 @@ export interface GroupMetadataEdit {
   name?: string;
   about?: string;
   picture?: string;
-}
-
-async function signAndPublish(
-  signer: SignerInterface,
-  relay: RelayClient,
-  template: { kind: number; content: string; tags: string[][] },
-): Promise<number> {
-  const pubkey = await signer.getPublicKey();
-  const unsigned: UnsignedEvent = {
-    kind: template.kind,
-    content: template.content,
-    tags: template.tags,
-    created_at: Math.floor(Date.now() / 1000),
-    pubkey,
-  };
-  const signed = await signer.signEvent(unsigned);
-  return relay.publish(signed);
 }
 
 export async function joinGroup(
@@ -173,12 +155,11 @@ export async function addGroupMember(
   const result = membersAfterAdd(read, pubkey);
   if (!result.ok) return result;
 
-  const count = await signAndPublish(signer, relay, {
+  await signAndPublish(signer, relay, {
     kind: GROUP_MEMBERS_KIND,
     content: '',
     tags: buildMemberTags(groupId, result.members),
   });
-  if (count === 0) throw new Error('No relay accepted the change.');
   return { ok: true };
 }
 
@@ -192,12 +173,11 @@ export async function removeGroupMember(
   const result = membersAfterRemove(read, pubkey);
   if (!result.ok) return result;
 
-  const count = await signAndPublish(signer, relay, {
+  await signAndPublish(signer, relay, {
     kind: GROUP_MEMBERS_KIND,
     content: '',
     tags: buildMemberTags(groupId, result.members),
   });
-  if (count === 0) throw new Error('No relay accepted the change.');
   return { ok: true };
 }
 
@@ -253,12 +233,11 @@ export async function setGroupPermissions(
   const others = read.entries.filter((e) => e.pubkey !== pubkey);
   const next = [...others, { pubkey, permissions }];
 
-  const count = await signAndPublish(signer, relay, {
+  await signAndPublish(signer, relay, {
     kind: GROUP_ADMINS_KIND,
     content: '',
     tags: buildAdminTags(groupId, next),
   });
-  if (count === 0) throw new Error('No relay accepted the change.');
   return { ok: true };
 }
 
@@ -277,11 +256,10 @@ export async function updateGroupMetadata(
   if (edit.about?.trim()) tags.push(['about', edit.about.trim()]);
   if (edit.picture?.trim()) tags.push(['picture', edit.picture.trim()]);
 
-  const count = await signAndPublish(signer, relay, {
+  await signAndPublish(signer, relay, {
     kind: GROUP_METADATA_KIND,
     content: '',
     tags,
   });
-  if (count === 0) throw new Error('No relay accepted the change.');
   return { ok: true };
 }

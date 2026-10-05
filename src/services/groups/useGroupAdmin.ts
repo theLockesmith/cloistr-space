@@ -17,16 +17,14 @@
  * display path. See trustedWriters.ts.
  *
  * Core logic lives in groupService.ts (React-free, accepts SignerInterface +
- * RelayClient). This hook provides the NDK-backed adapters and React state
+ * RelayClient). This hook supplies the NDK-backed adapters and React state
  * management (isBusy, error, notice).
  */
 
-import { useCallback, useMemo, useState } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useCallback, useState } from 'react';
+import { useNdk, useHeadlessAdapters } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { AdminPermission } from '@/types/groups';
-import type { SignerInterface, RelayClient } from '../headless';
-import type { Event, UnsignedEvent } from 'nostr-tools';
 import { REFUSAL_MESSAGE } from './membershipEdits';
 import {
   addGroupMember,
@@ -53,44 +51,18 @@ interface UseGroupAdminReturn {
 }
 
 export function useGroupAdmin(groupId: string): UseGroupAdminReturn {
-  const { fetchFromOwnRelays, createEvent, publish, isConnected } = useNdk();
+  const { isConnected } = useNdk();
   const { pubkey: myPubkey } = useAuthStore();
 
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const signer: SignerInterface | null = useMemo(() => {
-    if (!createEvent || !publish || !isConnected || !myPubkey) return null;
-    return {
-      getPublicKey: async () => myPubkey,
-      signEvent: async (unsigned: UnsignedEvent): Promise<Event> => {
-        const event = createEvent();
-        if (!event) throw new Error('Failed to make event');
-        event.kind = unsigned.kind;
-        event.content = unsigned.content;
-        event.tags = unsigned.tags;
-        event.created_at = unsigned.created_at;
-        const accepted = await publish(event);
-        if (accepted.size === 0) throw new Error('No relay accepted the change.');
-        return { ...unsigned, id: event.id || '0'.repeat(64), sig: event.sig || '0'.repeat(128) };
-      },
-      encrypt: async () => '',
-      decrypt: async () => '',
-    };
-  }, [createEvent, publish, isConnected, myPubkey]);
-
-  const relay: RelayClient | null = useMemo(() => {
-    if (!isConnected) return null;
-    return {
-      publish: async () => 1,
-      fetch: async (filter: Record<string, unknown>) => {
-        if (!fetchFromOwnRelays) return [];
-        const events = await fetchFromOwnRelays(filter as any);
-        return Array.from(events) as any;
-      },
-    };
-  }, [fetchFromOwnRelays, isConnected]);
+  // Gated on isConnected as before: these are read-then-write edits, and a
+  // read against no relay must not be mistaken for an empty member list.
+  const adapters = useHeadlessAdapters();
+  const signer = isConnected && myPubkey ? adapters.signer : null;
+  const relay = isConnected ? adapters.relay : null;
 
   const addMember = useCallback(
     async (pubkey: string) => {

@@ -9,7 +9,7 @@
  * inside giftWrap.ts, not the user's signer.
  */
 
-import type { RelayClient } from '../headless';
+import { publishOrThrow, type RelayClient } from '../headless';
 import {
   wrapThreadMessage,
   wrapKeyHandoff,
@@ -23,7 +23,7 @@ export async function publishMessage(
   nowSec?: number,
 ): Promise<void> {
   const wrap = wrapThreadMessage(plaintext, authorPubkey, threadSecretHex, nowSec);
-  await relay.publish(wrap);
+  await publishOrThrow(relay, wrap);
 }
 
 export async function publishKeyHandoff(
@@ -35,5 +35,5 @@ export async function publishKeyHandoff(
   nowSec?: number,
 ): Promise<void> {
   const wrap = wrapKeyHandoff(threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
-  await relay.publish(wrap);
+  await publishOrThrow(relay, wrap);
 }

@@ -52,6 +52,19 @@ describe('groupService', () => {
     });
   });
 
+  describe('when no relay accepts', () => {
+    it('joinGroup throws rather than reporting a sent request', async () => {
+      // The UI adapter used to report a constant 1 here, so a join nobody
+      // received looked identical to a sent one.
+      const { joinGroup } = await import('./groupService');
+      const relay = { ...createMockRelay(), publish: async () => 0 };
+
+      await expect(joinGroup(createMockSigner(), relay, 'test-group')).rejects.toThrow(
+        /No relay accepted/,
+      );
+    });
+  });
+
   describe('leaveGroup', () => {
     it('publishes a kind:9022 event', async () => {
       const { leaveGroup } = await import('./groupService');
