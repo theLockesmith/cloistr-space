@@ -213,7 +213,10 @@ export class ContactsSyncService {
     // A tagless list is never something a user meant: deliberately unfollowing
     // everyone leaves np tombstones behind, so a real "I follow nobody" is full
     // of tags. Nothing is lost by refusing, because there was nothing to say.
-    if (tags.length === 0) {
+    //
+    // Counts entry tags, not all tags: the ['d', 'contacts'] identifier is
+    // always present, so the original `tags.length === 0` could never fire.
+    if (!tags.some((t) => t[0] === 'p' || t[0] === 'np')) {
       console.warn('[ContactsSync] Refusing to publish an empty contact list');
       return false;
     }
