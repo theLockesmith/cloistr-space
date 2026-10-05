@@ -9,6 +9,7 @@ import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/a
 import { useNdk } from '@/services/nostr';
 import { useAuthorProfiles } from '@/services/profile';
 import { getDrive } from '@/services/cloistr';
+import { config } from '@/config/environment';
 import { getFileType } from '@/types/activity';
 import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
 import { FileUploadModal } from './FileUploadModal';
@@ -42,11 +43,11 @@ export function ActivityDashboard() {
   // tasks.cloistr.xyz. Both are same-site *.cloistr.xyz, so the shared session
   // cookie carries over and the user is not asked to log in again.
   const handleNewDocument = useCallback(() => {
-    window.open('https://docs.cloistr.xyz', '_blank', 'noopener,noreferrer');
+    window.open(config.docsUrl, '_blank', 'noopener,noreferrer');
   }, []);
 
   const handleNewTask = useCallback(() => {
-    window.open('https://tasks.cloistr.xyz', '_blank', 'noopener,noreferrer');
+    window.open(config.tasksUrl, '_blank', 'noopener,noreferrer');
   }, []);
 
   const handleCloseEvent = useCallback(() => {
@@ -397,7 +398,7 @@ function TasksWidget() {
         // Tasks live in a separate app (tasks.cloistr.xyz); space has no task
         // creation of its own. Sending the user there is honest — the button
         // previously did nothing at all.
-        onClick: () => window.open('https://tasks.cloistr.xyz/', '_blank', 'noopener,noreferrer'),
+        onClick: () => window.open(config.tasksUrl, '_blank', 'noopener,noreferrer'),
       }}
     >
       {isLoading ? (

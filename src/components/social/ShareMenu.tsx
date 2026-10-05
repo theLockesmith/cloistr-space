@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNdk, encodeEvent, notePath } from '@/services/nostr';
+import { config } from '@/config/environment';
 
 interface Props {
   noteId: string;
@@ -46,7 +47,7 @@ export function ownRelayHints(statuses: Map<string, { url: string; configured: b
 }
 
 /** Where a shared web link points. */
-const ORIGIN = typeof window !== 'undefined' ? window.location.origin : 'https://space.cloistr.xyz';
+const ORIGIN = config.appUrl;
 
 export function ShareMenu({ noteId, authorPubkey }: Props) {
   const { relayStatuses } = useNdk();

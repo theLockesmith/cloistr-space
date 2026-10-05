@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { LoginModal, Header as UnifiedHeader } from '@cloistr/ui/components';
 import { useAuth } from './AuthProvider';
+import { config } from '@/config/environment';
 
-const SIGNER_URL = 'https://signer.cloistr.xyz';
+const SIGNER_URL = config.signerUrl;
 
 const FEATURES = [
   { icon: '🗂️', title: 'Your workspace', body: 'Activity, projects, files, and tasks in one place — all keyed to your Nostr identity.' },
@@ -64,7 +65,7 @@ export function LoginPage() {
         <p className="mt-3 text-sm text-cloistr-light/60">
           New here? Get a Nostr identity at{' '}
           <a href={SIGNER_URL} className="text-cloistr-primary hover:underline">
-            signer.cloistr.xyz
+            {new URL(SIGNER_URL).host}
           </a>
         </p>
 

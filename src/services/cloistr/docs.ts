@@ -4,9 +4,10 @@
  */
 
 import type { Doc, DocDetail, DocCollaborator, DocVersion } from '@/types/docs';
+import { config } from '@/config/environment';
 
-/** Default docs API URL - no env var yet, use placeholder */
-const DEFAULT_DOCS_URL = 'https://docs-api.cloistr.xyz';
+/** Docs API URL, from runtime config (see config/environment.ts). */
+const DEFAULT_DOCS_URL = config.docsApiUrl;
 
 /** Convert snake_case to camelCase for documents */
 function mapDoc(d: Record<string, unknown>): Doc {

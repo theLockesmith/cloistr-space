@@ -12,8 +12,8 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       '@cloistr/collab-common':
-        specifier: ^0.3.0
-        version: 0.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+        specifier: ^0.4.0
+        version: 0.4.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       '@cloistr/ui':
         specifier: ^0.43.0
         version: 0.43.0(@cloistr/auth@1.1.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -260,8 +260,8 @@ packages:
       react-dom:
         optional: true
 
-  '@cloistr/collab-common@0.3.0':
-    resolution: {integrity: sha1-zyXwNwjC4yt0yOH2WNLv4fPIm6w=, tarball: https://git.aegis-hq.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.3.0.tgz}
+  '@cloistr/collab-common@0.4.0':
+    resolution: {integrity: sha1-Cmk/QY4mJiozS8sCeWADW4BZhws=, tarball: https://git.aegis-hq.xyz/api/v4/projects/44/packages/npm/@cloistr/collab-common/-/@cloistr/collab-common-0.4.0.tgz}
     peerDependencies:
       react: ^18.3.1
       react-dom: ^18.3.1
@@ -2502,7 +2502,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@cloistr/collab-common@0.3.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)':
+  '@cloistr/collab-common@0.4.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)':
     dependencies:
       '@cloistr/auth': 1.1.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       '@noble/hashes': 2.4.0
