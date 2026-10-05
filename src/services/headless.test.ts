@@ -9,7 +9,7 @@
  * The signer is a plain SignerInterface from @cloistr/auth/core, backed
  * by nostr-tools' finalizeEvent. No NDK, no hooks.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import type { SignerInterface, RelayClient } from './headless';
@@ -140,5 +140,27 @@ describe('headless parity proof', () => {
       expect(verifyEvent(e)).toBe(true);
     }
     expect(relay.events[1].tags).toContainEqual(['e', posted.eventId]);
+  });
+
+  it('uploads a file and describes it with a throwaway key, no React', async () => {
+    const { uploadBlob, publishFileMetadata } = await import('./cloistr/upload');
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const signer = createHeadlessSigner(sk);
+    const relay = createHeadlessRelay();
+    const blob = new Blob(['headless upload'], { type: 'text/plain' });
+
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const descriptor = await uploadBlob(signer, blob, { baseUrl: 'https://files.example' });
+      await publishFileMetadata(signer, relay, descriptor, { name: 'note.txt' });
+
+      expect(descriptor.url).toBe(`https://files.example/${descriptor.sha256}`);
+      expect(relay.events[0].kind).toBe(1063);
+      expect(relay.events[0].pubkey).toBe(pk);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
