@@ -100,8 +100,11 @@ export class ContactsSyncService {
       const pendingChanges = store.getPendingChanges();
       let published = false;
 
-      if (pendingChanges.length > 0 || remoteEvents.length === 0) {
-        // Publish full state to ensure consistency
+      // Publish only when this device has changes to send. An empty remote
+      // answer is NOT a reason: it may be a relay that did not answer, and
+      // publishing this device's copy would replace a fuller list held there
+      // (kind:33000 is addressable) -- the 2026-08-24 shape again.
+      if (pendingChanges.length > 0) {
         published = await this.publishContacts();
         if (published) {
           useContactsStore.getState().markSynced();

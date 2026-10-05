@@ -14,7 +14,8 @@
  * relays are always consulted, and `remoteEntriesFound` reflects cache UNION
  * relays. That is load-bearing:
  *
- *   contactsSync.sync() PUBLISHES when it finds no remote entries.
+ *   contactsSync.sync() PUBLISHED when it found no remote entries (until
+ *   2026-10-05; it now publishes only local changes, see staleListGuards.test).
  *
  * So a filter that skipped relays would report "no contacts exist" for a user
  * whose contacts merely were not in the local cache, and we would publish an

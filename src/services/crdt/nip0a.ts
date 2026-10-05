@@ -29,6 +29,18 @@ export const NIP0A_KIND = 33000;
 export const NIP0A_D_TAG = 'contacts';
 
 /**
+ * An entry's timestamp, or the event's when it is missing or not a number.
+ *
+ * NaN must never get in: it loses every comparison, so a NaN entry could not
+ * be replaced by any later follow or unfollow, and would be written back out
+ * as "NaN" on the next publish -- frozen for good.
+ */
+function parseTimestamp(raw: string | undefined, fallback: number | undefined): number {
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) ? n : fallback ?? 0;
+}
+
+/**
  * Parse a NIP-0A kind:33000 event into ContactsCrdtState
  */
 export function parseNip0aEvent(event: ContactListEvent): ContactsCrdtState {
@@ -40,7 +52,7 @@ export function parseNip0aEvent(event: ContactListEvent): ContactsCrdtState {
       const pubkey = tag[1];
       const relay = tag[2] || undefined;
       const petname = tag[3] || undefined;
-      const timestamp = tag[4] ? parseInt(tag[4], 10) : event.created_at ?? 0;
+      const timestamp = parseTimestamp(tag[4], event.created_at);
 
       entries.set(pubkey, {
         pubkey,
@@ -52,7 +64,7 @@ export function parseNip0aEvent(event: ContactListEvent): ContactsCrdtState {
     } else if (tag[0] === 'np' && tag[1]) {
       // Tombstone (deleted): ["np", pubkey, timestamp?]
       const pubkey = tag[1];
-      const timestamp = tag[2] ? parseInt(tag[2], 10) : event.created_at ?? 0;
+      const timestamp = parseTimestamp(tag[2], event.created_at);
 
       // Only set tombstone if it's newer than existing entry
       const existing = entries.get(pubkey);
