@@ -4,18 +4,10 @@
  */
 
 import { config } from '@/config/environment';
+import type { SignerInterface } from '../headless';
+import { sha256Hex, uploadBlob, type BlobDescriptor, type UploadProgressCallback } from './upload';
 
-/** Blossom blob descriptor returned after upload */
-export interface BlobDescriptor {
-  sha256: string;
-  url: string;
-  size: number;
-  mimeType: string;
-  uploaded: number;
-}
-
-/** Upload progress callback */
-export type UploadProgressCallback = (progress: number) => void;
+export type { BlobDescriptor, UploadProgressCallback } from './upload';
 
 /**
  * Blossom client for blob storage operations
@@ -28,31 +20,18 @@ export class BlossomClient {
   }
 
   /**
-   * Upload a file to Blossom
-   * @param file File or Blob to upload
-   * @param options Upload options
-   * @returns Blob descriptor with URL and metadata
+   * Upload a file to Blossom, signed by `signer` (BUD-02 kind:24242 auth).
+   * See upload.ts for the request shape the server enforces.
    */
   async upload(
+    signer: SignerInterface,
     file: File | Blob,
-    options?: {
-      filename?: string;
-      onProgress?: UploadProgressCallback;
-      authHeader?: string; // NIP-98 auth header
-    }
+    options?: { onProgress?: UploadProgressCallback }
   ): Promise<BlobDescriptor> {
-    const { filename, onProgress, authHeader } = options ?? {};
-
-    // Calculate SHA256 hash of file
-    const arrayBuffer = await file.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-    const sha256 = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    // Check if file already exists
-    const exists = await this.exists(sha256);
-    if (exists) {
+    // Already stored: Blossom addresses by content, so the same bytes are the
+    // same blob whoever uploaded them.
+    const sha256 = await sha256Hex(file);
+    if (await this.exists(sha256)) {
       return {
         sha256,
         url: `${this.baseUrl}/${sha256}`,
@@ -62,102 +41,7 @@ export class BlossomClient {
       };
     }
 
-    // Upload file
-    const formData = new FormData();
-    const uploadFile = file instanceof File ? file : new File([file], filename ?? 'file', { type: file.type });
-    formData.append('file', uploadFile);
-
-    const headers: Record<string, string> = {};
-    if (authHeader) {
-      headers['Authorization'] = authHeader;
-    }
-
-    // Use XMLHttpRequest for progress tracking
-    if (onProgress) {
-      return this.uploadWithProgress(formData, headers, sha256, file, onProgress);
-    }
-
-    const response = await fetch(`${this.baseUrl}/upload`, {
-      method: 'PUT',
-      headers,
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Upload failed: ${error}`);
-    }
-
-    const result = await response.json();
-
-    return {
-      sha256,
-      url: result.url ?? `${this.baseUrl}/${sha256}`,
-      size: file.size,
-      mimeType: file.type || 'application/octet-stream',
-      uploaded: Date.now(),
-    };
-  }
-
-  /**
-   * Upload with progress tracking using XMLHttpRequest
-   */
-  private uploadWithProgress(
-    formData: FormData,
-    headers: Record<string, string>,
-    sha256: string,
-    file: File | Blob,
-    onProgress: UploadProgressCallback
-  ): Promise<BlobDescriptor> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          onProgress(e.loaded / e.total);
-        }
-      });
-
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const result = JSON.parse(xhr.responseText);
-            resolve({
-              sha256,
-              url: result.url ?? `${this.baseUrl}/${sha256}`,
-              size: file.size,
-              mimeType: file.type || 'application/octet-stream',
-              uploaded: Date.now(),
-            });
-          } catch {
-            resolve({
-              sha256,
-              url: `${this.baseUrl}/${sha256}`,
-              size: file.size,
-              mimeType: file.type || 'application/octet-stream',
-              uploaded: Date.now(),
-            });
-          }
-        } else {
-          reject(new Error(`Upload failed: ${xhr.statusText}`));
-        }
-      });
-
-      xhr.addEventListener('error', () => {
-        reject(new Error('Upload failed: Network error'));
-      });
-
-      xhr.open('PUT', `${this.baseUrl}/upload`);
-
-      // Set headers
-      Object.entries(headers).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-          xhr.setRequestHeader(key, value);
-        }
-      });
-
-      xhr.send(formData);
-    });
+    return uploadBlob(signer, file, { baseUrl: this.baseUrl, onProgress: options?.onProgress, sha256 });
   }
 
   /**

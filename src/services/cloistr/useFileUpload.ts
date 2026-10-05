@@ -1,14 +1,13 @@
 /**
  * @fileoverview File upload hook
- * Handles uploading files to Blossom and publishing kind:1063 metadata
+ * Handles uploading files to Blossom and publishing kind:1063 metadata.
+ * Request building lives in upload.ts, which a headless caller can use directly.
  */
 
 import { useState, useCallback } from 'react';
-import { useNdk } from '@/services/nostr';
+import { useNdk, useHeadlessAdapters } from '@/services/nostr';
 import { getBlossom, type BlobDescriptor, type UploadProgressCallback } from './blossom';
-
-/** NIP-94 File Metadata kind */
-const FILE_METADATA_KIND = 1063;
+import { publishFileMetadata } from './upload';
 
 export interface UploadState {
   isUploading: boolean;
@@ -35,7 +34,8 @@ export interface UploadOptions {
  * Hook for uploading files to Blossom and publishing metadata
  */
 export function useFileUpload(): UseFileUploadReturn {
-  const { publish, createEvent, isConnected } = useNdk();
+  const { isConnected } = useNdk();
+  const { signer, relay } = useHeadlessAdapters();
   const [state, setState] = useState<UploadState>({
     isUploading: false,
     progress: 0,
@@ -62,54 +62,24 @@ export function useFileUpload(): UseFileUploadReturn {
           setState((prev) => ({ ...prev, progress: progress * 0.9 })); // Reserve 10% for metadata
         };
 
-        const descriptor = await blossom.upload(file, {
-          filename: filename ?? file.name,
-          onProgress,
-        });
+        if (!signer) throw new Error('Sign in to upload files.');
+        const descriptor = await blossom.upload(signer, file, { onProgress });
 
-        // Publish kind:1063 metadata event
-        if (publishMetadata && publish && createEvent && isConnected) {
+        // Publish kind:1063 metadata. Failure here does not fail the upload:
+        // the blob is stored and its URL works either way.
+        if (publishMetadata && relay && isConnected) {
           setState((prev) => ({ ...prev, progress: 0.95 }));
-
-          const event = createEvent();
-          if (event) {
-            event.kind = FILE_METADATA_KIND;
-            event.content = ''; // Content is optional for file metadata
-
-            // Build tags per NIP-94
-            const tags: string[][] = [
-              ['url', descriptor.url],
-              ['m', descriptor.mimeType],
-              ['x', descriptor.sha256],
-              ['size', descriptor.size.toString()],
-              ['name', filename ?? file.name],
-            ];
-
-            // Add dimensions for images
-            if (descriptor.mimeType.startsWith('image/')) {
-              try {
-                const dimensions = await getImageDimensions(file);
-                if (dimensions) {
-                  tags.push(['dim', `${dimensions.width}x${dimensions.height}`]);
-                }
-              } catch {
-                // Ignore dimension errors
-              }
-            }
-
-            // Add group association
-            if (groupId) {
-              tags.push(['h', groupId]);
-            }
-
-            event.tags = tags;
-
-            try {
-              await publish(event);
-            } catch (err) {
-              console.warn('Failed to publish file metadata:', err);
-              // Don't fail the upload if metadata publish fails
-            }
+          const dimensions = descriptor.mimeType.startsWith('image/')
+            ? await getImageDimensions(file).catch(() => null)
+            : null;
+          try {
+            await publishFileMetadata(signer, relay, descriptor, {
+              name: filename ?? file.name,
+              groupId,
+              dimensions: dimensions ?? undefined,
+            });
+          } catch (err) {
+            console.warn('Failed to publish file metadata:', err);
           }
         }
 
@@ -132,7 +102,7 @@ export function useFileUpload(): UseFileUploadReturn {
         return null;
       }
     },
-    [publish, createEvent, isConnected]
+    [signer, relay, isConnected]
   );
 
   const reset = useCallback(() => {
