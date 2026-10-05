@@ -101,6 +101,57 @@ describe('uploadBlob', () => {
   });
 });
 
+describe('uploadBlob with progress (XMLHttpRequest path)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('sends the same raw bytes and auth as the fetch path, and reports progress', async () => {
+    const bytes = new TextEncoder().encode('progress path');
+    const blob = new Blob([bytes], { type: 'text/plain' });
+    const sha = await sha256Hex(bytes);
+    const sent: { method?: string; url?: string; headers: Record<string, string>; body?: unknown } = { headers: {} };
+
+    class FakeXhr {
+      status = 200;
+      responseText = JSON.stringify({ url: `${BASE}/${sha}`, sha256: sha });
+      private listeners: Record<string, () => void> = {};
+      private uploadListeners: Record<string, (e: ProgressEvent) => void> = {};
+      upload = { addEventListener: (t: string, f: (e: ProgressEvent) => void) => (this.uploadListeners[t] = f) };
+      addEventListener(t: string, f: () => void) { this.listeners[t] = f; }
+      open(method: string, url: string) { sent.method = method; sent.url = url; }
+      setRequestHeader(k: string, v: string) { sent.headers[k] = v; }
+      send(body: unknown) {
+        sent.body = body;
+        this.uploadListeners.progress?.({ lengthComputable: true, loaded: 1, total: 2 } as ProgressEvent);
+        this.listeners.load?.();
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr);
+
+    const progress: number[] = [];
+    const result = await uploadBlob(realSigner(), blob, { baseUrl: BASE, onProgress: (p) => progress.push(p) });
+
+    expect(sent.method).toBe('PUT');
+    expect(sent.url).toBe(`${BASE}/upload`);
+    expect(sent.body).toBe(blob);
+    expect(sent.body).not.toBeInstanceOf(FormData);
+    expect(sent.headers['Content-Type']).toBe('text/plain');
+    expect(decodeAuth(sent.headers.Authorization).tags).toContainEqual(['x', sha]);
+    expect(progress).toEqual([0.5]);
+    expect(result.sha256).toBe(sha);
+  });
+});
+
+describe('uploadBlob network failure', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('says the upload failed, not a raw fetch TypeError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await expect(uploadBlob(realSigner(), new Blob(['x']), { baseUrl: BASE })).rejects.toThrow(
+      /^Upload failed: Failed to fetch$/,
+    );
+  });
+});
+
 describe('publishFileMetadata', () => {
   it('publishes a NIP-94 kind:1063 with url, type, hash, size, name, dimensions and group', async () => {
     const published: Event[] = [];

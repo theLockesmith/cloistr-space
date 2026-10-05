@@ -66,7 +66,9 @@ export function useFileUpload(): UseFileUploadReturn {
         const descriptor = await blossom.upload(signer, file, { onProgress });
 
         // Publish kind:1063 metadata. Failure here does not fail the upload:
-        // the blob is stored and its URL works either way.
+        // the blob is stored and its URL works either way. With no relay
+        // connection it is skipped outright, and the file will not appear in
+        // listings built from kind:1063.
         if (publishMetadata && relay && isConnected) {
           setState((prev) => ({ ...prev, progress: 0.95 }));
           const dimensions = descriptor.mimeType.startsWith('image/')

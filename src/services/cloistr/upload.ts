@@ -65,6 +65,9 @@ export async function blossomAuthHeader(
       ['expiration', String(now + ttlSec)],
     ],
   });
+  // btoa only takes Latin-1. Safe because every field here is ASCII by
+  // construction (action is a fixed word, the rest hex). Putting a filename in
+  // `content` would need UTF-8 encoding first.
   return `Nostr ${btoa(JSON.stringify(event))}`;
 }
 
@@ -124,7 +127,11 @@ export async function uploadBlob(
   if (options.onProgress && typeof XMLHttpRequest !== 'undefined') {
     ({ status, body: text } = await putWithProgress(url, headers, blob, options.onProgress));
   } else {
-    const response = await fetch(url, { method: 'PUT', headers, body: blob });
+    // Same wording as the XHR path, so the message does not depend on whether
+    // a progress bar was showing.
+    const response = await fetch(url, { method: 'PUT', headers, body: blob }).catch((err: unknown) => {
+      throw new Error(`Upload failed: ${err instanceof Error ? err.message : 'network error'}`);
+    });
     status = response.status;
     text = await response.text();
   }
