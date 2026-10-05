@@ -1,5 +1,6 @@
 import { Outlet, useNavigate } from 'react-router-dom';
 import { AppShell, AppShellToggle } from '@cloistr/ui/components';
+import { config } from '@/config/environment';
 import { Header as UnifiedHeader, Footer } from '@cloistr/ui/components';
 import { SpaceNavLinks } from './SpaceNavLinks';
 import { NotificationBadge } from './NotificationBadge';
@@ -65,6 +66,7 @@ export function MainLayout() {
         <div className="flex h-dvh flex-col bg-cloistr-dark">
           <UnifiedHeader
             activeServiceId="space"
+            signerUrl={config.signerUrl}
             auth={{
               authenticated: isAuthenticated,
               pubkey: pubkey ?? undefined,

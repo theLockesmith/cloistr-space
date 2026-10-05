@@ -1,0 +1,52 @@
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    # Runtime service configuration, written from CLOISTR_* environment
+    # variables when the container starts (the base image runs envsubst over
+    # /etc/nginx/templates). One image serves production and staging; with no
+    # variables set the Dockerfile's production defaults apply.
+    #
+    # Exact match (`location =`) on purpose: it outranks the regex below that
+    # gives every .js a one-year immutable cache. A prefix match would not, and
+    # a browser would keep whichever environment it saw first for a year.
+    # no-store for the same reason one layer out, at any edge cache.
+    location = /config.js {
+        access_log off;
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+        return 200 'window.__CLOISTR_CONFIG__={"relayUrl":"${CLOISTR_RELAY_URL}","blossomUrl":"${CLOISTR_BLOSSOM_URL}","discoveryUrl":"${CLOISTR_DISCOVERY_URL}","signerUrl":"${CLOISTR_SIGNER_URL}","appUrl":"${CLOISTR_APP_URL}","environment":"${CLOISTR_ENVIRONMENT}","services":{"files":"${CLOISTR_STASH_URL}","tasks":"${CLOISTR_TASKS_URL}","docs":"${CLOISTR_DOCS_URL}","docs-api":"${CLOISTR_DOCS_API_URL}"}};';
+    }
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # HTML files should not be cached (always fetch fresh to get new JS hashes)
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+    }
+
+    # SPA routing - serve index.html for all routes
+    location / {
+        try_files $uri $uri/ /index.html;
+        # For index.html fallback, prevent caching
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+    }
+
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}

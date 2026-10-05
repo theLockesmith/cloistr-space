@@ -16,6 +16,7 @@ import {
   classifySignerError,
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
+import { config } from '@/config/environment';
 import { useContactsStore } from '@/stores/contactsStore';
 import { clearAll as clearCache } from '@/services/cache';
 
@@ -113,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // and then no-ops.
       queueMicrotask(() => {
         setSigner(shared.signer);
-        storeLogin(sharedPubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+        storeLogin(sharedPubkey, method ?? 'nip46', config.signerUrl);
       });
     }
   }, [shared.authState, shared.signer, isAuthenticated, storeLogin]);
@@ -153,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 2. Re-scope local authStore — useGroups/useFeed/useContactsSync all
     //    read pubkey from here and will re-subscribe when it changes.
-    storeLogin(activePubkey, method ?? 'nip46', 'https://signer.cloistr.xyz');
+    storeLogin(activePubkey, method ?? 'nip46', config.signerUrl);
 
     // 3. Clear contacts for the old key so useContactsSync starts fresh
     resetContacts(new Map());

@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, ToastProvider, SharedAuthProvider } from '@cloistr/ui/components';
+import { config } from '@/config/environment';
 import '@cloistr/ui/styles';
 import { AuthProvider } from './components/auth/AuthProvider';
 import { SessionManager } from './components/auth/SessionManager';
@@ -23,7 +24,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <SharedAuthProvider>
+        <SharedAuthProvider signerUrl={config.signerUrl}>
         <ErrorBoundary
           fallbackRender={({ error, resetError }) => (
             <FullPageErrorFallback error={error} resetError={resetError} />
