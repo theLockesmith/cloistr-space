@@ -55,7 +55,6 @@ export const config = {
 
   // Other apps Space hands off to.
   tasksUrl: override('tasks') ?? 'https://tasks.cloistr.xyz',
-  docsUrl: override('docs') ?? 'https://docs.cloistr.xyz',
 
   /** This app's own public URL, for links it generates about itself. */
   appUrl: service.appUrl ?? (typeof window !== 'undefined' ? window.location.origin : 'https://space.cloistr.xyz'),

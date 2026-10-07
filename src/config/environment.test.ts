@@ -30,7 +30,6 @@ describe('config with no runtime configuration', () => {
     expect(config.driveApiUrl).toBe('https://stash.cloistr.xyz');
     expect(config.docsApiUrl).toBe('https://docs-api.cloistr.xyz');
     expect(config.tasksUrl).toBe('https://tasks.cloistr.xyz');
-    expect(config.docsUrl).toBe('https://docs.cloistr.xyz');
   });
 });
 
@@ -60,7 +59,6 @@ describe('config with staging runtime configuration', () => {
     expect(config.appUrl).toBe(staging.appUrl);
     expect(config.driveApiUrl).toBe(staging.services.files);
     expect(config.tasksUrl).toBe(staging.services.tasks);
-    expect(config.docsUrl).toBe(staging.services.docs);
     expect(config.docsApiUrl).toBe(staging.services['docs-api']);
   });
 
