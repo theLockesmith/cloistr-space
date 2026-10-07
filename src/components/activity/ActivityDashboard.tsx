@@ -36,16 +36,11 @@ export function ActivityDashboard() {
     setIsEventModalOpen(true);
   }, []);
 
-  // New Document and New Task were `onClick={() => {}}` -- literally no-ops, so
-  // the buttons looked functional and did nothing when clicked. Space is a
-  // workspace shell, not a document or task editor, so the correct behaviour is
-  // to hand off to the app that owns each: docs.cloistr.xyz and
-  // tasks.cloistr.xyz. Both are same-site *.cloistr.xyz, so the shared session
-  // cookie carries over and the user is not asked to log in again.
-  const handleNewDocument = useCallback(() => {
-    window.open(config.docsUrl, '_blank', 'noopener,noreferrer');
-  }, []);
-
+  // New Task was `onClick={() => {}}` -- a no-op, so the button looked
+  // functional and did nothing. Space is a workspace shell, not a task editor,
+  // so it hands off to tasks.cloistr.xyz; same-site, so the shared session
+  // cookie carries over. There is no New Document action: Docs has left
+  // production, and a button opening a dead host is worse than none.
   const handleNewTask = useCallback(() => {
     window.open(config.tasksUrl, '_blank', 'noopener,noreferrer');
   }, []);
@@ -69,16 +64,7 @@ export function ActivityDashboard() {
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <QuickAction
-          icon={
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-          }
-          label="New Document"
-          onClick={handleNewDocument}
-        />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <QuickAction
           icon={
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
