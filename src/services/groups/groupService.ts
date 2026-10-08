@@ -76,7 +76,10 @@ export interface PendingGroup {
   readonly identifier: string;
   /** The key the group was begun under; only that key can finish it. */
   readonly owner: string;
-  /** Steps a relay accepted. createGroup adds to it as each one lands. */
+  /**
+   * Steps a relay accepted. The binding is readonly; the set is not:
+   * createGroup adds to it as each step lands, so the caller's copy stays current.
+   */
   readonly published: Set<GroupCreateStep>;
 }
 
@@ -97,6 +100,12 @@ export async function beginGroupCreation(
  * possible. With it, only steps not yet in `pending.published` are sent. A
  * step that timed out is not recorded and is sent again; that is safe because
  * all three kinds are addressable, so the relay keeps one copy per group.
+ *
+ * A resume does not read the group first. The admins and members steps carry
+ * only the creator, so if someone else published a member list for this
+ * identifier between attempts, finishing would replace it. Accepted: it needs
+ * someone else to find a half-made group and edit its member list in the gap
+ * before the creator's retry.
  */
 export async function createGroup(
   signer: SignerInterface,

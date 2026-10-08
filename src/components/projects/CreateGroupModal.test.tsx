@@ -52,7 +52,7 @@ describe('CreateGroupModal', () => {
     await user.type(screen.getByLabelText(/name/i), 'Test Group');
 
     await submit(user);
-    expect(await screen.findByText(/partly created; submit again to finish it/)).toBeTruthy();
+    expect(await screen.findByText(/partly created; submit again with the same name to finish it/)).toBeTruthy();
 
     await submit(user);
     await waitFor(() => expect(onGroupCreated).toHaveBeenCalledWith('first'));
@@ -60,6 +60,61 @@ describe('CreateGroupModal', () => {
     expect(beginGroupCreation).toHaveBeenCalledTimes(1);
     expect(createGroup).toHaveBeenCalledTimes(2);
     expect(createGroup.mock.calls[1][1]).toBe(pending);
+  });
+
+  it('after closing a partly made group, a different name starts a new group, not the old one', async () => {
+    const user = userEvent.setup();
+    const first = pendingGroup('first');
+    const second = pendingGroup('second');
+    beginGroupCreation.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    createGroup
+      .mockImplementationOnce(async (_opts: unknown, p: PendingGroup) => {
+        p.published.add('metadata');
+        throw new Error('No relay accepted it.');
+      })
+      .mockResolvedValueOnce('second');
+    const onGroupCreated = vi.fn();
+
+    const { rerender } = render(<CreateGroupModal isOpen onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+    await user.type(screen.getByLabelText(/name/i), 'Group A');
+    await submit(user);
+    await screen.findByText(/partly created/);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    rerender(<CreateGroupModal isOpen={false} onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+    rerender(<CreateGroupModal isOpen onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+
+    await user.type(screen.getByLabelText(/name/i), 'Group B');
+    await submit(user);
+    await waitFor(() => expect(onGroupCreated).toHaveBeenCalledWith('second'));
+    expect(createGroup.mock.calls[1][1]).toBe(second);
+  });
+
+  it('after closing a partly made group, the same name finishes it', async () => {
+    const user = userEvent.setup();
+    const first = pendingGroup('first');
+    beginGroupCreation.mockResolvedValueOnce(first).mockResolvedValueOnce(pendingGroup('second'));
+    createGroup
+      .mockImplementationOnce(async (_opts: unknown, p: PendingGroup) => {
+        p.published.add('metadata');
+        throw new Error('No relay accepted it.');
+      })
+      .mockResolvedValueOnce('first');
+    const onGroupCreated = vi.fn();
+
+    const { rerender } = render(<CreateGroupModal isOpen onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+    await user.type(screen.getByLabelText(/name/i), 'Group A');
+    await submit(user);
+    await screen.findByText(/partly created/);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    rerender(<CreateGroupModal isOpen={false} onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+    rerender(<CreateGroupModal isOpen onClose={vi.fn()} onGroupCreated={onGroupCreated} />);
+
+    await user.type(screen.getByLabelText(/name/i), 'Group A');
+    await submit(user);
+    await waitFor(() => expect(onGroupCreated).toHaveBeenCalledWith('first'));
+    expect(createGroup.mock.calls[1][1]).toBe(first);
   });
 
   it('starts a fresh group after a successful create', async () => {
