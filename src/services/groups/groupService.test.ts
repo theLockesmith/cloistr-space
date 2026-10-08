@@ -79,6 +79,100 @@ describe('groupService', () => {
     });
   });
 
+  describe('createGroup after a failed step', () => {
+    /**
+     * A relay that keeps one copy per (kind, author, d tag), as a relay does
+     * for addressable events, and refuses chosen publishes once each.
+     */
+    function createAddressableRelay(failOnPublish: number[] = []) {
+      const stored = new Map<string, Event>();
+      let attempts = 0;
+      const relay: RelayClient = {
+        publish: async (event: Event) => {
+          attempts += 1;
+          if (failOnPublish.includes(attempts)) return 0;
+          const d = event.tags.find((t) => t[0] === 'd')?.[1] ?? '';
+          stored.set(`${event.kind}:${event.pubkey}:${d}`, event);
+          return 1;
+        },
+        fetch: async () => [],
+      };
+      const groupIds = () =>
+        new Set([...stored.values()].map((e) => e.tags.find((t) => t[0] === 'd')?.[1]));
+      const kindsFor = (id: string) =>
+        [...stored.values()]
+          .filter((e) => e.tags.some((t) => t[0] === 'd' && t[1] === id))
+          .map((e) => e.kind)
+          .sort();
+      return { relay, groupIds, kindsFor };
+    }
+
+    it('fails step 2, then a retry with the pending group leaves exactly one complete group', async () => {
+      const { beginGroupCreation, createGroup } = await import('./groupService');
+      const signer = createMockSigner();
+      const { relay, groupIds, kindsFor } = createAddressableRelay([2]);
+
+      const pending = await beginGroupCreation(signer, 'Test Group');
+      await expect(createGroup(signer, relay, { name: 'Test Group' }, pending)).rejects.toThrow();
+      expect(pending.published).toEqual(new Set(['metadata']));
+
+      const groupId = await createGroup(signer, relay, { name: 'Test Group' }, pending);
+
+      expect(groupId).toBe(pending.identifier);
+      expect(groupIds()).toEqual(new Set([pending.identifier]));
+      expect(kindsFor(pending.identifier)).toEqual(
+        [GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND].sort(),
+      );
+    });
+
+    it('the retry publishes only the steps that had not landed', async () => {
+      const { beginGroupCreation, createGroup } = await import('./groupService');
+      const signer = createMockSigner();
+      const kinds: number[] = [];
+      let first = true;
+      const relay: RelayClient = {
+        publish: async (event: Event) => {
+          kinds.push(event.kind);
+          if (event.kind === GROUP_MEMBERS_KIND && first) {
+            first = false;
+            return 0;
+          }
+          return 1;
+        },
+        fetch: async () => [],
+      };
+
+      const pending = await beginGroupCreation(signer, 'Test Group');
+      await expect(createGroup(signer, relay, { name: 'Test Group' }, pending)).rejects.toThrow();
+      await createGroup(signer, relay, { name: 'Test Group' }, pending);
+
+      expect(kinds).toEqual([GROUP_METADATA_KIND, GROUP_ADMINS_KIND, GROUP_MEMBERS_KIND, GROUP_MEMBERS_KIND]);
+    });
+
+    it('without a pending group, a retry mints a second group (why the caller must keep it)', async () => {
+      const { createGroup } = await import('./groupService');
+      const signer = createMockSigner();
+      const { relay, groupIds } = createAddressableRelay([2]);
+
+      await expect(createGroup(signer, relay, { name: 'Test Group' })).rejects.toThrow();
+      await createGroup(signer, relay, { name: 'Test Group' });
+
+      expect(groupIds().size).toBe(2);
+    });
+
+    it('refuses to resume a group begun under a different key', async () => {
+      const { beginGroupCreation, createGroup } = await import('./groupService');
+      const pending = await beginGroupCreation(createMockSigner(), 'Test Group');
+      const otherSigner = { ...createMockSigner(), getPublicKey: async () => 'dd'.repeat(32) };
+      const { relay, groupIds } = createAddressableRelay();
+
+      await expect(createGroup(otherSigner, relay, { name: 'Test Group' }, pending)).rejects.toThrow(
+        /different key/,
+      );
+      expect(groupIds().size).toBe(0);
+    });
+  });
+
   describe('createGroup', () => {
     it('publishes metadata, admins, and members events', async () => {
       const { createGroup } = await import('./groupService');

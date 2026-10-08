@@ -65,14 +65,53 @@ export async function leaveGroup(
   });
 }
 
+export type GroupCreateStep = 'metadata' | 'admins' | 'members';
+
+/**
+ * A group creation in progress. Creating a group is three publishes, and
+ * Nostr cannot make them atomic, so the caller keeps this across a failure
+ * and passes it back to finish the same group rather than mint a second one.
+ */
+export interface PendingGroup {
+  readonly identifier: string;
+  /** The key the group was begun under; only that key can finish it. */
+  readonly owner: string;
+  /** Steps a relay accepted. createGroup adds to it as each one lands. */
+  readonly published: Set<GroupCreateStep>;
+}
+
+/** Mint the identifier before anything is published. */
+export async function beginGroupCreation(
+  signer: SignerInterface,
+  name: string,
+): Promise<PendingGroup> {
+  const owner = await signer.getPublicKey();
+  return { identifier: buildGroupIdentifier(name, owner), owner, published: new Set() };
+}
+
+/**
+ * Create a group, or finish one a previous attempt left partly published.
+ *
+ * Without `pending` this begins a fresh group, and a failure partway loses
+ * its identifier: hold a PendingGroup from beginGroupCreation when a retry is
+ * possible. With it, only steps not yet in `pending.published` are sent. A
+ * step that timed out is not recorded and is sent again; that is safe because
+ * all three kinds are addressable, so the relay keeps one copy per group.
+ */
 export async function createGroup(
   signer: SignerInterface,
   relay: RelayClient,
   options: CreateGroupOptions,
+  pending?: PendingGroup,
 ): Promise<string> {
+  const group = pending ?? (await beginGroupCreation(signer, options.name));
   const pubkey = await signer.getPublicKey();
+  if (pubkey !== group.owner) {
+    throw new Error('This group was started under a different key. Switch back to it to finish creating the group.');
+  }
+
+  const { identifier } = group;
   const { name, description, picture, isPublic = true, isOpen = false } = options;
-  const identifier = buildGroupIdentifier(name, pubkey);
 
   const metadataTags: string[][] = [
     ['d', identifier],
@@ -83,29 +122,37 @@ export async function createGroup(
   metadataTags.push([isPublic ? 'public' : 'private']);
   metadataTags.push([isOpen ? 'open' : 'closed']);
 
-  await signAndPublish(signer, relay, {
-    kind: GROUP_METADATA_KIND,
-    content: description || '',
-    tags: metadataTags,
-  });
-
-  await signAndPublish(signer, relay, {
-    kind: GROUP_ADMINS_KIND,
-    content: '',
-    tags: [
-      ['d', identifier],
-      ['p', pubkey, 'add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'],
+  const steps: Array<[GroupCreateStep, { kind: number; content: string; tags: string[][] }]> = [
+    ['metadata', { kind: GROUP_METADATA_KIND, content: description || '', tags: metadataTags }],
+    [
+      'admins',
+      {
+        kind: GROUP_ADMINS_KIND,
+        content: '',
+        tags: [
+          ['d', identifier],
+          ['p', pubkey, 'add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'],
+        ],
+      },
     ],
-  });
-
-  await signAndPublish(signer, relay, {
-    kind: GROUP_MEMBERS_KIND,
-    content: '',
-    tags: [
-      ['d', identifier],
-      ['p', pubkey],
+    [
+      'members',
+      {
+        kind: GROUP_MEMBERS_KIND,
+        content: '',
+        tags: [
+          ['d', identifier],
+          ['p', pubkey],
+        ],
+      },
     ],
-  });
+  ];
+
+  for (const [step, template] of steps) {
+    if (group.published.has(step)) continue;
+    await signAndPublish(signer, relay, template);
+    group.published.add(step);
+  }
 
   return identifier;
 }

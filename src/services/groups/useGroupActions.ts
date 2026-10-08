@@ -14,7 +14,9 @@ import {
   joinGroup as joinGroupPure,
   leaveGroup as leaveGroupPure,
   createGroup as createGroupPure,
+  beginGroupCreation as beginGroupCreationPure,
   type CreateGroupOptions,
+  type PendingGroup,
 } from './groupService';
 
 interface UseGroupActionsReturn {
@@ -22,8 +24,10 @@ interface UseGroupActionsReturn {
   joinGroup: (groupId: string, message?: string) => Promise<void>;
   /** Leave a group */
   leaveGroup: (groupId: string) => Promise<void>;
-  /** Create a new group */
-  createGroup: (options: CreateGroupOptions) => Promise<string>;
+  /** Mint a group identifier before publishing, so a failed create can be finished */
+  beginGroupCreation: (name: string) => Promise<PendingGroup>;
+  /** Create a new group, or finish `pending` if a previous attempt failed partway */
+  createGroup: (options: CreateGroupOptions, pending?: PendingGroup) => Promise<string>;
   /** Whether connected and authenticated */
   canAct: boolean;
 }
@@ -55,10 +59,18 @@ export function useGroupActions(): UseGroupActionsReturn {
     [signer, relay],
   );
 
+  const beginGroupCreation = useCallback(
+    async (name: string): Promise<PendingGroup> => {
+      if (!signer) throw new Error('Not connected');
+      return beginGroupCreationPure(signer, name);
+    },
+    [signer],
+  );
+
   const createGroup = useCallback(
-    async (options: CreateGroupOptions): Promise<string> => {
+    async (options: CreateGroupOptions, pending?: PendingGroup): Promise<string> => {
       if (!signer || !relay) throw new Error('Not connected');
-      return createGroupPure(signer, relay, options);
+      return createGroupPure(signer, relay, options, pending);
     },
     [signer, relay],
   );
@@ -66,6 +78,7 @@ export function useGroupActions(): UseGroupActionsReturn {
   return {
     joinGroup,
     leaveGroup,
+    beginGroupCreation,
     createGroup,
     canAct,
   };
