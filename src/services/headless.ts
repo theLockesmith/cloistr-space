@@ -31,9 +31,35 @@ export interface PublishOutcome {
   eventId: string;
 }
 
-/** Publish an already-signed event; throw when no relay accepts it. */
+/**
+ * How long a publish may take before the caller is told it failed. Matches
+ * @cloistr/collab-common 0.5.0, so every Cloistr app gives up at the same point.
+ */
+export const PUBLISH_TIMEOUT_MS = 15_000;
+
+/**
+ * A publish that did not finish in time. Not a refusal: the relay may still be
+ * working on it, so the event can land after the caller has been told it failed.
+ */
+export class PublishTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`No relay answered within ${ms / 1000}s. It may still arrive; check before posting it again.`);
+    this.name = 'PublishTimeoutError';
+  }
+}
+
+/** Reject with PublishTimeoutError if `work` has not settled within `ms`. */
+export function withPublishTimeout<T>(work: Promise<T>, ms = PUBLISH_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new PublishTimeoutError(ms)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Publish an already-signed event; throw when no relay accepts it in time. */
 export async function publishOrThrow(relay: RelayClient, event: Event): Promise<PublishOutcome> {
-  const acceptedBy = await relay.publish(event);
+  const acceptedBy = await withPublishTimeout(relay.publish(event));
   if (acceptedBy === 0) {
     throw new Error('No relay accepted it. Check your relay list and connection.');
   }
