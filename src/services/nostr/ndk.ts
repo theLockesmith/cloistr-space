@@ -18,6 +18,7 @@ import type { UnsignedEvent } from 'nostr-tools';
 import type { SignerInterface } from '@cloistr/auth';
 import { defaultRelays } from '@/config/environment';
 import { RelayAuthPolicy } from './authPolicy';
+import { withPublishTimeout } from '../headless';
 
 /**
  * Public relay-list indexers, kept as a SUPPLEMENT to our own relays.
@@ -567,10 +568,15 @@ export class NdkService {
    * your pubkey is not on the whitelist". Every catch block in the app reads
    * `.message`, so the user never sees the real reason. Unwrap here so all
    * callers benefit without needing to know about NDKPublishError.
+   *
+   * Bounded by PUBLISH_TIMEOUT_MS. NDK limits each relay to 2.5s, but before
+   * any relay is contacted it looks up the author's relay list (outbox), which
+   * has no limit. Signing is not covered: callers sign before calling this,
+   * and a person approving on a remote signer may need longer than 15s.
    */
   async publish(event: NDKEvent, relaySet?: NDKRelaySet): Promise<Set<NDKRelay>> {
     try {
-      return await event.publish(relaySet);
+      return await withPublishTimeout(event.publish(relaySet));
     } catch (err) {
       if (err instanceof NDKPublishError && err.errors.size > 0) {
         // Collect the relay-specific reasons. Each entry in .errors is a
