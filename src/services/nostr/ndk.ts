@@ -570,8 +570,9 @@ export class NdkService {
    * callers benefit without needing to know about NDKPublishError.
    *
    * Bounded by PUBLISH_TIMEOUT_MS. NDK limits each relay to 2.5s, but before
-   * any relay is contacted it may look up the author's relay list (outbox) and
-   * sign an unsigned event through the remote signer, and neither has a limit.
+   * any relay is contacted it looks up the author's relay list (outbox), which
+   * has no limit. Signing is not covered: callers sign before calling this,
+   * and a person approving on a remote signer may need longer than 15s.
    */
   async publish(event: NDKEvent, relaySet?: NDKRelaySet): Promise<Set<NDKRelay>> {
     try {

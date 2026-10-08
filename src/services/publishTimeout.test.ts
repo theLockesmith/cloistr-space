@@ -1,18 +1,28 @@
 /**
- * Every publish is bounded: a relay or signer that never answers must not
- * leave the caller waiting forever.
+ * Every relay publish is bounded: a relay, or NDK's outbox lookup of the
+ * author's relay list, that never answers must not leave the caller waiting
+ * forever.
  *
- * NDK limits each relay to 2.5s, but two steps run before any relay is
- * contacted and have no limit: the outbox lookup of the author's relay list,
- * and signing an event that arrives unsigned (a NIP-46 round trip). The two
- * choke points every publish passes through -- publishOrThrow for headless
- * callers and NdkService.publish for the UI -- carry the bound, matching
- * @cloistr/collab-common 0.5.0 (15s, PublishTimeoutError).
+ * NDK limits each relay to 2.5s, but the outbox lookup runs before any relay
+ * is contacted and has no limit. The two choke points every publish passes
+ * through -- publishOrThrow for headless callers and NdkService.publish for
+ * the UI -- carry the bound, matching @cloistr/collab-common 0.5.0 (15s,
+ * PublishTimeoutError).
+ *
+ * Signing is NOT bounded here. Every caller signs before publishing
+ * (signAndPublish, makeNdkSigner), outside this window, and a person
+ * approving on a remote signer can legitimately take longer than 15s.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { NDKEvent } from '@nostr-dev-kit/ndk';
 import type { Event } from 'nostr-tools';
-import { publishOrThrow, PublishTimeoutError, PUBLISH_TIMEOUT_MS, type RelayClient } from './headless';
+import {
+  publishOrThrow,
+  withPublishTimeout,
+  PublishTimeoutError,
+  PUBLISH_TIMEOUT_MS,
+  type RelayClient,
+} from './headless';
 
 const { NdkService } = await import('./nostr/ndk');
 
@@ -70,5 +80,30 @@ describe('publish timeout', () => {
     const assertion = expect(result).rejects.toBeInstanceOf(PublishTimeoutError);
     await vi.advanceTimersByTimeAsync(PUBLISH_TIMEOUT_MS);
     await assertion;
+  });
+
+  it('a publish that fails after its timeout is not an unhandled rejection', async () => {
+    vi.useFakeTimers();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let failLate!: (err: Error) => void;
+      const work = new Promise<number>((_, reject) => {
+        failLate = reject;
+      });
+
+      const result = withPublishTimeout(work);
+      const assertion = expect(result).rejects.toBeInstanceOf(PublishTimeoutError);
+      await vi.advanceTimersByTimeAsync(PUBLISH_TIMEOUT_MS);
+      await assertion;
+
+      failLate(new Error('Not enough relays received the event'));
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });
