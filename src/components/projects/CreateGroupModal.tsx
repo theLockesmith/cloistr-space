@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { useGroupActions } from '@/services/groups/useGroupActions';
+import type { PendingGroup } from '@/services/groups/groupService';
 import { useToast } from '@/components/common/Toast';
 
 interface CreateGroupModalProps {
@@ -14,7 +15,16 @@ interface CreateGroupModalProps {
 }
 
 export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGroupModalProps) {
-  const { createGroup, canAct } = useGroupActions();
+  const { beginGroupCreation, createGroup, canAct } = useGroupActions();
+  // The group being created, and the name it was begun under. Kept across a
+  // failed attempt so submitting the same name again finishes that group
+  // instead of minting a second one beside a half-made first. Survives closing
+  // the modal once anything was published, for the same reason. A different
+  // name is a different group: it starts fresh rather than silently finishing
+  // (and renaming) the old one. Cleared on success.
+  const pendingRef = useRef<{ group: PendingGroup; name: string } | null>(null);
+  // Synchronous double-submit guard: isSubmitting state lags a fast second Enter.
+  const submittingRef = useRef(false);
   const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +85,13 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
     setIsPublic(true);
     setIsOpenGroup(false);
     setError(null);
+    if (pendingRef.current?.group.published.size === 0) pendingRef.current = null;
     onClose();
   }, [isSubmitting, onClose]);
 
   const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
 
     if (!canAct) {
       setError('Not connected');
@@ -91,29 +103,42 @@ export function CreateGroupModal({ isOpen, onClose, onGroupCreated }: CreateGrou
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const groupId = await createGroup({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        picture: picture.trim() || undefined,
-        isPublic,
-        isOpen: isOpenGroup,
-      });
+      const groupName = name.trim();
+      if (pendingRef.current?.name !== groupName) {
+        pendingRef.current = { group: await beginGroupCreation(groupName), name: groupName };
+      }
+      const groupId = await createGroup(
+        {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          picture: picture.trim() || undefined,
+          isPublic,
+          isOpen: isOpenGroup,
+        },
+        pendingRef.current.group,
+      );
+      pendingRef.current = null;
 
       toast.success('Group created', `"${name.trim()}" is ready`);
       onGroupCreated?.(groupId);
       handleClose();
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create group';
+      const reason = err instanceof Error ? err.message : 'Failed to create group';
+      const errorMessage = pendingRef.current?.group.published.size
+        ? `${reason} Your group was partly created; submit again with the same name to finish it.`
+        : reason;
       setError(errorMessage);
       toast.error('Failed to create group', errorMessage);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [canAct, name, description, picture, isPublic, isOpenGroup, createGroup, onGroupCreated, handleClose, toast]);
+  }, [canAct, name, description, picture, isPublic, isOpenGroup, beginGroupCreation, createGroup, onGroupCreated, handleClose, toast]);
 
   if (!isOpen) return null;
 
