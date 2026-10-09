@@ -6,10 +6,11 @@
  * philosophy doc.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NDKEvent, NDKFilter, NDKRelaySet } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import { useAuth } from '@/components/auth/AuthProvider';
 import {
   METADATA_KIND,
   RELAY_LIST_KIND,
@@ -22,11 +23,22 @@ import {
   type RelayListEntry,
 } from './profileEvents';
 
+/** How the kind:10002 read went. Same three states as ExistingProfile. */
+export type RelayListRead =
+  | { status: 'found'; entries: RelayListEntry[] }
+  | { status: 'absent' }
+  | { status: 'unreadable' };
+
 export interface UseProfileReturn {
   profile: ProfileFields;
   relays: RelayListEntry[];
-  /** How the existing profile read went. Gates whether saving is safe. */
+  /**
+   * How the existing profile read went, for the signed-in key and signer.
+   * Null until a read for this key has finished. Gates whether saving is safe.
+   */
   existing: ExistingProfile | null;
+  /** The same for the relay list. Null until a read for this key has finished. */
+  relayList: RelayListRead | null;
   isLoading: boolean;
   isSaving: boolean;
   error: string | null;
@@ -51,6 +63,42 @@ function newestOf<T extends { created_at?: number }>(events: Iterable<T>): T | n
     }
   }
   return newest;
+}
+
+/**
+ * A read only counts for the key and signer it was made with. Header sign-in
+ * and key switches change both without remounting anything, so a read held
+ * over from the previous key must read as "not loaded", never as the new
+ * key's data -- or a save would publish key A's list under key B.
+ */
+interface ProfileReadResult {
+  pubkey: string;
+  signer: unknown;
+  existing: ExistingProfile;
+  relayList: RelayListRead;
+  fields: ProfileFields;
+  relays: RelayListEntry[];
+}
+
+/** Stable empties, so the editor's identity-based re-seeding does not churn. */
+const NO_FIELDS: ProfileFields = {};
+const NO_RELAYS: RelayListEntry[] = [];
+
+/**
+ * How long a read may take before it counts as failed. A relay that never
+ * answers must not leave the form looking like the user has no relays.
+ */
+export const PROFILE_READ_TIMEOUT_MS = 15_000;
+
+function withReadTimeout<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('No relay answered while reading your profile and relay list.')),
+      PROFILE_READ_TIMEOUT_MS
+    );
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** How long the user's own write relays get to answer a profile read. */
@@ -136,13 +184,21 @@ async function readOwnRelayProfiles(
 export function useProfile(): UseProfileReturn {
   const { fetchEvents, createEvent, publish, isConnected, service, subscribe } = useNdk();
   const pubkey = useAuthStore((s) => s.pubkey);
+  const { signer } = useAuth();
 
-  const [profile, setProfile] = useState<ProfileFields>({});
-  const [relays, setRelays] = useState<RelayListEntry[]>([]);
-  const [existing, setExisting] = useState<ExistingProfile | null>(null);
+  const [read, setRead] = useState<ProfileReadResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Each load gets a number; only the newest may record its result, so a slow
+  // read for a previous key cannot land after a switch.
+  const loadSeq = useRef(0);
+
+  const current = read && read.pubkey === pubkey && read.signer === signer ? read : null;
+  const existing = current?.existing ?? null;
+  const relayList = current?.relayList ?? null;
+  const profile = current?.fields ?? NO_FIELDS;
+  const relays = current?.relays ?? NO_RELAYS;
 
   // Promise-chained rather than async/await: every setState call needs to run
   // from inside a .then()/.catch()/.finally() callback, not synchronously in
@@ -152,13 +208,24 @@ export function useProfile(): UseProfileReturn {
   // render-triggering update.
   const load = useCallback((): Promise<void> => {
     if (!fetchEvents || !pubkey) return Promise.resolve();
+    const seq = ++loadSeq.current;
+    const isNewest = () => seq === loadSeq.current;
+
+    const unreadable = (): ProfileReadResult => ({
+      pubkey,
+      signer,
+      existing: { status: 'unreadable' },
+      relayList: { status: 'unreadable' },
+      fields: NO_FIELDS,
+      relays: NO_RELAYS,
+    });
 
     // Not connected means we cannot know what exists. Recording `unreadable`
-    // here is what stops a later save from publishing over a profile we never
-    // managed to read.
+    // here is what stops a later save from publishing over a profile or relay
+    // list we never managed to read.
     if (!isConnected) {
       return Promise.resolve().then(() => {
-        setExisting({ status: 'unreadable' });
+        if (isNewest()) setRead(unreadable());
       });
     }
 
@@ -168,21 +235,26 @@ export function useProfile(): UseProfileReturn {
         setError(null);
       })
       .then(() =>
-        Promise.all([
-          fetchEvents({ kinds: [METADATA_KIND], authors: [pubkey], limit: 10 }),
-          fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
-        ])
+        withReadTimeout(
+          Promise.all([
+            fetchEvents({ kinds: [METADATA_KIND], authors: [pubkey], limit: 10 }),
+            fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
+          ])
+        )
       )
       .then(async ([metadataEvents, relayEvents]) => {
+        if (!isNewest()) return;
         const newestRelayList = newestOf(relayEvents);
-        const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
-        setRelays(relayList);
+        const entries = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : NO_RELAYS;
+        const relayList: RelayListRead = newestRelayList ? { status: 'found', entries } : { status: 'absent' };
+        const record = (existing: ExistingProfile, fields: ProfileFields) =>
+          setRead({ pubkey, signer, existing, relayList, fields, relays: entries });
 
         // kind:0 is replaceable, so a save publishes the whole profile, built
         // on the newest one seen. With a relay list, every write relay is
         // asked as well as Space's pool, and the newest across all of them
         // wins; the first to arrive may be older than what a slow relay holds.
-        const writeUrls = relayList.filter((r) => r.write).map((r) => r.url);
+        const writeUrls = entries.filter((r) => r.write).map((r) => r.url);
         const own =
           writeUrls.length && service && subscribe
             ? await readOwnRelayProfiles(subscribe as unknown as SubscribeLike, service, writeUrls, pubkey)
@@ -192,39 +264,60 @@ export function useProfile(): UseProfileReturn {
               // one, the bug cloistr-stash had to fix in this same code path.
               { events: [] as NDKEvent[], silent: [] as string[] };
 
+        // The per-relay reads are their own wait; a newer load may have started.
+        if (!isNewest()) return;
+
         const newest = newestOf([...Array.from(metadataEvents), ...own.events]);
         if (newest) {
           const content = newest.content ?? '';
-          setExisting({ status: 'found', content });
-          setProfile(parseProfileContent(content));
+          record({ status: 'found', content }, parseProfileContent(content));
           return;
         }
 
         // Nothing anywhere. Only "absent" when every write relay said so;
-        // silence is never absent.
+        // silence is never absent. The relay list itself was read, so it
+        // stays as read.
         if (own.silent.length > 0) {
-          setExisting({ status: 'unreadable' });
-          setProfile({});
+          record({ status: 'unreadable' }, NO_FIELDS);
           setError(
             `Could not read your profile: ${own.silent.join(', ')} did not answer. Saving is disabled so it cannot replace a profile kept there.`,
           );
           return;
         }
 
-        setExisting({ status: 'absent' });
-        setProfile({});
+        record({ status: 'absent' }, NO_FIELDS);
       })
       .catch((err) => {
-        // We reached for it and failed. Explicitly NOT `absent`.
-        setExisting({ status: 'unreadable' });
+        if (!isNewest()) return;
+        // We reached for it and failed, or nobody answered in time. Explicitly
+        // NOT `absent`.
+        setRead(unreadable());
         setError(err instanceof Error ? err.message : 'Could not read your profile');
       })
-      .finally(() => setIsLoading(false));
-  }, [fetchEvents, pubkey, isConnected, service, subscribe]);
+      .finally(() => {
+        if (isNewest()) setIsLoading(false);
+      });
+  }, [fetchEvents, pubkey, signer, isConnected, service, subscribe]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Adopt what a save just published as the new base. Only onto the read it
+   * was made against: if the key or signer changed while the publish was in
+   * flight, that read is gone and the result belongs to the old key, so it is
+   * dropped rather than recorded as the new key's data. A null `prev` is the
+   * same case (nothing current to update), not a read to construct.
+   */
+  const adopt = useCallback(
+    (forPubkey: string, forSigner: unknown, patch: Partial<ProfileReadResult>) => {
+      setRead((prev) =>
+        prev && prev.pubkey === forPubkey && prev.signer === forSigner ? { ...prev, ...patch } : prev
+      );
+    },
+    []
+  );
 
   const saveProfile = useCallback(
     async (updates: ProfileFields) => {
@@ -271,8 +364,10 @@ export function useProfile(): UseProfileReturn {
 
         // Adopt what we just published as the new base, so a second save in the
         // same session merges onto it rather than onto the pre-edit copy.
-        setExisting({ status: 'found', content });
-        setProfile(parseProfileContent(content));
+        adopt(pubkey, signer, {
+          existing: { status: 'found', content },
+          fields: parseProfileContent(content),
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save your profile');
         throw err;
@@ -280,13 +375,27 @@ export function useProfile(): UseProfileReturn {
         setIsSaving(false);
       }
     },
-    [createEvent, publish, pubkey, existing]
+    [createEvent, publish, pubkey, signer, existing, adopt]
   );
 
   const saveRelays = useCallback(
     async (entries: RelayListEntry[]) => {
       if (!createEvent || !publish || !pubkey) {
         throw new Error('Not signed in');
+      }
+
+      // The guard. A kind:10002 replaces the user's whole relay list on every
+      // relay and in every Nostr app. `entries` is the editor's draft, seeded
+      // from the read; if that read is pending, failed, timed out, or belongs
+      // to another key, the draft is not the user's list and publishing it
+      // replaces the real one. `absent` is fine: a relay answered and the user
+      // has none, so there is nothing to lose.
+      if (!relayList || relayList.status === 'unreadable') {
+        const message =
+          'Could not read your current relay list, so saving was cancelled to avoid ' +
+          'replacing it. Check your relay connection and try again.';
+        setError(message);
+        throw new Error(message);
       }
 
       setIsSaving(true);
@@ -307,7 +416,7 @@ export function useProfile(): UseProfileReturn {
         // This means a failed publish leaves the pools holding relays the
         // persisted list does not. That is deliberate: a retry against the
         // expanded pool can succeed, whereas restoring the old pool would
-        // reproduce the deadlock. setRelays (the persisted state) runs only
+        // reproduce the deadlock. The read state (what the form shows) changes only
         // after publish succeeds, so the two converge on success.
         const urls = entries.map((e) => e.url);
         service?.setConfiguredRelays(urls);
@@ -321,7 +430,7 @@ export function useProfile(): UseProfileReturn {
 
         await publish(event);
 
-        setRelays(entries);
+        adopt(pubkey, signer, { relayList: { status: 'found', entries }, relays: entries });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save your relay list');
         throw err;
@@ -329,13 +438,14 @@ export function useProfile(): UseProfileReturn {
         setIsSaving(false);
       }
     },
-    [createEvent, publish, pubkey, service]
+    [createEvent, publish, pubkey, signer, service, relayList, adopt]
   );
 
   return {
     profile,
     relays,
     existing,
+    relayList,
     isLoading,
     isSaving,
     error,
