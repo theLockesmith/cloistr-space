@@ -47,11 +47,14 @@ describe('ProfileView relay list', () => {
     expect(screen.queryByText('No relays listed yet.')).toBeNull();
   });
 
-  it('disables Save before any read for this key has finished', () => {
+  it('disables Save and Add before any read for this key has finished, without calling it a failure', () => {
     hookState = { relayList: null };
     render(<ProfileView />);
     expect(saveButton().disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Reading your relay list…')).toBeTruthy();
     expect(screen.queryByText('No relays listed yet.')).toBeNull();
+    expect(screen.queryByText(/Could not read your current relay list/)).toBeNull();
   });
 
   it('allows Save and says "none yet" only when a relay answered with no list', () => {

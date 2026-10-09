@@ -144,7 +144,11 @@ export function useProfile(): UseProfileReturn {
     // list we never managed to read.
     if (!isConnected) {
       return Promise.resolve().then(() => {
-        if (isNewest()) setRead(unreadable());
+        if (!isNewest()) return;
+        setRead(unreadable());
+        // A superseded connected load skips its own finally, so this one must
+        // clear the flag or the form stays on "Loading" with no way to retry.
+        setIsLoading(false);
       });
     }
 

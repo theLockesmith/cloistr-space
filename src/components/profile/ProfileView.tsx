@@ -226,11 +226,14 @@ export function ProfileView() {
           {/* "None yet" only when a relay actually answered. Unread and
               unreadable are not empty, and saying so would invite the user to
               build a new list over the real one. */}
-          {relaysBlocked && !isLoading && (
+          {relayList?.status === 'unreadable' && !isLoading && (
             <p className="text-sm text-cloistr-warning">
               Could not read your current relay list, so it cannot be edited right now. Saving
               would replace the list every Nostr app uses. Check your connection and reload.
             </p>
+          )}
+          {!relayList && (
+            <p className="text-sm text-cloistr-light/50">Reading your relay list…</p>
           )}
           {!relaysBlocked && relayDraft.length === 0 && (
             <p className="text-sm text-cloistr-light/50">No relays listed yet.</p>
@@ -273,11 +276,13 @@ export function ProfileView() {
             value={newRelayUrl}
             placeholder="wss://relay.example.com"
             onChange={(e) => setNewRelayUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addRelay()}
+            onKeyDown={(e) => e.key === 'Enter' && !relaysBlocked && addRelay()}
+            disabled={relaysBlocked}
             className="flex-1 rounded border border-cloistr-light/10 bg-cloistr-light/5 p-2 text-sm text-cloistr-light"
           />
           <button
             onClick={addRelay}
+            disabled={relaysBlocked}
             className="rounded bg-cloistr-light/10 px-3 text-sm text-cloistr-light hover:bg-cloistr-light/20"
           >
             Add

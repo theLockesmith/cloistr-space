@@ -301,3 +301,45 @@ describe('useProfile.saveProfile is keyed the same way', () => {
     await expectRefused(() => hook.result.current.saveProfile({ name: 'x' }));
   });
 });
+
+describe('useProfile loading state', () => {
+  it('a connection drop during a read does not leave the form loading forever', async () => {
+    fetchImpl = () => new Promise(() => {});
+    const hook = renderHook(() => useProfile());
+    await vi.waitFor(() => expect(hook.result.current.isLoading).toBe(true));
+
+    connected = false;
+    hook.rerender();
+
+    await vi.waitFor(() => expect(hook.result.current.isLoading).toBe(false));
+    expect(hook.result.current.relayList?.status).toBe('unreadable');
+  });
+
+  it("a save that finishes after a key switch is not recorded as the new key's list", async () => {
+    let finishPublish!: () => void;
+    mockPublish.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPublish = () => resolve(new Set());
+        })
+    );
+    const hook = await renderLoaded();
+    let saving!: Promise<void>;
+    act(() => {
+      saving = hook.result.current.saveRelays([NEW_ENTRY]);
+    });
+    await vi.waitFor(() => expect(finishPublish).toBeTypeOf('function'));
+
+    fetchImpl = () => new Promise(() => {});
+    currentPubkey = 'b'.repeat(64);
+    currentSigner = { id: 'signer-b' };
+    hook.rerender();
+
+    await act(async () => {
+      finishPublish();
+      await saving;
+    });
+    expect(hook.result.current.relayList).toBeNull();
+    expect(hook.result.current.relays).toEqual([]);
+  });
+});
