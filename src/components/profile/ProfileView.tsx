@@ -25,8 +25,18 @@ const FIELD_LABELS: { key: keyof ProfileFields; label: string; hint?: string; mu
   ];
 
 export function ProfileView() {
-  const { profile, relays, existing, isLoading, isSaving, error, reload, saveProfile, saveRelays } =
-    useProfile();
+  const {
+    profile,
+    relays,
+    existing,
+    relayList,
+    isLoading,
+    isSaving,
+    error,
+    reload,
+    saveProfile,
+    saveRelays,
+  } = useProfile();
   const { service } = useNdk();
 
   const [draft, setDraft] = useState<ProfileFields>({});
@@ -61,6 +71,10 @@ export function ProfileView() {
   }
 
   const blocked = !existing || existing.status === 'unreadable';
+  // Same guard for the relay list: a kind:10002 replaces the whole list in
+  // every Nostr app, so it is never saved from a draft that was not seeded
+  // from a successful read for this key.
+  const relaysBlocked = !relayList || relayList.status === 'unreadable';
 
   const handleSaveProfile = useCallback(async () => {
     try {
@@ -209,7 +223,16 @@ export function ProfileView() {
         </p>
 
         <div className="space-y-2">
-          {relayDraft.length === 0 && (
+          {/* "None yet" only when a relay actually answered. Unread and
+              unreadable are not empty, and saying so would invite the user to
+              build a new list over the real one. */}
+          {relaysBlocked && !isLoading && (
+            <p className="text-sm text-cloistr-warning">
+              Could not read your current relay list, so it cannot be edited right now. Saving
+              would replace the list every Nostr app uses. Check your connection and reload.
+            </p>
+          )}
+          {!relaysBlocked && relayDraft.length === 0 && (
             <p className="text-sm text-cloistr-light/50">No relays listed yet.</p>
           )}
 
@@ -263,7 +286,7 @@ export function ProfileView() {
 
         <button
           onClick={() => void handleSaveRelays()}
-          disabled={isSaving}
+          disabled={relaysBlocked || isLoading || isSaving}
           className="mt-4 rounded bg-cloistr-primary px-4 py-2 text-sm text-cloistr-dark disabled:opacity-50"
         >
           {isSaving ? 'Saving…' : 'Save relay list'}
