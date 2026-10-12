@@ -260,6 +260,11 @@ packages:
     peerDependencies:
       react: ^18.3.1
       react-dom: ^18.3.1
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
 
   '@cloistr/tailwind-config@0.1.0':
     resolution: {integrity: sha1-gfdaQxSYEglLTTjzkZjrkmE6GIA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/185/packages/npm/@cloistr/tailwind-config/-/@cloistr/tailwind-config-0.1.0.tgz}
@@ -2504,11 +2509,12 @@ snapshots:
       lib0: 0.2.119
       libsodium-wrappers: 0.8.4
       nostr-tools: 2.25.2(typescript@5.9.3)
-      react: 19.3.0
-      react-dom: 19.3.0(react@19.3.0)
       y-indexeddb: 9.0.12(yjs@13.6.33)
       y-protocols: 1.0.7(yjs@13.6.33)
       yjs: 13.6.33
+    optionalDependencies:
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
     transitivePeerDependencies:
       - typescript
 
