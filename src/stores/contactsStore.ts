@@ -8,6 +8,13 @@ interface ContactsState {
   isSyncing: boolean;
   lastError: string | null;
   conflictLog: ConflictResolution[];
+  /**
+   * The key this list belongs to. Contacts are per-identity, and publishing
+   * one key's list under another corrupts it and publicly links the two.
+   */
+  owner: string | null;
+  /** The key whose list was successfully read from a relay. Writes need it. */
+  loadedFor: string | null;
 
   // Actions
   setContacts: (contacts: Map<string, Contact>) => void;
@@ -19,6 +26,10 @@ interface ContactsState {
   mergeCrdt: (remoteState: ContactsCrdtState) => void;
   getPendingChanges: () => ContactEntry[];
   markSynced: () => void;
+  /** Drop everything and start an empty, unread list for `owner`. */
+  resetFor: (owner: string | null) => void;
+  /** Record that `owner`'s list was read. */
+  markLoaded: (owner: string) => void;
 
   setLoading: (loading: boolean) => void;
   setSyncing: (syncing: boolean) => void;
@@ -46,6 +57,8 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
   isSyncing: false,
   lastError: null,
   conflictLog: [],
+  owner: null,
+  loadedFor: null,
 
   setContacts: (contacts) => set({ contacts, isLoading: false }),
 
@@ -203,6 +216,28 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       },
       isSyncing: false,
     }));
+  },
+
+  resetFor: (owner) => {
+    set((state) => ({
+      contacts: new Map(),
+      crdt: {
+        entries: new Map(),
+        version: 0,
+        lastSync: 0,
+        clientId: state.crdt.clientId,
+        pendingChanges: [],
+      },
+      conflictLog: [],
+      lastError: null,
+      isLoading: true,
+      owner,
+      loadedFor: null,
+    }));
+  },
+
+  markLoaded: (owner) => {
+    set((state) => (state.owner === owner ? { loadedFor: owner } : {}));
   },
 
   setLoading: (isLoading) => set({ isLoading }),

@@ -15,9 +15,11 @@ import { buildNip0aTags } from './nip0a';
 import { useContactsStore } from '@/stores/contactsStore';
 import type { NdkService } from '@/services/nostr';
 
+const OWNER = 'aa'.repeat(32);
+
 function fakeNdkService(sign: () => Promise<void>) {
   return {
-    getNdk: () => ({ signer: { sign } }),
+    getNdk: () => ({ signer: { sign, user: async () => ({ pubkey: OWNER }) } }),
   } as unknown as NdkService;
 }
 
@@ -31,6 +33,9 @@ describe('publishContacts empty-list guard', () => {
   });
 
   it('refuses to publish when the list has no follows and no tombstones', async () => {
+    // Owned and read, so the only thing left to refuse is the empty list.
+    useContactsStore.getState().resetFor(OWNER);
+    useContactsStore.getState().markLoaded(OWNER);
     const sign = vi.fn(async () => {});
     const svc = new ContactsSyncService(fakeNdkService(sign));
 

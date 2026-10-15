@@ -40,6 +40,7 @@ describe('sync when the relay returns nothing', () => {
   it('does not republish an unchanged local list over whatever the relay really has', async () => {
     // An empty answer may be a relay that did not answer. Publishing this
     // device's copy then replaces a fuller list held elsewhere.
+    useContactsStore.getState().resetFor('aa'.repeat(32));
     useContactsStore.getState().mergeCrdt({
       entries: new Map([[BOB, { pubkey: BOB, timestamp: 100, deleted: false }]]),
       version: 1, lastSync: 0, clientId: 'x', pendingChanges: [],
@@ -50,7 +51,7 @@ describe('sync when the relay returns nothing', () => {
     const publish = vi.fn();
     const svc = new ContactsSyncService({
       getNdk: () => ({ signer: { sign, user: async () => ({ pubkey: 'aa'.repeat(32) }) } }),
-      fetchFromOwnRelays: async () => new Set(),
+      readFromOwnRelays: async () => ({ events: [], answeredBy: 1 }),
       createEvent: () => null,
       publish,
     } as unknown as NdkService);

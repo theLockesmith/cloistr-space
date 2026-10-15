@@ -77,12 +77,14 @@ export class ContactsSyncService {
     }
 
     this.syncInProgress = true;
+    this.ensureOwner(pubkey);
     const store = useContactsStore.getState();
     store.setSyncing(true);
     store.setError(null);
 
     try {
-      // Step 1: Fetch remote events
+      // Step 1: Fetch remote events. Throws when no relay answered, so an
+      // unanswered read is a failed sync, never an empty list.
       const remoteEvents = await this.fetchRemoteContacts(pubkey);
 
       // Step 2: Merge remote state with local
@@ -95,6 +97,7 @@ export class ContactsSyncService {
         store.mergeCrdt(mergedRemote);
         conflictsResolved = useContactsStore.getState().conflictLog.length - beforeConflicts;
       }
+      useContactsStore.getState().markLoaded(pubkey);
 
       // Step 3: Publish local changes if any
       const pendingChanges = store.getPendingChanges();
@@ -196,14 +199,25 @@ export class ContactsSyncService {
    * Publish current contact list to relays
    */
   async publishContacts(): Promise<boolean> {
-    const store = useContactsStore.getState();
     const ndk = this.ndkService.getNdk();
 
     if (!ndk.signer) {
       throw new Error('Signer not available - cannot publish');
     }
     const ndkSigner = ndk.signer;
-    const signer = makeNdkSigner(this.source(), async () => (await ndkSigner.user()).pubkey);
+    const signerPubkey = (await ndkSigner.user()).pubkey;
+
+    // The ownership guard. Only the key the list belongs to may publish it, and
+    // only after that key's list was read. A key switch that left the previous
+    // key's entries in the store, or a signer that has already moved on, would
+    // otherwise publish one identity's follows under another.
+    const owned = useContactsStore.getState();
+    if (owned.owner !== signerPubkey || owned.loadedFor !== signerPubkey) {
+      throw new Error(
+        'Your contact list has not been loaded for this key yet, so it was not saved. Try again in a moment.'
+      );
+    }
+    const signer = makeNdkSigner(this.source(), async () => signerPubkey);
 
     // publishContactState refuses a list with no entries. That refusal is the
     // second half of the fix for the operator's follow list: sync() publishes
@@ -212,7 +226,7 @@ export class ContactsSyncService {
     // measured on relay.cloistr.xyz as a populated event from 2026-08-02
     // replaced by a tagless one from 2026-08-24. A real "I follow nobody" is
     // full of np tombstones, so nothing is lost by refusing.
-    const outcome = await publishContactState(signer, this.relay(), store.crdt);
+    const outcome = await publishContactState(signer, this.relay(), owned.crdt);
     if (!outcome) {
       console.warn('[ContactsSync] Refusing to publish an empty contact list');
       return false;
@@ -226,8 +240,21 @@ export class ContactsSyncService {
     return {
       createEvent: () => service.createEvent(),
       publish: (event: NDKEvent) => service.publish(event),
-      fetchFromOwnRelays: (filter: NDKFilter) => service.fetchFromOwnRelays(filter),
+      // Contacts read through readFromOwnRelays so that "no relay answered"
+      // throws instead of looking like "this user has no list".
+      fetchFromOwnRelays: async (filter: NDKFilter) => {
+        const { events, answeredBy } = await service.readFromOwnRelays(filter);
+        if (answeredBy === 0) throw new Error('None of your relays answered.');
+        return new Set(events);
+      },
     };
+  }
+
+  /** Start a fresh, unread list when the key changed under us. */
+  private ensureOwner(pubkey: string): void {
+    if (useContactsStore.getState().owner !== pubkey) {
+      useContactsStore.getState().resetFor(pubkey);
+    }
   }
 
   private relay() {
@@ -252,6 +279,11 @@ export class ContactsSyncService {
         onEvent: (event: NDKEvent) => {
           // Only process events from the user (not our own publishes)
           if (event.pubkey !== pubkey) {
+            return;
+          }
+          // A stream opened for a previous key can still deliver after a
+          // switch; never merge it into the new key's list.
+          if (useContactsStore.getState().owner !== pubkey) {
             return;
           }
 
@@ -319,11 +351,22 @@ export class ContactsSyncService {
     }
 
     this.syncInProgress = true;
+    this.ensureOwner(pubkey);
     const store = useContactsStore.getState();
     store.setSyncing(true);
     store.setError(null);
 
     try {
+      // Read the current kind:33000 first. The import publishes a whole list,
+      // so merging a kind:3 onto a list that was never read would replace the
+      // real one and could resurrect contacts the user unfollowed. Throws when
+      // no relay answered.
+      const remoteEvents = await this.fetchRemoteContacts(pubkey);
+      if (remoteEvents.length > 0) {
+        store.mergeCrdt(mergeNip0aEvents(remoteEvents));
+      }
+      useContactsStore.getState().markLoaded(pubkey);
+
       // Fetch kind:3 event
       const filter = getKind3Filter(pubkey);
       const events = await this.ndkService.fetchEvents(filter);
@@ -348,7 +391,7 @@ export class ContactsSyncService {
       const importedState = parseKind3Event(latestEvent);
 
       // Count how many are new vs existing
-      const currentState = store.crdt;
+      const currentState = useContactsStore.getState().crdt;
       let imported = 0;
       let skipped = 0;
 
