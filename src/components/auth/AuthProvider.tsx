@@ -14,6 +14,7 @@ import {
   clearSharedSession,
   withSignerRetry,
   classifySignerError,
+  useIdentityChange,
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
@@ -133,6 +134,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   //      next sync then published -- under the new key, linking the two.
   const prevActivePubkeyRef = useRef<string | null>(null);
   const resetContacts = useContactsStore((s) => s.resetFor);
+  // Every identity change -- sign-in, key switch, SSO restore, cross-tab --
+  // starts an empty, unread contact list owned by the new key. The switch
+  // bridge below handles key switches it can see; this also covers Header
+  // sign-in and restores that never pass through it. Contacts are
+  // per-identity, and another key's entries must never reach this one.
+  useIdentityChange(
+    useCallback(
+      (event: { pubkey: string }) => {
+        if (useContactsStore.getState().owner !== event.pubkey) resetContacts(event.pubkey);
+      },
+      [resetContacts]
+    )
+  );
   useEffect(() => {
     const { activePubkey, isConnected, method, isSwitching } = shared.authState;
 
@@ -424,6 +438,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSharedSession();
       // Clear IndexedDB cache so the next user does not inherit this one's feed.
       void clearCache();
+      // And the in-memory contact list, CRDT and pending changes with it, so
+      // the next key to sign in in this tab starts from nothing.
+      useContactsStore.getState().resetFor(null);
       storeLogout();
     }
   }, [signer, storeLogout]);
