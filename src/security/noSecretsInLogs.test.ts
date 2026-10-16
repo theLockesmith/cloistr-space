@@ -83,3 +83,115 @@ describe('bypasses of the first guard are caught', () => {
     expect(scanSource("console.warn('No client secret key found');")).toEqual([]);
   });
 });
+
+/**
+ * cloistr-pr's review of !221: shapes the second guard (hand-tokenised, kept
+ * below as `secondGuard`) let through. The parser-based scanner catches each.
+ */
+/** Console methods that print their arguments. */
+const LOG_CALL2 = /console\.(log|warn|error|info|debug|dir|trace|table)\(/g;
+
+/** Names that hold key material. */
+const SECRET_NAME2 = /\b\w*(secret|nsec|privkey|privatekey|seckey)\w*\b/gi;
+
+/** `hasX: !!value` logs a boolean. Removed per occurrence, nothing else. */
+const PRESENCE_FLAG2 = /\bhas\w*\s*:\s*!!\s*[\w.?]+/g;
+
+/** Each console call with its argument text, up to the matching paren. */
+function consoleCalls2(text: string): string[] {
+  const calls: string[] = [];
+  for (const m of text.matchAll(LOG_CALL2)) {
+    let depth = 1;
+    let i = (m.index ?? 0) + m[0].length;
+    while (i < text.length && depth > 0) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')') depth--;
+      i++;
+    }
+    calls.push(text.slice(m.index, i));
+  }
+  return calls;
+}
+
+/**
+ * Drop the TEXT of string literals (words in a message are not values) but
+ * keep every `${...}` expression of a template literal, which is a value.
+ */
+function stripLiteralText2(code: string): string {
+  let out = '';
+  let i = 0;
+  while (i < code.length) {
+    const c = code[i];
+    if (c === "'" || c === '"') {
+      const end = code.indexOf(c, i + 1);
+      out += "''";
+      i = end === -1 ? code.length : end + 1;
+    } else if (c === '`') {
+      i++;
+      out += '`';
+      while (i < code.length && code[i] !== '`') {
+        if (code[i] === '$' && code[i + 1] === '{') {
+          let depth = 1;
+          let j = i + 2;
+          while (j < code.length && depth > 0) {
+            if (code[j] === '{') depth++;
+            else if (code[j] === '}') depth--;
+            j++;
+          }
+          out += ` ${code.slice(i + 2, j - 1)} `;
+          i = j;
+        } else {
+          i++;
+        }
+      }
+      out += '`';
+      i++;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+/** Secret-named values a console call passes. */
+function secretsLogged2(call: string): string[] {
+  const code = stripLiteralText2(call).replace(PRESENCE_FLAG2, '');
+  return [...code.matchAll(SECRET_NAME2)].map((m) => m[0]).filter((name) => !/^has[A-Z]/.test(name));
+}
+
+/** Any slice, substring or substr of a secret-named value. */
+function secretSlices2(text: string): string[] {
+  return [
+    ...text.matchAll(/\b\w*(secret|nsec|privkey|privatekey|seckey)\w*\??\.(slice|substring|substr)\(/gi),
+  ].map((m) => m[0]);
+}
+
+/** Every offence in a source file. */
+function secondGuard(text: string): string[] {
+  return [...consoleCalls2(text).flatMap(secretsLogged2), ...secretSlices2(text)];
+}
+
+describe('bypasses of the second guard are caught', () => {
+  it.each([
+    ["a ')' inside a log string", "console.log('done :) retrying', clientSecretKey);"],
+    ['an escaped quote in a log string', "console.log('don\\'t', clientSecretKey);"],
+    ["console['log']", "console['log'](clientSecretKey);"],
+    ['console.log?.()', 'console.log?.(clientSecretKey);'],
+    ['console.assert', 'console.assert(ok, clientSecretKey);'],
+    ['console.group', 'console.group(clientSecretKey);'],
+    ['.slice after a newline', 'const p = clientSecretKey\n  .slice(0, 8);'],
+    ['[...secret].slice', 'const p = [...clientSecretKey].slice(0, 8);'],
+  ])('%s', (_label, source) => {
+    expect(secondGuard(source)).toEqual([]);
+    expect(scanSource(source).length).toBeGreaterThan(0);
+  });
+
+  it('still allows flags, message words and object keys', () => {
+    expect(scanSource("console.log('Session:', { hasClientSecretKey: !!auth.clientSecretKey });")).toEqual([]);
+    expect(scanSource("console.warn('No client secret key found (retrying)');")).toEqual([]);
+    expect(scanSource('console.log(`secret ${count} items`);')).toEqual([]);
+    expect(scanSource("console.log({ secretKeyPresent: !!k, label: 'nsec' });")).toEqual([]);
+    expect(scanSource("const s = 'my secret'.slice(0, 2);")).toEqual([]);
+  });
+});
