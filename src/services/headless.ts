@@ -20,6 +20,22 @@ export interface RelayClient {
 }
 
 /**
+ * One relay's answer to a query, kept apart from every other relay's.
+ *
+ * RelayClient.fetch merges relays and resolves the same way whether a relay
+ * answered "nothing" or never answered, which is fine for display and not
+ * enough for a decision that is only safe if EVERY relay said "nothing".
+ * `answered` means this relay sent EOSE; anything else (timeout, CLOSED, not
+ * connected) is `failed`.
+ */
+export type RelayAnswer =
+  | { url: string; status: 'answered'; events: Event[] }
+  | { url: string; status: 'failed'; reason: string };
+
+/** Ask each of the user's own relays separately. */
+export type RelayProbe = (filter: Record<string, unknown>) => Promise<RelayAnswer[]>;
+
+/**
  * How a publish went. Never zero relays -- zero throws instead.
  *
  * The user's relay list is mostly third-party, so "some relays took it" is the

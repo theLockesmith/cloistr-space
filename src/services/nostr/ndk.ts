@@ -14,6 +14,8 @@ import NDK, {
   type NDKRelay,
   type NostrEvent,
 } from '@nostr-dev-kit/ndk';
+import { probeRelay, type ProbeSubscribe } from './probeRelays';
+import type { RelayAnswer } from '../headless';
 import type { UnsignedEvent } from 'nostr-tools';
 import type { SignerInterface } from '@cloistr/auth';
 import { defaultRelays } from '@/config/environment';
@@ -522,6 +524,20 @@ export class NdkService {
     const relaySet = this.getOwnRelaySet();
     if (!relaySet) return this.ndk.fetchEvents(filterArray);
     return this.ndk.fetchEvents(filterArray, undefined, relaySet);
+  }
+
+  /**
+   * Ask each of the user's own relays separately, for a decision that is only
+   * safe when EVERY one of them answered. See probeRelays.ts. No configured
+   * relays gives no answers, which callers must treat as "can't tell".
+   */
+  probeOwnRelays(filter: NDKFilter, timeoutMs?: number): Promise<RelayAnswer[]> {
+    const subscribe = this.ndk.subscribe.bind(this.ndk) as unknown as ProbeSubscribe;
+    return Promise.all(
+      Array.from(this.configuredRelays).map((url) =>
+        probeRelay(subscribe, url, filter as Record<string, unknown>, timeoutMs),
+      ),
+    );
   }
 
   /**

@@ -131,30 +131,10 @@ export async function createGroup(
   metadataTags.push([isPublic ? 'public' : 'private']);
   metadataTags.push([isOpen ? 'open' : 'closed']);
 
-  const steps: Array<[GroupCreateStep, { kind: number; content: string; tags: string[][] }]> = [
+  const steps: Array<[GroupCreateStep, EventTemplate]> = [
     ['metadata', { kind: GROUP_METADATA_KIND, content: description || '', tags: metadataTags }],
-    [
-      'admins',
-      {
-        kind: GROUP_ADMINS_KIND,
-        content: '',
-        tags: [
-          ['d', identifier],
-          ['p', pubkey, 'add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'],
-        ],
-      },
-    ],
-    [
-      'members',
-      {
-        kind: GROUP_MEMBERS_KIND,
-        content: '',
-        tags: [
-          ['d', identifier],
-          ['p', pubkey],
-        ],
-      },
-    ],
+    ['admins', creationAdminsTemplate(identifier, pubkey)],
+    ['members', creationMembersTemplate(identifier, pubkey)],
   ];
 
   for (const [step, template] of steps) {
@@ -164,6 +144,32 @@ export async function createGroup(
   }
 
   return identifier;
+}
+
+type EventTemplate = { kind: number; content: string; tags: string[][] };
+
+/** The kind:39001 creation publishes: the creator, with every permission. */
+export function creationAdminsTemplate(identifier: string, owner: string): EventTemplate {
+  return {
+    kind: GROUP_ADMINS_KIND,
+    content: '',
+    tags: [
+      ['d', identifier],
+      ['p', owner, 'add-user', 'remove-user', 'edit-metadata', 'delete-event', 'add-permission', 'remove-permission'],
+    ],
+  };
+}
+
+/** The kind:39002 creation publishes: the creator alone. */
+export function creationMembersTemplate(identifier: string, owner: string): EventTemplate {
+  return {
+    kind: GROUP_MEMBERS_KIND,
+    content: '',
+    tags: [
+      ['d', identifier],
+      ['p', owner],
+    ],
+  };
 }
 
 // --- Read operations ---
