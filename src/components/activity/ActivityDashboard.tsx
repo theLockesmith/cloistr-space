@@ -168,7 +168,7 @@ function RecentFilesWidget() {
       ) : error ? (
         <WidgetError message={error} />
       ) : files.length === 0 ? (
-        <WidgetEmpty message="No recent files" />
+        <WidgetEmpty message="No files yet" />
       ) : (
         <div className="space-y-2">
           {files.map((file) => (
@@ -392,7 +392,7 @@ function TasksWidget() {
       ) : error ? (
         <WidgetError message={error} />
       ) : tasks.length === 0 ? (
-        <WidgetEmpty message="No tasks" />
+        <WidgetEmpty message="No tasks yet" />
       ) : (
         <div className="space-y-2">
           {tasks.map((task) => (
@@ -498,7 +498,7 @@ function MentionsWidget() {
       ) : error ? (
         <WidgetError message={error} />
       ) : mentions.length === 0 ? (
-        <WidgetEmpty message="No mentions" />
+        <WidgetEmpty message="No mentions in the last 7 days" />
       ) : (
         <div className="space-y-3">
           {mentions.map((mention) => (
@@ -732,7 +732,7 @@ function CalendarWidget() {
       ) : error ? (
         <WidgetError message={error} />
       ) : displayEvents.length === 0 ? (
-        <WidgetEmpty message={viewMode === 'list' ? 'No upcoming events' : 'No events'} />
+        <WidgetEmpty message={viewMode === 'list' ? 'Nothing in the next 14 days' : 'No events'} />
       ) : (
         <div className="space-y-2">
           {displayEvents.slice(0, 5).map((event) => (

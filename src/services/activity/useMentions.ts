@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import { trackAnswers, useUnreachable, withReachability, NO_RELAY_ANSWERED } from './widgetReads';
 import type { Mention, WidgetState } from '@/types/activity';
 import {
   NOTIFICATION_KINDS,
@@ -126,6 +127,7 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
     autoSubscribe = true,
   } = options;
   const { subscribe, isConnected, fetchEvents, service } = useNdk();
+  const unreachable = useUnreachable(isConnected);
   const { pubkey, isAuthenticated } = useAuthStore();
   // The inbox relays, resolved once per key: marking a mention read restarts
   // the subscription, and that must not re-read the relay list each time.
@@ -165,7 +167,9 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
-      setState((prev) => ({ ...prev, isLoading: false }));
+      // Not connected is not "nothing here": stay loading, and useUnreachable
+      // turns it into an error if the connection does not come.
+      setState((prev) => ({ ...prev, isLoading: true }));
       return;
     }
 
@@ -206,7 +210,7 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
       // A newer start (key change, mark-read, unmount) superseded this one.
       if (run !== runRef.current) return;
       try {
-        const subscription = subscribeStream(subscribe, [filter], {
+        const tracked = trackAnswers({
           onEvent: (event: NDKEvent) => {
           // Skip own notes
           if (event.pubkey === pubkey) return;
@@ -233,13 +237,20 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
             lastUpdated: Date.now(),
           }));
         },
-        }, { closeOnEose: false, relaySet: service?.getRelaySetFor(urls) });
+        }, () =>
+          // Nobody answered: an error, never "nothing here". Items that did arrive stay.
+          setState((prev) => ({ ...prev, isLoading: false, error: prev.items.length ? prev.error : NO_RELAY_ANSWERED }))
+        );
+        const subscription = subscribeStream(subscribe, [filter], tracked.handlers, { closeOnEose: false, relaySet: service?.getRelaySetFor(urls) });
 
 
 
 
         subscriptionRef.current = {
-          unsubscribe: () => subscription.stop(),
+          unsubscribe: () => {
+          tracked.cancel();
+          subscription.stop();
+        },
         };
       } catch (err) {
         setState({
@@ -304,7 +315,7 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
   const unreadCount = state.items.filter((m) => !m.read).length;
 
   return {
-    ...state,
+    ...withReachability(state, unreachable),
     refresh: startSubscription,
     markAsRead,
     markAllAsRead,
