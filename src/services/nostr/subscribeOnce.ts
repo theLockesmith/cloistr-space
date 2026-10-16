@@ -44,7 +44,7 @@ import type { NDKEvent, NDKFilter, NDKRelaySet, NDKSubscription } from '@nostr-d
 
 export interface OnceHandlers {
   onEvent?: (event: NDKEvent) => void;
-  onEose?: () => void;
+  onEose?: (sub?: { eosesSeen?: Set<unknown> }) => void;
 }
 
 export interface StreamOptions {
