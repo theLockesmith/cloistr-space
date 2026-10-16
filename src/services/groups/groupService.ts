@@ -178,11 +178,21 @@ export async function readGroupMembers(
       '#d': [groupId],
     });
 
+    // A project being edited always has a 39000. Finding none means this read
+    // did not reach it, not that the project is empty: an edit built on it
+    // would replace the whole list (sweep #7).
+    if (!events.some((e) => e.kind === GROUP_METADATA_KIND)) return { ok: false, members: [] };
+
     // Safe cast: resolveTrustedWriters only reads kind, pubkey, tags,
     // created_at, id. nostr-tools Event has all of these.
     const writers = resolveTrustedWriters(groupId, events as any);
 
     if (writers.status === 'resolved') {
+      // No member list from a trusted writer is "could not tell", not "nobody".
+      const trusted = events.some(
+        (e) => e.kind === GROUP_MEMBERS_KIND && writers.memberWriters.has(e.pubkey),
+      );
+      if (!trusted) return { ok: false, members: [] };
       return { ok: true, members: authoritativeMembers(writers, events as any) ?? [] };
     }
 
@@ -190,7 +200,7 @@ export async function readGroupMembers(
       .filter((e) => e.kind === GROUP_MEMBERS_KIND)
       .sort((a, b) => b.created_at - a.created_at)[0];
 
-    if (!latest) return { ok: true, members: [] };
+    if (!latest) return { ok: false, members: [] };
 
     return {
       ok: true,
@@ -251,9 +261,16 @@ export async function readGroupAdmins(
       '#d': [groupId],
     });
 
+    // Same rule as readGroupMembers: no 39000 means the read missed the project.
+    if (!events.some((e) => e.kind === GROUP_METADATA_KIND)) return { ok: false, entries: [] };
+
     const writers = resolveTrustedWriters(groupId, events as any);
 
     if (writers.status === 'resolved') {
+      // Only the owner writes 39001; without the owner's list there is nothing to edit from.
+      if (!events.some((e) => e.kind === GROUP_ADMINS_KIND && e.pubkey === writers.owner)) {
+        return { ok: false, entries: [] };
+      }
       return { ok: true, entries: writers.admins, ownerPubkey: writers.owner };
     }
 
@@ -261,7 +278,7 @@ export async function readGroupAdmins(
       .filter((e) => e.kind === GROUP_ADMINS_KIND)
       .sort((a, b) => b.created_at - a.created_at)[0];
 
-    if (!latest) return { ok: true, entries: [] };
+    if (!latest) return { ok: false, entries: [] };
 
     return {
       ok: true,
@@ -307,7 +324,32 @@ export async function updateGroupMetadata(
     return { ok: false, reason: 'A project needs a name. Nothing was changed.' };
   }
 
-  const tags: string[][] = [['d', groupId]];
+  // 39000 is addressable: this publish replaces the whole event. Build it on
+  // the current one from someone allowed to write it, carrying every tag the
+  // edit does not change (private/public, closed/open, ...). No such event
+  // read: publish nothing (sweep #7).
+  let current: { tags: string[][] } | undefined;
+  try {
+    const events = await relay.fetch({ kinds: [GROUP_METADATA_KIND, GROUP_ADMINS_KIND], '#d': [groupId] });
+    const writers = resolveTrustedWriters(groupId, events as unknown as Parameters<typeof resolveTrustedWriters>[1]);
+    if (writers.status === 'resolved') {
+      const editors = new Set([
+        writers.owner,
+        ...writers.admins.filter((a) => a.permissions.includes('edit-metadata')).map((a) => a.pubkey),
+      ]);
+      current = events
+        .filter((e) => e.kind === GROUP_METADATA_KIND && editors.has(e.pubkey))
+        .sort((a, b) => b.created_at - a.created_at || (b.id < a.id ? -1 : 1))[0];
+    }
+  } catch {
+    current = undefined;
+  }
+  if (!current) {
+    return { ok: false, reason: 'Could not read the project as it is now, so nothing was changed.' };
+  }
+
+  const EDITED = new Set(['d', 'name', 'about', 'picture']);
+  const tags: string[][] = [['d', groupId], ...current.tags.filter((t) => !EDITED.has(t[0]))];
   if (edit.name?.trim()) tags.push(['name', edit.name.trim()]);
   if (edit.about?.trim()) tags.push(['about', edit.about.trim()]);
   if (edit.picture?.trim()) tags.push(['picture', edit.picture.trim()]);
