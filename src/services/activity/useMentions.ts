@@ -1,6 +1,7 @@
 /**
  * @fileoverview Mentions hook using NDK subscriptions
- * Subscribes to kind:1 notes where user is p-tagged
+ * Subscribes to everything addressed to the user (notes, reactions, reposts,
+ * zaps) on our relays and the user's declared read relays. See inboxRelays.ts.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -13,6 +14,30 @@ import {
   classifyNotification,
   showsContent,
 } from './notificationKinds';
+import { inboxRelayUrls } from './inboxRelays';
+
+/** How long to wait for the user's relay list before asking our relays alone. */
+export const RELAY_LIST_READ_TIMEOUT_MS = 8_000;
+
+/** The user's newest kind:10002 tags, or null when none could be read in time. */
+function readRelayListTags(
+  fetchEvents: (filter: NDKFilter) => Promise<Set<NDKEvent>>,
+  pubkey: string
+): Promise<string[][] | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), RELAY_LIST_READ_TIMEOUT_MS);
+  });
+  const read = fetchEvents({ kinds: [10002], authors: [pubkey], limit: 5 }).then(
+    (events) => {
+      let newest: NDKEvent | null = null;
+      for (const e of events) if (!newest || (e.created_at ?? 0) > (newest.created_at ?? 0)) newest = e;
+      return newest ? newest.tags : null;
+    },
+    () => null
+  );
+  return Promise.race([read, timeout]).finally(() => clearTimeout(timer));
+}
 
 /** Kind 1 - Text note */
 const NOTE_KIND = 1;
@@ -100,8 +125,12 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
     since = 7 * 24 * 60 * 60, // 7 days
     autoSubscribe = true,
   } = options;
-  const { subscribe, isConnected } = useNdk();
+  const { subscribe, isConnected, fetchEvents, service } = useNdk();
   const { pubkey, isAuthenticated } = useAuthStore();
+  // The inbox relays, resolved once per key: marking a mention read restarts
+  // the subscription, and that must not re-read the relay list each time.
+  const inboxRef = useRef<{ pubkey: string; urls: Promise<string[]> } | null>(null);
+  const runRef = useRef(0);
 
   // Track read status
   const [readIds, setReadIds] = useState<Set<string>>(() => {
@@ -162,51 +191,66 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
       limit: limit * 2, // Fetch extra to filter out own notes
     };
 
-    try {
-      const subscription = subscribeStream(subscribe, [filter], {
-        onEvent: (event: NDKEvent) => {
-        // Skip own notes
-        if (event.pubkey === pubkey) return;
+    const run = ++runRef.current;
+    if (!inboxRef.current || inboxRef.current.pubkey !== pubkey) {
+      const own = service?.getOwnRelayUrls() ?? [];
+      inboxRef.current = {
+        pubkey,
+        urls: (fetchEvents ? readRelayListTags(fetchEvents, pubkey) : Promise.resolve(null)).then((tags) =>
+          inboxRelayUrls(tags, own)
+        ),
+      };
+    }
 
-        const mention = parseMentionEvent(event, readIds);
-        mentionsMapRef.current.set(mention.id, mention);
+    void inboxRef.current.urls.then((urls) => {
+      // A newer start (key change, mark-read, unmount) superseded this one.
+      if (run !== runRef.current) return;
+      try {
+        const subscription = subscribeStream(subscribe, [filter], {
+          onEvent: (event: NDKEvent) => {
+          // Skip own notes
+          if (event.pubkey === pubkey) return;
 
-        // Sort by created_at descending and limit
-        const sortedMentions = Array.from(mentionsMapRef.current.values())
-          .sort((a, b) => b.createdAt - a.createdAt)
-          .slice(0, limit);
+          const mention = parseMentionEvent(event, readIds);
+          mentionsMapRef.current.set(mention.id, mention);
 
+          // Sort by created_at descending and limit
+          const sortedMentions = Array.from(mentionsMapRef.current.values())
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, limit);
+
+          setState({
+            items: sortedMentions,
+            isLoading: false,
+            error: null,
+            lastUpdated: Date.now(),
+          });
+        },
+          onEose: () => {
+          setState((prev) => ({
+            ...prev,
+            isLoading: false,
+            lastUpdated: Date.now(),
+          }));
+        },
+        }, { closeOnEose: false, relaySet: service?.getRelaySetFor(urls) });
+
+
+
+
+        subscriptionRef.current = {
+          unsubscribe: () => subscription.stop(),
+        };
+      } catch (err) {
         setState({
-          items: sortedMentions,
+          items: [],
           isLoading: false,
-          error: null,
+          error: err instanceof Error ? err.message : 'Failed to fetch mentions',
           lastUpdated: Date.now(),
         });
-      },
-        onEose: () => {
-        setState((prev) => ({
-          ...prev,
-          isLoading: false,
-          lastUpdated: Date.now(),
-        }));
-      },
-      }, { closeOnEose: false });
-
-
-
-
-      subscriptionRef.current = {
-        unsubscribe: () => subscription.stop(),
-      };
-    } catch (err) {
-      setState({
-        items: [],
-        isLoading: false,
-        error: err instanceof Error ? err.message : 'Failed to fetch mentions',
-        lastUpdated: Date.now(),
-      });
-    }
-  }, [subscribe, isConnected, pubkey, limit, since, readIds]);
+      }
+    });
+  }, [subscribe, isConnected, pubkey, limit, since, readIds, fetchEvents, service]);
 
   // Mark single mention as read
   const markAsRead = useCallback((id: string) => {
@@ -248,6 +292,10 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
 
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
+      // A relay-list read still in flight must not open a subscription later.
+      // runRef is a counter, not a DOM ref; bumping its current value is the point.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      runRef.current++;
       subscriptionRef.current?.unsubscribe();
     };
   }, [autoSubscribe, isAuthenticated, isConnected, startSubscription]);
