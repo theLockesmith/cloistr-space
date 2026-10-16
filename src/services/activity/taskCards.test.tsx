@@ -107,6 +107,22 @@ describe('useTaskCards', () => {
     expect(signEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('a refusal is not kept: the next visit asks again instead of showing no tasks', async () => {
+    // Only a successful read is reused. Keeping a refusal as an empty list
+    // would show "No open tasks" for the whole reuse window.
+    signEvent.mockRejectedValueOnce(new Error('user declined'));
+    const first = renderHook(() => useTaskCards());
+    await waitFor(() => expect(first.result.current.error).not.toBeNull());
+    first.unmount();
+
+    fetchMock.mockResolvedValue(ok([card('7', null)]));
+    const second = renderHook(() => useTaskCards());
+    await waitFor(() => expect(second.result.current.isLoading).toBe(false));
+    expect(signEvent).toHaveBeenCalledTimes(2);
+    expect(second.result.current.items.map((c) => c.id)).toEqual(['7']);
+    expect(second.result.current.error).toBeNull();
+  });
+
   it('refresh always asks again', async () => {
     const { result } = renderHook(() => useTaskCards());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
