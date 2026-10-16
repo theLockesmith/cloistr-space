@@ -207,13 +207,14 @@ describe('groupService', () => {
   });
 
   describe('readGroupMembers', () => {
-    it('returns empty members for a group with no events', async () => {
+    it('a read that found no events is unreadable, not an empty group', async () => {
+      // An edit built on "empty" replaces the whole addressable list (sweep #7).
       const { readGroupMembers } = await import('./groupService');
       const relay = createMockRelay();
 
       const result = await readGroupMembers(relay, 'nonexistent');
 
-      expect(result).toEqual({ ok: true, members: [] });
+      expect(result).toEqual({ ok: false, members: [] });
     });
 
     it('returns ok:false when the relay throws', async () => {
@@ -247,8 +248,13 @@ describe('groupService', () => {
       const { updateGroupMetadata } = await import('./groupService');
       const signer = createMockSigner();
       const relay = createMockRelay();
+      // A pubkey-aware id owned by the signer, and its current metadata.
+      const groupId = `test-group-${TEST_PUBKEY.slice(0, 16)}-0a0b0c0d`;
+      relay.fetch = async () => [
+        { id: '01'.repeat(32), kind: GROUP_METADATA_KIND, pubkey: TEST_PUBKEY, created_at: 1, content: '', sig: '', tags: [['d', groupId], ['name', 'Old']] },
+      ];
 
-      const result = await updateGroupMetadata(signer, relay, 'test-group', {
+      const result = await updateGroupMetadata(signer, relay, groupId, {
         name: '  My Project  ',
         about: '  Cool project  ',
       });
