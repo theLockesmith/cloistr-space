@@ -208,3 +208,97 @@ describe('(c) a read nobody answered', () => {
     expect(followsIn(n.published[0])).toEqual([CAROL]);
   });
 });
+
+describe('a read that finishes after a key switch', () => {
+  /** A fake whose reads wait until released, so a switch can happen mid-read. */
+  function deferredRead(signerPubkey: string, lists: Map<string, ReturnType<typeof listEvent>>) {
+    const n = fakeNdk({ signerPubkey, lists });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const original = n.raw.readFromOwnRelays.getMockImplementation()!;
+    n.raw.readFromOwnRelays.mockImplementation(async (filters) => {
+      await gate;
+      return original(filters);
+    });
+    return { ...n, release };
+  }
+
+  it("sync does not merge key A's list into key B's store", async () => {
+    const a = deferredRead(ALICE, new Map([[ALICE, listEvent(ALICE, [BOB, CAROL])]]));
+    const pending = new ContactsSyncService(a.service).sync(ALICE);
+
+    useContactsStore.getState().resetFor(DAVE);
+    a.release();
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(useContactsStore.getState().owner).toBe(DAVE);
+    expect(useContactsStore.getState().crdt.entries.size).toBe(0);
+    expect(useContactsStore.getState().lastError).toBeNull();
+    expect(a.published).toHaveLength(0);
+  });
+
+  it("importFromKind3 does not merge key A's list into key B's store", async () => {
+    const a = deferredRead(ALICE, new Map([[ALICE, listEvent(ALICE, [BOB])]]));
+    const pending = new ContactsSyncService(a.service).importFromKind3(ALICE);
+
+    useContactsStore.getState().resetFor(DAVE);
+    a.release();
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(useContactsStore.getState().crdt.entries.size).toBe(0);
+    expect(a.published).toHaveLength(0);
+  });
+
+  it("a recovery found for key A is not applied to key B's list", async () => {
+    const n = fakeNdk({ signerPubkey: DAVE });
+    useContactsStore.getState().resetFor(DAVE);
+    const candidate = { createdAt: 1000, state: { entries: new Map([[BOB, { pubkey: BOB, timestamp: 1000, deleted: false }]]) } };
+
+    await expect(
+      new ContactsSyncService(n.service).applyRecovery(candidate as never, ALICE),
+    ).rejects.toThrow(/key changed/);
+    expect(useContactsStore.getState().crdt.entries.size).toBe(0);
+  });
+});
+
+describe('the same sync service across a key switch', () => {
+  it("a read still running for key A does not turn away key B's first sync", async () => {
+    const lists = new Map([[ALICE, listEvent(ALICE, [BOB])], [DAVE, listEvent(DAVE, [CAROL])]]);
+    const n = fakeNdk({ signerPubkey: DAVE, lists });
+    let releaseAlice!: () => void;
+    const aliceGate = new Promise<void>((r) => { releaseAlice = r; });
+    const original = n.raw.readFromOwnRelays.getMockImplementation()!;
+    n.raw.readFromOwnRelays.mockImplementation(async (filters) => {
+      const filter = Array.isArray(filters) ? filters[0] : filters;
+      if (filter?.authors?.[0] === ALICE) await aliceGate;
+      return original(filters);
+    });
+    const svc = new ContactsSyncService(n.service);
+
+    const aliceSync = svc.sync(ALICE);
+    useContactsStore.getState().resetFor(DAVE);
+    const daveResult = await svc.sync(DAVE);
+    releaseAlice();
+    await aliceSync;
+
+    expect(daveResult.success).toBe(true);
+    expect(useContactsStore.getState().loadedFor).toBe(DAVE);
+    expect([...useContactsStore.getState().crdt.entries.keys()]).toEqual([CAROL]);
+    expect(useContactsStore.getState().isSyncing).toBe(false);
+  });
+});
+
+describe('the client id published in the list', () => {
+  it('is different for each key, so two keys on one device are not linked', () => {
+    useContactsStore.getState().resetFor(ALICE);
+    const aliceId = useContactsStore.getState().crdt.clientId;
+    useContactsStore.getState().resetFor(DAVE);
+    const daveId = useContactsStore.getState().crdt.clientId;
+    useContactsStore.getState().resetFor(ALICE);
+
+    expect(daveId).not.toBe(aliceId);
+    expect(useContactsStore.getState().crdt.clientId).toBe(aliceId);
+  });
+});

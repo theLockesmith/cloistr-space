@@ -36,12 +36,24 @@ interface ContactsState {
   setError: (error: string | null) => void;
 }
 
-const generateClientId = () => {
-  const stored = localStorage.getItem('cloistr-space-client-id');
-  if (stored) return stored;
-  const id = crypto.randomUUID();
-  localStorage.setItem('cloistr-space-client-id', id);
-  return id;
+/**
+ * This device's id for `owner`, published in every kind:33000 it writes. One
+ * per key, never shared: a single id across keys would appear in each key's
+ * public list and link the identities that used this browser. With no owner
+ * the id is throwaway, since nothing is published without one.
+ */
+const clientIdFor = (owner: string | null) => {
+  if (!owner) return crypto.randomUUID();
+  const storageKey = `cloistr-space-client-id:${owner}`;
+  try {
+    const stored = localStorage.getItem(storageKey);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem(storageKey, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
 };
 
 export const useContactsStore = create<ContactsState>((set, get) => ({
@@ -50,7 +62,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     entries: new Map(),
     version: 0,
     lastSync: 0,
-    clientId: generateClientId(),
+    clientId: clientIdFor(null),
     pendingChanges: [],
   },
   isLoading: true,
@@ -219,18 +231,20 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
   },
 
   resetFor: (owner) => {
-    set((state) => ({
+    set(() => ({
       contacts: new Map(),
       crdt: {
         entries: new Map(),
         version: 0,
         lastSync: 0,
-        clientId: state.crdt.clientId,
+        clientId: clientIdFor(owner),
         pendingChanges: [],
       },
       conflictLog: [],
       lastError: null,
       isLoading: true,
+      // A sync still running for the previous key is not this key's sync.
+      isSyncing: false,
       owner,
       loadedFor: null,
     }));

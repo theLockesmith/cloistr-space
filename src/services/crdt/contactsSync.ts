@@ -55,7 +55,13 @@ export interface ImportResult {
  */
 export class ContactsSyncService {
   private ndkService: NdkService;
-  private syncInProgress = false;
+  /**
+   * The key whose sync or import is running, if any. Per key, not a boolean:
+   * a read for the previous key can outlive a key switch by up to the read
+   * timeout, and it must not turn away the new key's first sync -- nothing
+   * retries that sync, so the new key would show no contacts until reload.
+   */
+  private syncingFor: string | null = null;
 
   constructor(ndkService: NdkService) {
     this.ndkService = ndkService;
@@ -65,7 +71,7 @@ export class ContactsSyncService {
    * Perform a full sync: fetch remote, merge, publish changes
    */
   async sync(pubkey: string): Promise<SyncResult> {
-    if (this.syncInProgress) {
+    if (this.syncingFor === pubkey) {
       return {
         success: false,
         remoteEventsFound: 0,
@@ -76,7 +82,7 @@ export class ContactsSyncService {
       };
     }
 
-    this.syncInProgress = true;
+    this.syncingFor = pubkey;
     this.ensureOwner(pubkey);
     const store = useContactsStore.getState();
     store.setSyncing(true);
@@ -93,8 +99,9 @@ export class ContactsSyncService {
       if (remoteEvents.length > 0) {
         const mergedRemote = mergeNip0aEvents(remoteEvents);
         remoteEntriesFound = mergedRemote.entries.size;
-        const beforeConflicts = store.conflictLog.length;
-        store.mergeCrdt(mergedRemote);
+        this.assertStillOwner(pubkey);
+        const beforeConflicts = useContactsStore.getState().conflictLog.length;
+        useContactsStore.getState().mergeCrdt(mergedRemote);
         conflictsResolved = useContactsStore.getState().conflictLog.length - beforeConflicts;
       }
       useContactsStore.getState().markLoaded(pubkey);
@@ -126,7 +133,8 @@ export class ContactsSyncService {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync failed';
-      store.setError(message);
+      // A read that outlived a key switch is not the new key's error.
+      if (useContactsStore.getState().owner === pubkey) useContactsStore.getState().setError(message);
       return {
         success: false,
         remoteEventsFound: 0,
@@ -136,8 +144,11 @@ export class ContactsSyncService {
         error: message,
       };
     } finally {
-      this.syncInProgress = false;
-      useContactsStore.getState().setSyncing(false);
+      // A run that outlived a key switch leaves the new key's run alone.
+      if (this.syncingFor === pubkey) {
+        this.syncingFor = null;
+        useContactsStore.getState().setSyncing(false);
+      }
     }
   }
 
@@ -184,9 +195,10 @@ export class ContactsSyncService {
    * since the overwrite survives the restore. The publish then supersedes the
    * empty event the same way the empty one superseded the original.
    */
-  async applyRecovery(candidate: RecoveryCandidate): Promise<boolean> {
-    const store = useContactsStore.getState();
-    store.mergeCrdt(candidate.state);
+  async applyRecovery(candidate: RecoveryCandidate, pubkey: string): Promise<boolean> {
+    // The candidate was read for `pubkey`; never merge it into another key's list.
+    this.assertStillOwner(pubkey);
+    useContactsStore.getState().mergeCrdt(candidate.state);
 
     const published = await this.publishContacts();
     if (published) {
@@ -257,6 +269,17 @@ export class ContactsSyncService {
     }
   }
 
+  /**
+   * Throw when the store now belongs to another key. A read for one key that
+   * finishes after a switch to another must not merge into the new key's
+   * list: its entries would be published under the new key on the next sync.
+   */
+  private assertStillOwner(pubkey: string): void {
+    if (useContactsStore.getState().owner !== pubkey) {
+      throw new Error('The signed-in key changed during the read; nothing was merged.');
+    }
+  }
+
   private relay() {
     return makeNdkRelay(this.source());
   }
@@ -302,7 +325,7 @@ export class ContactsSyncService {
    * Check if sync is in progress
    */
   isSyncing(): boolean {
-    return this.syncInProgress;
+    return this.syncingFor !== null;
   }
 
   // ===========================================================================
@@ -340,7 +363,7 @@ export class ContactsSyncService {
    * Merges with existing contacts using LWW semantics
    */
   async importFromKind3(pubkey: string): Promise<ImportResult> {
-    if (this.syncInProgress) {
+    if (this.syncingFor === pubkey) {
       return {
         success: false,
         contactsImported: 0,
@@ -350,7 +373,7 @@ export class ContactsSyncService {
       };
     }
 
-    this.syncInProgress = true;
+    this.syncingFor = pubkey;
     this.ensureOwner(pubkey);
     const store = useContactsStore.getState();
     store.setSyncing(true);
@@ -362,8 +385,9 @@ export class ContactsSyncService {
       // real one and could resurrect contacts the user unfollowed. Throws when
       // no relay answered.
       const remoteEvents = await this.fetchRemoteContacts(pubkey);
+      this.assertStillOwner(pubkey);
       if (remoteEvents.length > 0) {
-        store.mergeCrdt(mergeNip0aEvents(remoteEvents));
+        useContactsStore.getState().mergeCrdt(mergeNip0aEvents(remoteEvents));
       }
       useContactsStore.getState().markLoaded(pubkey);
 
@@ -407,7 +431,8 @@ export class ContactsSyncService {
       }
 
       // Merge into local state
-      store.mergeCrdt(importedState);
+      this.assertStillOwner(pubkey);
+      useContactsStore.getState().mergeCrdt(importedState);
 
       // Publish the merged state as NIP-0A
       const published = await this.publishContacts();
@@ -425,7 +450,8 @@ export class ContactsSyncService {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Import failed';
-      store.setError(message);
+      // A read that outlived a key switch is not the new key's error.
+      if (useContactsStore.getState().owner === pubkey) useContactsStore.getState().setError(message);
       return {
         success: false,
         contactsImported: 0,
@@ -434,8 +460,11 @@ export class ContactsSyncService {
         error: message,
       };
     } finally {
-      this.syncInProgress = false;
-      useContactsStore.getState().setSyncing(false);
+      // A run that outlived a key switch leaves the new key's run alone.
+      if (this.syncingFor === pubkey) {
+        this.syncingFor = null;
+        useContactsStore.getState().setSyncing(false);
+      }
     }
   }
 }

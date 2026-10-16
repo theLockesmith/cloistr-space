@@ -172,8 +172,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     //    read pubkey from here and will re-subscribe when it changes.
     storeLogin(activePubkey, method ?? 'nip46', config.signerUrl);
 
-    // 3. Start an empty, unread contact list owned by the new key
-    resetContacts(activePubkey);
+    // 3. Start an empty, unread contact list owned by the new key, unless
+    //    useIdentityChange already did -- resetting again would mark a list
+    //    the new key's sync has just read as unread.
+    if (useContactsStore.getState().owner !== activePubkey) resetContacts(activePubkey);
   }, [shared.authState, shared.signer, storeLogin, resetContacts]);
 
   // Check for NIP-07 extension on mount
