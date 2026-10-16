@@ -130,7 +130,10 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
   });
 
   const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
-  const filesMapRef = useRef<Map<string, FileMetadata>>(new Map());
+  // Which read is current. NDK 2.18.1's stop() emits close but keeps its
+  // listeners, so a stopped subscription can still deliver events; every
+  // handler checks its own run against this and ignores itself once stale.
+  const runRef = useRef(0);
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
@@ -142,7 +145,10 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
 
     // Clean up existing subscription
     subscriptionRef.current?.unsubscribe();
-    filesMapRef.current.clear();
+    const run = ++runRef.current;
+    const live = () => runRef.current === run;
+    // A fresh map per read: a stale read can never add to the current one.
+    const files = new Map<string, FileMetadata>();
 
     // A read for a new key starts empty and owned by that key, so a later
     // EOSE cannot claim the previous key's items. The same key keeps its items
@@ -170,13 +176,16 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     try {
       const tracked = trackAnswers({
         onEvent: (event: NDKEvent) => {
+        if (!live()) return;
+        // Only the signed-in key's own file events, whatever a relay sends.
+        if (event.pubkey !== pubkey) return;
         const file = parseFileEvent(event);
         if (!file) return;
 
-        filesMapRef.current.set(file.id, file);
+        files.set(file.id, file);
 
         // Sort by created_at descending and limit
-        const sortedFiles = Array.from(filesMapRef.current.values())
+        const sortedFiles = Array.from(files.values())
           .sort((a, b) => b.createdAt - a.createdAt)
           .slice(0, limit);
 
@@ -189,6 +198,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
         });
       },
         onEose: () => {
+        if (!live()) return;
         setState((prev) => ({
           ...prev,
           owner: pubkey,
@@ -196,15 +206,16 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
           lastUpdated: Date.now(),
         }));
       },
-      }, () =>
+      }, () => {
+        if (!live()) return;
         // Nobody answered: an error, never "nothing here". Items that did arrive stay.
         setState((prev) => ({
           ...prev,
           owner: pubkey,
           isLoading: false,
           error: prev.owner === pubkey && prev.items.length ? prev.error : NO_RELAY_ANSWERED,
-        }))
-      );
+        }));
+      });
       const subscription = subscribeStream(subscribe, [filter], tracked.handlers, { closeOnEose: false });
 
 
@@ -212,6 +223,8 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
 
       subscriptionRef.current = {
         unsubscribe: () => {
+          // Stale from here on, even before the next read starts.
+          if (live()) runRef.current++;
           tracked.cancel();
           subscription.stop();
         },
