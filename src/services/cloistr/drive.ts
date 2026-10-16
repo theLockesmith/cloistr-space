@@ -6,6 +6,7 @@
 import { config } from '@/config/environment';
 import type { SignerInterface } from '@cloistr/auth';
 import type { UnsignedEvent } from 'nostr-tools';
+import { signNip98 } from '@/services/nip98';
 import type { DriveFile, DriveFolder, StorageQuota, FileShare, PublicLink } from '@/types/drive';
 
 /** Blossom auth event kind */
@@ -68,6 +69,18 @@ function mapPublicLink(p: Record<string, unknown>): PublicLink {
   };
 }
 
+/** The signer refused, or failed, to sign a Drive request. */
+export class DriveNotSigned extends Error {
+  constructor(cause: unknown) {
+    super(
+      'Space needs your approval to reach your Drive, and did not get it' +
+        (cause instanceof Error && cause.message ? ` (${cause.message})` : '') +
+        '.'
+    );
+    this.name = 'DriveNotSigned';
+  }
+}
+
 /** Re-export SignerInterface as AuthSigner for convenience */
 export type AuthSigner = SignerInterface;
 
@@ -87,8 +100,32 @@ export class DriveClient {
     this.signer = signer;
   }
 
-  /** Generate Blossom auth header */
-  private async getAuthHeader(action: string): Promise<string> {
+  /**
+   * NIP-98 header for one request. Stash accepts NIP-98 on every route and
+   * requires it on the owner-only reads (file, folder and share lists) and on
+   * folder writes; a Blossom (24242) header is valid only on the blob routes.
+   */
+  private async nip98(url: string, method: string, signer = this.signer): Promise<string> {
+    if (!signer) {
+      throw new Error('No signer configured');
+    }
+    try {
+      return await signNip98(signer, url, method);
+    } catch (err) {
+      throw new DriveNotSigned(err);
+    }
+  }
+
+  /** Signed GET of an owner-only route. */
+  private async ownGet(url: string, signer?: SignerInterface | null): Promise<Response> {
+    return fetch(url, { headers: { Authorization: await this.nip98(url, 'GET', signer ?? this.signer) } });
+  }
+
+  /**
+   * Blossom auth header, for the blob routes only. A delete must name the
+   * blob in an x tag, or stash refuses it.
+   */
+  private async getAuthHeader(action: string, sha256?: string): Promise<string> {
     if (!this.signer) {
       throw new Error('No signer configured');
     }
@@ -102,6 +139,7 @@ export class DriveClient {
       created_at: now,
       tags: [
         ['t', action],
+        ...(sha256 ? [['x', sha256.toLowerCase()]] : []),
         ['expiration', String(now + 600)],
       ],
       content: '',
@@ -111,14 +149,14 @@ export class DriveClient {
     return `Nostr ${btoa(JSON.stringify(signedEvent))}`;
   }
 
-  /** List files for a pubkey */
-  async listFiles(pubkey: string, folderId?: string): Promise<DriveFile[]> {
+  /** List the signed-in user's files (owner only: the request is signed). */
+  async listFiles(pubkey: string, folderId?: string, signer?: SignerInterface | null): Promise<DriveFile[]> {
     const params = new URLSearchParams({ pubkey });
     if (folderId !== undefined) {
       params.set('folder', folderId);
     }
 
-    const response = await fetch(`${this.baseUrl}/api/files?${params}`);
+    const response = await this.ownGet(`${this.baseUrl}/api/files?${params}`, signer);
     if (!response.ok) {
       throw new Error(`Failed to list files: ${response.statusText}`);
     }
@@ -134,7 +172,7 @@ export class DriveClient {
       params.set('parent', parentId);
     }
 
-    const response = await fetch(`${this.baseUrl}/api/folders?${params}`);
+    const response = await this.ownGet(`${this.baseUrl}/api/folders?${params}`);
     if (!response.ok) {
       throw new Error(`Failed to list folders: ${response.statusText}`);
     }
@@ -146,7 +184,7 @@ export class DriveClient {
   /** Get folder by ID */
   async getFolder(folderId: string, pubkey: string): Promise<DriveFolder | null> {
     const params = new URLSearchParams({ pubkey });
-    const response = await fetch(`${this.baseUrl}/api/folders/${folderId}?${params}`);
+    const response = await this.ownGet(`${this.baseUrl}/api/folders/${folderId}?${params}`);
 
     if (response.status === 404) {
       return null;
@@ -161,7 +199,8 @@ export class DriveClient {
 
   /** Create a folder */
   async createFolder(name: string, parentId: string = ''): Promise<DriveFolder> {
-    const authHeader = await this.getAuthHeader('upload');
+    const url = `${this.baseUrl}/api/folders`;
+    const authHeader = await this.nip98(url, 'POST');
     const pubkey = await this.signer!.getPublicKey();
     const now = Math.floor(Date.now() / 1000);
 
@@ -179,7 +218,7 @@ export class DriveClient {
 
     const signedEvent = await this.signer!.signEvent(event);
 
-    const response = await fetch(`${this.baseUrl}/api/folders`, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -197,7 +236,7 @@ export class DriveClient {
 
   /** Delete a folder */
   async deleteFolder(folderId: string): Promise<void> {
-    const authHeader = await this.getAuthHeader('delete');
+    const authHeader = await this.nip98(`${this.baseUrl}/api/folders/${folderId}`, 'DELETE');
     const pubkey = await this.signer!.getPublicKey();
     const now = Math.floor(Date.now() / 1000);
 
@@ -227,7 +266,7 @@ export class DriveClient {
 
   /** Delete a file */
   async deleteFile(sha256: string): Promise<void> {
-    const authHeader = await this.getAuthHeader('delete');
+    const authHeader = await this.getAuthHeader('delete', sha256);
 
     const response = await fetch(`${this.baseUrl}/api/files/${sha256}`, {
       method: 'DELETE',
@@ -254,7 +293,7 @@ export class DriveClient {
   /** List shares */
   async listShares(pubkey: string, type: 'created' | 'received' | 'all' = 'all'): Promise<FileShare[]> {
     const params = new URLSearchParams({ pubkey, type });
-    const response = await fetch(`${this.baseUrl}/api/shares?${params}`);
+    const response = await this.ownGet(`${this.baseUrl}/api/shares?${params}`);
 
     if (!response.ok) {
       throw new Error(`Failed to list shares: ${response.statusText}`);
