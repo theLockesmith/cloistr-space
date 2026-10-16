@@ -97,7 +97,13 @@ interface ServiceFiles {
   items: FileMetadata[];
   isLoading: boolean;
   error: string | null;
+  /** The key these items were listed for. Items for any other key are never shown. */
+  owner: string | null;
 }
+
+/** Shown when no signer appears, so the services cannot be listed. */
+export const SIGNER_NOT_READY =
+  'Could not list your Drive and Cloistr Files: your signer is not connected. Try again once it is.';
 
 /**
  * Hook for subscribing to recent files
@@ -112,11 +118,15 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
   const unreachable = useUnreachable(isConnected);
   const { pubkey, isAuthenticated } = useAuthStore();
 
-  const [state, setState] = useState<WidgetState<FileMetadata>>({
+  // `owner` is the key the relay items were read for. A key switch keeps the
+  // previous key's items in state until the new read answers, so rendering is
+  // filtered on it: one account must never see another's file list.
+  const [stored, setState] = useState<WidgetState<FileMetadata> & { owner: string | null }>({
     items: [],
     isLoading: true,
     error: null,
     lastUpdated: null,
+    owner: null,
   });
 
   const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
@@ -134,7 +144,16 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     subscriptionRef.current?.unsubscribe();
     filesMapRef.current.clear();
 
-    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    // A read for a new key starts empty and owned by that key, so a later
+    // EOSE cannot claim the previous key's items. The same key keeps its items
+    // on screen while it re-reads.
+    setState((prev) => ({
+      ...prev,
+      items: prev.owner === pubkey ? prev.items : [],
+      owner: pubkey,
+      isLoading: true,
+      error: null,
+    }));
 
     // Build filter for user's files
     const filter: NDKFilter = {
@@ -166,18 +185,25 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
           isLoading: false,
           error: null,
           lastUpdated: Date.now(),
+          owner: pubkey,
         });
       },
         onEose: () => {
         setState((prev) => ({
           ...prev,
+          owner: pubkey,
           isLoading: false,
           lastUpdated: Date.now(),
         }));
       },
       }, () =>
         // Nobody answered: an error, never "nothing here". Items that did arrive stay.
-        setState((prev) => ({ ...prev, isLoading: false, error: prev.items.length ? prev.error : NO_RELAY_ANSWERED }))
+        setState((prev) => ({
+          ...prev,
+          owner: pubkey,
+          isLoading: false,
+          error: prev.owner === pubkey && prev.items.length ? prev.error : NO_RELAY_ANSWERED,
+        }))
       );
       const subscription = subscribeStream(subscribe, [filter], tracked.handlers, { closeOnEose: false });
 
@@ -196,6 +222,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
         isLoading: false,
         error: err instanceof Error ? err.message : 'Failed to fetch files',
         lastUpdated: Date.now(),
+        owner: pubkey,
       });
     }
   }, [subscribe, isConnected, pubkey, limit, groupId]);
@@ -223,7 +250,11 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     items: [],
     isLoading: includeServices,
     error: null,
+    owner: null,
   });
+  // A signer that never appears is an error, not an endless skeleton. It is
+  // given the same grace as a relay connection, since it comes up with NDK.
+  const signerMissing = useUnreachable(!!signer);
   const [servicesRun, setServicesRun] = useState(0);
 
   useEffect(() => {
@@ -238,6 +269,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
           if (drive.status === 'rejected') failures.push(`Drive: ${sentence(reason(drive.reason))}`);
           if (blossom.status === 'rejected') failures.push(`Cloistr Files: ${sentence(reason(blossom.reason))}`);
           setServices({
+            owner: pubkey,
             items: [
               ...(drive.status === 'fulfilled' ? drive.value : []),
               ...(blossom.status === 'fulfilled' ? blossom.value : []),
@@ -259,15 +291,22 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     setServicesRun((n) => n + 1);
   }, [startSubscription]);
 
+  // Another key's state is never shown, and is not an answer for this key:
+  // until this key's read settles the widget is loading, never "No files yet".
+  const state = stored.owner === pubkey ? stored : { ...stored, items: [], isLoading: true, error: null };
   const relays = withReachability(state, unreachable);
-  const items = mergeFiles([relays.items, services.items], limit);
-  const servicesPending = includeServices && services.isLoading;
+  const servicesMine = services.owner === pubkey;
+  const serviceItems = servicesMine ? services.items : [];
+  const items = mergeFiles([relays.items, serviceItems], limit);
+  const noSigner = includeServices && !!pubkey && !signer;
+  const servicesPending = includeServices && (noSigner ? !signerMissing : !servicesMine || services.isLoading);
+  const servicesError = noSigner ? (signerMissing ? SIGNER_NOT_READY : null) : servicesMine ? services.error : null;
   const isLoading = items.length === 0 && (relays.isLoading || servicesPending);
   return {
     items,
     isLoading,
     // With files to show, a source that failed does not hide them.
-    error: items.length === 0 && !isLoading ? (relays.error ?? (includeServices ? services.error : null)) : null,
+    error: items.length === 0 && !isLoading ? (relays.error ?? (includeServices ? servicesError : null)) : null,
     lastUpdated: relays.lastUpdated,
     refresh,
   };

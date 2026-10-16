@@ -13,11 +13,16 @@ const signer = { getPublicKey: async () => ME, signEvent };
 const fetchMock = vi.fn();
 
 vi.mock('@/config/environment', () => ({ config: { tasksUrl: 'https://tasks.cloistr.xyz' } }));
-vi.mock('@/services/nostr', () => ({ useHeadlessAdapters: () => ({ signer, relay: null }) }));
-vi.mock('@/stores/authStore', () => ({ useAuthStore: () => ({ pubkey: ME }) }));
+const env = vi.hoisted(() => ({ pubkey: 'ab'.repeat(32), signerOn: true }));
+vi.mock('@/services/nostr', () => ({
+  useHeadlessAdapters: () => ({ signer: env.signerOn ? signer : null, relay: null }),
+}));
+vi.mock('@/stores/authStore', () => ({ useAuthStore: () => ({ pubkey: env.pubkey }) }));
 
 const { fetchAssignedCards, sortByDue, assignedCardsUrl } = await import('./taskCards');
-const { useTaskCards, clearTaskCardsCache } = await import('./useTaskCards');
+const { useTaskCards, clearTaskCardsCache, TASKS_SIGNER_NOT_READY } = await import('./useTaskCards');
+const { WIDGET_NO_ANSWER_MS } = await import('./widgetReads');
+const OTHER = 'cd'.repeat(32);
 
 const card = (id: string, due: string | null, title = `card ${id}`) => ({
   id, title, list_id: 'l1', board_name: 'Space', column_name: 'Doing', due_date: due, url: `/card/${id}`,
@@ -25,6 +30,8 @@ const card = (id: string, due: string | null, title = `card ${id}`) => ({
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
+  env.pubkey = ME;
+  env.signerOn = true;
   clearTaskCardsCache();
   signEvent.mockReset().mockImplementation(async (e: object) => ({ ...e, id: 'id', sig: 'sig' }));
   fetchMock.mockReset().mockResolvedValue(ok([]));
@@ -128,5 +135,60 @@ describe('useTaskCards', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     act(() => result.current.refresh());
     await waitFor(() => expect(signEvent).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('useTaskCards privacy and lifecycle', () => {
+  it('a key switch drops the previous key\'s cards at once', async () => {
+    fetchMock.mockResolvedValue(ok([card('1', null)]));
+    const { result, rerender } = renderHook(() => useTaskCards());
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    fetchMock.mockReturnValue(new Promise(() => {})); // OTHER's read never answers
+    env.pubkey = OTHER;
+    rerender();
+    expect(result.current.items).toEqual([]);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('with no signer: loading at first, then an error, never an endless skeleton', async () => {
+    vi.useFakeTimers();
+    try {
+      env.signerOn = false;
+      const { result } = renderHook(() => useTaskCards());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.error).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WIDGET_NO_ANSWER_MS);
+      });
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBe(TASKS_SIGNER_NOT_READY);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a refresh skips the reuse window once, not for the rest of the widget\'s life', async () => {
+    const { result, rerender } = renderHook(({ limit }) => useTaskCards({ limit }), {
+      initialProps: { limit: 5 },
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    act(() => result.current.refresh());
+    await waitFor(() => expect(signEvent).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Any later re-run (here a new limit) reuses the fresh read.
+    rerender({ limit: 3 });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(signEvent).toHaveBeenCalledTimes(2);
   });
 });
