@@ -302,3 +302,63 @@ describe('the client id published in the list', () => {
     expect(useContactsStore.getState().crdt.clientId).toBe(aliceId);
   });
 });
+
+// Review of !211 (cloistr-pr, 2026-10-16): guards that survived mutation
+// because no test reached them. Each test below fails with its guard removed.
+describe('guards only a key switch round trip reaches', () => {
+  it("refuses to publish the owner's own list before it has been read", async () => {
+    // A -> B -> A: the store is A's again, but A's list has not been read.
+    // Only the "was read" half of the publish guard stops this.
+    useContactsStore.getState().resetFor(ALICE);
+    useContactsStore.getState().addContact(CAROL);
+    const n = fakeNdk({ signerPubkey: ALICE });
+
+    await expect(new ContactsSyncService(n.service).publishContacts()).rejects.toThrow();
+    expect(n.published).toHaveLength(0);
+  });
+
+  it('Recover refuses over a list that has not been read yet', async () => {
+    useContactsStore.getState().resetFor(ALICE);
+    const n = fakeNdk({ signerPubkey: ALICE });
+    const candidate = { createdAt: 1000, state: { entries: new Map([[BOB, { pubkey: BOB, timestamp: 1000, deleted: false }]]) } };
+
+    await expect(new ContactsSyncService(n.service).applyRecovery(candidate as never, ALICE)).rejects.toThrow();
+    expect(n.published).toHaveLength(0);
+  });
+
+  it("a late run for key A does not free key B's in-progress guard", async () => {
+    const lists = new Map([[ALICE, listEvent(ALICE, [BOB])], [DAVE, listEvent(DAVE, [CAROL])]]);
+    const n = fakeNdk({ signerPubkey: DAVE, lists });
+    const gates = new Map<string, () => void>();
+    const original = n.raw.readFromOwnRelays.getMockImplementation()!;
+    n.raw.readFromOwnRelays.mockImplementation(async (filters) => {
+      const filter = Array.isArray(filters) ? filters[0] : filters;
+      const author = filter?.authors?.[0] ?? '';
+      await new Promise<void>((r) => gates.set(author, r));
+      return original(filters);
+    });
+    const svc = new ContactsSyncService(n.service);
+
+    const aliceSync = svc.sync(ALICE);
+    useContactsStore.getState().resetFor(DAVE);
+    const daveSync = svc.sync(DAVE);
+    await vi.waitFor(() => expect(gates.has(DAVE)).toBe(true));
+
+    gates.get(ALICE)!();
+    await aliceSync;
+
+    // B's sync is still running: a second one is turned away and the flag holds.
+    expect(svc.isSyncing()).toBe(true);
+    expect(useContactsStore.getState().isSyncing).toBe(true);
+    expect((await svc.sync(DAVE)).error).toBe('Sync already in progress');
+
+    gates.get(DAVE)!();
+    expect((await daveSync).success).toBe(true);
+  });
+
+  it("a late read for key A does not mark key B's list as read", () => {
+    useContactsStore.getState().resetFor(DAVE);
+    useContactsStore.getState().markLoaded(ALICE);
+    expect(useContactsStore.getState().loadedFor).toBeNull();
+  });
+});
