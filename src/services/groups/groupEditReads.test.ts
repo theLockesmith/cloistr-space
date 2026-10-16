@@ -146,3 +146,33 @@ describe('metadata edits', () => {
     expect(tags).not.toContainEqual(['public']);
   });
 });
+
+describe('guards the tests above do not reach on their own', () => {
+  it('an admin list read without the project itself publishes nothing', async () => {
+    const relay = relayWith([admins]);
+    const result = await setGroupPermissions(signer, relay, GROUP, BOB, ['add-user']);
+    expect(result.ok).toBe(false);
+    expect(relay.published).toEqual([]);
+  });
+
+  // Identifiers from before the owner-prefixed scheme cannot be verified and take the fallback path.
+  const LEGACY = 'legacy-project';
+  const legacy = (kind: number, tags: string[][]): Partial<Event> => ({
+    ...ev(kind, tags),
+    tags: [['d', LEGACY], ...tags],
+  });
+
+  it('an unverifiable project whose member list was not found publishes nothing', async () => {
+    const relay = relayWith([legacy(GROUP_METADATA_KIND, [['name', 'Old']]), legacy(GROUP_ADMINS_KIND, [['p', OWNER, 'add-user']])]);
+    const result = await addGroupMember(signer, relay, LEGACY, BOB);
+    expect(result.ok).toBe(false);
+    expect(relay.published).toEqual([]);
+  });
+
+  it('an unverifiable project whose admin list was not found publishes nothing', async () => {
+    const relay = relayWith([legacy(GROUP_METADATA_KIND, [['name', 'Old']])]);
+    const result = await setGroupPermissions(signer, relay, LEGACY, BOB, ['add-user']);
+    expect(result.ok).toBe(false);
+    expect(relay.published).toEqual([]);
+  });
+});
