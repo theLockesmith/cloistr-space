@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react';
 import { useGroupAdmin } from '@/services/groups/useGroupAdmin';
 import { useGroupOwner } from '@/services/groups/useGroupOwner';
 import { useGroups } from '@/services/groups/useGroups';
+import { FinishProjectSetup } from './FinishProjectSetup';
 
 interface Props {
   groupId: string;
@@ -73,10 +74,13 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
   const setAbout = (v: string) => setEdits((e) => ({ ...e, about: v }));
   const setPicture = (v: string) => setEdits((e) => ({ ...e, picture: v }));
 
+  // The setup panel sits before the admin gate too: an owner whose project has
+  // no admin list yet may not be recognised as an admin until it is finished.
   if (!canAdmin) {
     return (
-      <div className="p-4 text-sm text-cloistr-light/60">
-        Only project admins can change these details.
+      <div className="space-y-3 p-4 text-sm text-cloistr-light/60">
+        <FinishProjectSetup groupId={groupId} />
+        <p>Only project admins can change these details.</p>
       </div>
     );
   }
@@ -108,6 +112,7 @@ export function GroupSettings({ groupId, canAdmin }: Props) {
 
   return (
     <div className="max-w-lg space-y-3 p-4">
+      <FinishProjectSetup groupId={groupId} />
       <Field label="Name" value={name} onChange={setName} placeholder="Project name" />
       <Field
         label="Description"
