@@ -343,3 +343,86 @@ describe('useProfile loading state', () => {
     expect(hook.result.current.relays).toEqual([]);
   });
 });
+
+// Review of !194 (cloistr-pr, 2026-10-16): three guards survived mutation
+// because their tests reached the right answer another way. Each test below
+// fails when its guard is removed.
+describe('guards that only show when the new key has been read', () => {
+  const B_RELAY = 'wss://b-only.example.com';
+
+  function switchToB() {
+    currentPubkey = 'b'.repeat(64);
+    currentSigner = { id: 'signer-b' };
+  }
+
+  it("a save for key A finishing after key B's read does not put A's list in B's form", async () => {
+    // Guard: adopt() applies a save only onto the read it was made against.
+    let finishPublish!: () => void;
+    mockPublish.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPublish = () => resolve(new Set());
+        })
+    );
+    const hook = await renderLoaded();
+    let saving!: Promise<void>;
+    act(() => {
+      saving = hook.result.current.saveRelays([NEW_ENTRY]);
+    });
+    await vi.waitFor(() => expect(finishPublish).toBeTypeOf('function'));
+
+    fetchImpl = answering([B_RELAY]);
+    switchToB();
+    hook.rerender();
+    await vi.waitFor(() => expect(hook.result.current.relayList?.status).toBe('found'));
+    expect(hook.result.current.relays.map((r) => r.url)).toEqual([B_RELAY]);
+
+    await act(async () => {
+      finishPublish();
+      await saving;
+    });
+
+    expect(hook.result.current.relays.map((r) => r.url)).toEqual([B_RELAY]);
+    expect(hook.result.current.relayList).toEqual({
+      status: 'found',
+      entries: [expect.objectContaining({ url: B_RELAY })],
+    });
+  });
+
+  it("a late read for key A arriving after key B's read does not reset B's form", async () => {
+    // Guard: only the newest load may record its result (isNewest).
+    let resolveA!: (v: Set<unknown>) => void;
+    fetchImpl = (filter) =>
+      filter.kinds[0] === 10002
+        ? new Promise((r) => {
+            resolveA = r;
+          })
+        : Promise.resolve(new Set());
+    const hook = renderHook(() => useProfile());
+    await vi.waitFor(() => expect(resolveA).toBeTypeOf('function'));
+    const lateA = resolveA;
+
+    fetchImpl = answering([B_RELAY]);
+    switchToB();
+    hook.rerender();
+    await vi.waitFor(() => expect(hook.result.current.relayList?.status).toBe('found'));
+
+    await act(async () => {
+      lateA(new Set([relayListEvent(['wss://a-only.example.com'])]));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(hook.result.current.relayList?.status).toBe('found');
+    expect(hook.result.current.relays.map((r) => r.url)).toEqual([B_RELAY]);
+    expect(hook.result.current.isLoading).toBe(false);
+  });
+
+  it('saveProfile refuses after a failed read, and publishes nothing', async () => {
+    // Guard: saveProfile's own `unreadable` check, reached with a non-null read.
+    fetchImpl = () => Promise.reject(new Error('relay refused'));
+    const hook = await renderLoaded();
+    expect(hook.result.current.existing).toEqual({ status: 'unreadable' });
+
+    await expectRefused(() => hook.result.current.saveProfile({ name: 'x' }));
+  });
+});
