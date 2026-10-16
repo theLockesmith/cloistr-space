@@ -8,7 +8,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 
 const ME = 'ac'.repeat(32);
-const subscribe = vi.fn((_filters: unknown, _opts: { relaySet?: { urls: string[] } }, _handlers: unknown) => ({ stop: vi.fn() }));
+/** Every subscription opened, so a test can see which are still live. */
+const opened: Array<{ urls: string[] | undefined; stop: ReturnType<typeof vi.fn> }> = [];
+const subscribe = vi.fn((_filters: unknown, opts: { relaySet?: { urls: string[] } }, _handlers: unknown) => {
+  const sub = { urls: opts.relaySet?.urls, stop: vi.fn() };
+  opened.push(sub);
+  return sub;
+});
+const live = () => opened.filter((s) => s.stop.mock.calls.length === 0);
 let relayList: Array<{ created_at: number; tags: string[][] }> = [];
 let relayListHangs = false;
 let heldFetch: Promise<Set<unknown>> | null = null;
@@ -40,6 +47,7 @@ const { useMentions, RELAY_LIST_READ_TIMEOUT_MS } = await import('./useMentions'
 
 beforeEach(() => {
   subscribe.mockClear();
+  opened.length = 0;
   fetchEventsMock.mockClear();
   relayListHangs = false;
   heldFetch = null;
@@ -124,6 +132,12 @@ describe('useMentions relay routing', () => {
         'wss://relay.damus.io',
         'wss://nos.lol',
       ]);
+
+      // Reopened, not doubled: the first read was stopped, and only the
+      // inbox-relay read is still open.
+      expect(opened[0].stop).toHaveBeenCalled();
+      expect(live()).toHaveLength(1);
+      expect(live()[0].urls).toContain('wss://relay.damus.io');
     } finally {
       vi.useRealTimers();
     }
