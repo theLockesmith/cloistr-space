@@ -69,15 +69,18 @@ vi.mock('@cloistr/ui/components', async (importOriginal) => {
   };
 });
 
-import { AuthProvider } from './AuthProvider';
+import { AuthProvider, MIRROR_WAIT_MS } from './AuthProvider';
 import { AuthGuard } from './AuthGuard';
 import { LoginPage } from './LoginPage';
 import { useAuthStore } from '@/stores/authStore';
 
 const PUBKEY = 'a'.repeat(64);
 
+const visited: string[] = [];
+
 function Where() {
   const loc = useLocation();
+  visited.push(loc.pathname);
   return <div data-testid="where">{loc.pathname + loc.search}</div>;
 }
 
@@ -128,8 +131,12 @@ function sharedConnects() {
   h.session.isResolving = false;
 }
 
+const realLogin = useAuthStore.getState().login;
+
 beforeEach(() => {
+  visited.length = 0;
   localStorage.clear();
+  useAuthStore.setState({ login: realLogin });
   useAuthStore.setState({ pubkey: null, method: null, isAuthenticated: false, isLoading: true });
   h.shared.authState = {
     isConnected: false,
@@ -237,6 +244,40 @@ describe('signed-in reload of a deep link', () => {
     rerender(app());
     await settle();
     expect(where()).toBe('/activity');
+  });
+
+  it('waits for a connected shared session to reach Space, without visiting /login', async () => {
+    // Connected before Space mounts: the bridge copies it into Space's store a
+    // tick later. Until then this must read as loading, not signed out.
+    sharedConnects();
+    render(tree('/social'));
+    await settle();
+
+    expect(screen.getByText('social page')).toBeTruthy();
+    expect(visited).not.toContain('/login');
+  });
+
+  it('stops waiting for a mirror that never lands, within the bound', async () => {
+    vi.useFakeTimers();
+    try {
+      useAuthStore.setState({ login: () => {} });
+      sharedConnects();
+      render(tree('/social'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(where()).toBe('/social');
+      expect(screen.getByText('Loading...')).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(MIRROR_WAIT_MS);
+      });
+      expect(where()).toBe('/login');
+      expect(screen.queryByText('Loading...')).toBeNull();
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the login page, not a spinner, when there is no session to restore', async () => {

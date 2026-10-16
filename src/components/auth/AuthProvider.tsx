@@ -53,6 +53,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // to avoid zustand persist overwriting our session data
 const STORAGE_KEY = 'cloistr-space-session';
 
+/** How long a connected shared session may take to reach Space's store. */
+export const MIRROR_WAIT_MS = 5000;
+
 interface PersistedAuth {
   method: 'nip07' | 'nip46';
   bunkerUrl?: string;
@@ -500,12 +503,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // isConnecting counts only with a shared session: a first sign-in also runs
   // under isConnecting, and the overlay must not cover the modal then.
   // isConnected-but-not-mirrored covers the bridge's queued storeLogin.
+  //
+  // The mirror wait is bounded: if storeLogin never lands, the user reaches the
+  // login page after MIRROR_WAIT_MS rather than an endless spinner. The other
+  // two waits are bounded by the shared provider (its safety cap and connect
+  // timeouts).
   const sharedSession = useSharedSessionMaybe();
+  const awaitingMirror = !isAuthenticated && shared.authState.isConnected && !!shared.authState.pubkey;
+  const [mirrorTimedOut, setMirrorTimedOut] = useState(false);
+  useEffect(() => {
+    if (!awaitingMirror) {
+      const reset = setTimeout(() => setMirrorTimedOut(false), 0);
+      return () => clearTimeout(reset);
+    }
+    const timer = setTimeout(() => {
+      console.warn('[Auth] Shared session connected but never reached Space; showing sign-in.');
+      setMirrorTimedOut(true);
+    }, MIRROR_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingMirror]);
   const sharedRestorePending =
     !isAuthenticated &&
     (!!sharedSession?.isResolving ||
       (shared.authState.isConnecting && !!sharedSession?.hasSharedSession) ||
-      (shared.authState.isConnected && !!shared.authState.pubkey));
+      (awaitingMirror && !mirrorTimedOut));
 
   return (
     <AuthContext.Provider
