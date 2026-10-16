@@ -233,7 +233,12 @@ function KeyOfferPrompt({
   const sender = <span className="font-mono">{shortNpub(senderPubkey)}</span>;
   return (
     <div role="alert" className="m-4 rounded border border-cloistr-warning/40 bg-cloistr-warning/10 p-3 text-sm text-cloistr-light">
-      <p className="font-medium">Someone offered you a key to a sealed thread</p>
+      <p className="font-medium">
+        <span className="mr-2 rounded border border-cloistr-warning/40 px-1 text-[10px] uppercase text-cloistr-warning">
+          Unverified invitation
+        </span>
+        Someone offered you a key to a sealed thread
+      </p>
       <p className="mt-1 text-xs text-cloistr-light/70">
         {senderSigned ? (
           <>It was sent by {sender}, who is not a sender Space knows to trust.</>

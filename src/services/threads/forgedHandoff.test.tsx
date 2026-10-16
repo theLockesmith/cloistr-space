@@ -18,7 +18,8 @@ import { computeHandoffBucket, ecdhHex, getWindowId, expiryTimestamp } from './b
 import { GIFT_WRAP_KIND, wrapThreadMessage } from './giftWrap';
 
 type Wrap = { id: string; pubkey: string; content: string; tags: string[][] };
-const relay: { events: Wrap[] } = { events: [] };
+/** `unfiltered`: deliver every event whatever was asked for, as a careless or hostile relay may. */
+const relay: { events: Wrap[]; unfiltered?: boolean } = { events: [] };
 const store = { current: new ThreadKeyStore() };
 const auth: { signer: unknown } = { signer: null };
 
@@ -31,7 +32,7 @@ vi.mock('@/services/nostr', () => ({
       for (const e of relay.events) {
         if (stopped) return;
         const b = e.tags.find((t) => t[0] === 't')?.[1];
-        if (b && wanted.has(b)) handlers.onEvent(e);
+        if (relay.unfiltered || (b && wanted.has(b))) handlers.onEvent(e);
       }
       handlers.onEose?.();
     });
@@ -55,15 +56,15 @@ const attackerThreadPk = getPublicKey(attackerThreadSk);
  * copied off any genuine hand-off for this pair (it is in the clear on the
  * relay for the whole window); here it is computed directly for brevity.
  */
-function forgedHandoff(now: number): Wrap {
+function forgedHandoff(now: number, threadSk = attackerThreadSk, tid = 'looks-official', claimedGranter = trustedGranterPk): Wrap {
   const wid = getWindowId(now);
   const throwaway = generateSecretKey();
-  const payload = JSON.stringify({ tid: 'looks-official', sec: bytesToHex(attackerThreadSk), g: trustedGranterPk });
+  const payload = JSON.stringify({ tid, sec: bytesToHex(threadSk), g: claimedGranter });
   return finalizeEvent(
     {
       kind: GIFT_WRAP_KIND,
       content: nip44.v2.encrypt(payload, nip44.v2.utils.getConversationKey(throwaway, memberPk)),
-      tags: [['t', computeHandoffBucket(ecdhHex(memberSk, trustedGranterPk), wid)], ['expiration', String(expiryTimestamp(wid))]],
+      tags: [['t', computeHandoffBucket(ecdhHex(memberSk, claimedGranter), wid)], ['expiration', String(expiryTimestamp(wid))]],
       created_at: now,
     },
     throwaway,
@@ -82,6 +83,7 @@ function remoteSigner(userSk: Uint8Array) {
 }
 
 beforeEach(() => {
+  relay.unfiltered = false;
   store.current = new ThreadKeyStore();
   try { localStorage.clear(); } catch { /* none */ }
   const now = Math.floor(Date.now() / 1000);
@@ -130,6 +132,39 @@ describe.each([
     await new Promise((r) => setTimeout(r, 50));
 
     expect(result.current.pendingHandoffs).toHaveLength(1);
+  });
+
+  it('three forgeries for three threads: all three held, none stored, nothing shown', async () => {
+    const secret = setup();
+    const now = Math.floor(Date.now() / 1000);
+    const threads = [generateSecretKey(), generateSecretKey(), generateSecretKey()];
+    relay.events = threads.flatMap((sk, i) => [
+      forgedHandoff(now, sk, `official-${i}`),
+      wrapThreadMessage(`message ${i}`, trustedGranterPk, bytesToHex(sk), now) as unknown as Wrap,
+    ]);
+    const { result } = renderHook(() => useBucketReader(secret, [trustedGranterPk]));
+
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(3), { timeout: 3000 });
+    for (const sk of threads) expect(store.current.get(getPublicKey(sk))).toBeFalsy();
+    expect(result.current.handoffs).toHaveLength(0);
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it('refusal control: a hand-off claiming a sender the user does not trust is refused, not offered', async () => {
+    // The same forgery, claiming a granter outside the user's list and sent
+    // by a relay that ignores the filter. It must be dropped outright, which
+    // shows the prompts above are the trusted-granter claim being held, and
+    // not every wrap the reader sees.
+    const secret = setup();
+    relay.unfiltered = true;
+    const now = Math.floor(Date.now() / 1000);
+    const strangerPk = getPublicKey(generateSecretKey());
+    relay.events = [forgedHandoff(now, attackerThreadSk, 'looks-official', strangerPk)];
+    const { result } = renderHook(() => useBucketReader(secret, [trustedGranterPk]));
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(result.current.pendingHandoffs).toHaveLength(0);
+    expect(store.current.get(attackerThreadPk)).toBeFalsy();
   });
 
   it('once dismissed, is not offered again', async () => {

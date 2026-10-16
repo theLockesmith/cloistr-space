@@ -266,6 +266,7 @@ describe('SealedMessages hand-off prompt', () => {
 
     // The claimed sender is labelled as a claim: a forger claims the familiar
     // fleet npub, so the key must never read as verified.
+    expect(getByText('Unverified invitation')).toBeTruthy();
     expect(getByText('claimed, unverified')).toBeTruthy();
     expect(getByText(/Anyone can claim any sender here/)).toBeTruthy();
     getByRole('button', { name: 'Accept key' }).click();
@@ -290,6 +291,7 @@ describe('SealedMessages key-wrap prompt', () => {
     });
 
     const { getByText, getByRole } = render(<SealedMessages />);
+    expect(getByText('Unverified invitation')).toBeTruthy();
     expect(getByText(/not a sender Space knows to trust/)).toBeTruthy();
     expect(getByRole('button', { name: 'Accept key' })).toBeTruthy();
     clearKeyWraps();
