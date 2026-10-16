@@ -16,7 +16,7 @@ import { HashtagView } from './components/social/HashtagView';
 import { ProfileView, UserProfileView } from './components/profile';
 import { ThreadsView } from './components/threads';
 import { NotificationsView } from './components/activity/NotificationsView';
-import { FileBrowser } from './components/integrations';
+import { FilesView } from './components/integrations';
 import { LoginPage } from './components/auth/LoginPage';
 import { AuthGuard } from './components/auth/AuthGuard';
 
@@ -82,14 +82,14 @@ export default function App() {
                   </ErrorBoundary>
                 }
               />
-              {/* FileBrowser was fully built and routed NOWHERE — dead code,
-                  and the dashboard's "View all" on Recent Files had no
-                  destination to point at. */}
+              {/* Stash's own file list (the only way to show a sealed drive
+                  without Space holding the root key), plus the Drive browser
+                  for uploads and changes. */}
               <Route
                 path="files"
                 element={
                   <ErrorBoundary context="Files">
-                    <FileBrowser />
+                    <FilesView />
                   </ErrorBoundary>
                 }
               />
