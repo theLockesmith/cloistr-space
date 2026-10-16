@@ -5,13 +5,15 @@ import {
   RecoverContactsCard,
   ConflictResolutionPanel,
 } from '@/components/contacts';
-import { useRecentFiles, useTasks, useCalendar, useMentions } from '@/services/activity';
+import { useRecentFiles, useCalendar, useMentions } from '@/services/activity';
+import { useTaskCards } from '@/services/activity/useTaskCards';
+import type { TaskCard } from '@/services/activity/taskCards';
 import { useNdk } from '@/services/nostr';
 import { useAuthorProfiles } from '@/services/profile';
 import { getDrive } from '@/services/cloistr';
 import { config } from '@/config/environment';
 import { getFileType } from '@/types/activity';
-import type { FileMetadata, Task, CalendarEvent, Mention } from '@/types/activity';
+import type { FileMetadata, CalendarEvent, Mention } from '@/types/activity';
 import { FileUploadModal } from './FileUploadModal';
 import { CreateEventModal } from './CreateEventModal';
 
@@ -374,7 +376,7 @@ function FileActionsMenu({
 }
 
 function TasksWidget() {
-  const { items: tasks, isLoading, error, toggleTask } = useTasks({ limit: 5 });
+  const { items: cards, isLoading, error, refresh } = useTaskCards({ limit: 5 });
 
   return (
     <WidgetCard
@@ -390,13 +392,13 @@ function TasksWidget() {
       {isLoading ? (
         <WidgetSkeleton count={3} />
       ) : error ? (
-        <WidgetError message={error} />
-      ) : tasks.length === 0 ? (
-        <WidgetEmpty message="No tasks yet" />
+        <WidgetError message={error} onRetry={refresh} />
+      ) : cards.length === 0 ? (
+        <WidgetEmpty message="No open tasks assigned to you" />
       ) : (
         <div className="space-y-2">
-          {tasks.map((task) => (
-            <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.identifier)} />
+          {cards.map((card) => (
+            <TaskCardRow key={card.id} card={card} />
           ))}
         </div>
       )}
@@ -404,34 +406,23 @@ function TasksWidget() {
   );
 }
 
-function TaskRow({ task, onToggle }: { task: Task; onToggle: () => void }) {
+function TaskCardRow({ card }: { card: TaskCard }) {
+  const where = [card.boardName, card.columnName].filter(Boolean).join(' · ');
   return (
-    <div className="flex items-center gap-3 rounded-lg p-2 hover:bg-cloistr-light/5">
-      <input
-        type="checkbox"
-        checked={task.completed}
-        onChange={onToggle}
-        className="h-4 w-4 rounded border-cloistr-light/20 bg-transparent text-cloistr-primary focus:ring-cloistr-primary"
-      />
-      <span
-        className={`flex-1 text-sm ${
-          task.completed ? 'text-cloistr-light/40 line-through' : 'text-cloistr-light'
-        }`}
-      >
-        {task.title}
+    <a
+      href={card.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-3 rounded-lg p-2 hover:bg-cloistr-light/5"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-cloistr-light">{card.title}</span>
+        {where && <span className="block truncate text-xs text-cloistr-light/50">{where}</span>}
       </span>
-      <span
-        className={`rounded px-2 py-0.5 text-xs ${
-          task.priority === 'high'
-            ? 'bg-cloistr-error/10 text-cloistr-error'
-            : task.priority === 'low'
-              ? 'bg-cloistr-text-dim/10 text-cloistr-text-dim'
-              : 'bg-cloistr-warning/10 text-cloistr-warning'
-        }`}
-      >
-        {task.priority}
-      </span>
-    </div>
+      {card.dueDate && (
+        <span className="rounded bg-cloistr-warning/10 px-2 py-0.5 text-xs text-cloistr-warning">{card.dueDate}</span>
+      )}
+    </a>
   );
 }
 
