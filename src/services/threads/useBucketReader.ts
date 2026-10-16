@@ -20,6 +20,7 @@ import { type ThreadKeyStore } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
 import { saveThreadKey, type StorageAdapter } from './threadKeyPersistence';
 import { signerHandoffBuckets } from './signerEcdh';
+import { loadDismissed, saveDismissed } from './pendingKeyOffers';
 import {
   getWindowId,
   computeThreadBucket,
@@ -136,6 +137,9 @@ export function useBucketReader(
     new Map<string, { handoff: PendingHandoff; ownerPk: string; encryptFn: (pk: string, pt: string) => Promise<string> }>(),
   );
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
+  // Who the pending offers were addressed to. A restart for the window timer
+  // or a new key keeps them on screen; only a different reader drops them.
+  const pendingForRef = useRef<{ recipientSecret: Uint8Array | null; signer: unknown } | null>(null);
 
   const canSubscribe = Boolean(subscribe && isConnected);
   const granterKey = granterPubkeys.slice().sort().join(',');
@@ -146,10 +150,14 @@ export function useBucketReader(
     subRef.current?.unsubscribe();
     messagesRef.current.clear();
     handoffsRef.current.clear();
-    pendingRef.current.clear();
+    const prevReader = pendingForRef.current;
+    if (!prevReader || prevReader.recipientSecret !== recipientSecret || prevReader.signer !== signer) {
+      pendingRef.current.clear();
+      setPendingHandoffs([]);
+    }
+    pendingForRef.current = { recipientSecret, signer };
     setMessages([]);
     setHandoffs([]);
-    setPendingHandoffs([]);
     setIsFetching(true);
     setError(null);
 
@@ -181,7 +189,7 @@ export function useBucketReader(
         setHandoffs(Array.from(handoffsRef.current.values()));
         return;
       }
-      if (loadDismissed().has(handoff.wrapId)) return;
+      if (loadDismissed().has(handoff.wrapId) || pendingRef.current.has(handoff.wrapId)) return;
       pendingRef.current.set(handoff.wrapId, { handoff: { ...handoff, threadPubkey }, ownerPk, encryptFn });
       setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     };
@@ -362,29 +370,6 @@ export function useBucketReader(
     refresh,
     debug,
   };
-}
-
-const DISMISSED_KEY = 'cloistr.threads.dismissedHandoffs';
-
-/** Wrap ids of hand-offs the user refused on this device. */
-function loadDismissed(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DISMISSED_KEY);
-    const ids: unknown = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveDismissed(wrapId: string): void {
-  try {
-    const ids = loadDismissed();
-    ids.add(wrapId);
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(ids)));
-  } catch {
-    // Storage unavailable: the offer comes back on the next load.
-  }
 }
 
 // Re-export for the module; getPublicKey is used inside the hook

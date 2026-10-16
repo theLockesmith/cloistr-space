@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { generateSecretKey, getPublicKey, nip44, utils as ntUtils } from 'nostr-tools';
 import {
   useThreadKeyStore,
@@ -15,6 +15,7 @@ import {
   _resetGlobalStore,
 } from './useThreadKeyStore';
 import { KEY_WRAP_KIND } from './threadKeyStore';
+import { usePendingKeyWraps, acceptKeyWrap, dismissKeyWrap, clearKeyWraps } from './pendingKeyOffers';
 
 const { bytesToHex } = ntUtils;
 
@@ -23,6 +24,16 @@ const RECIPIENT_SK = generateSecretKey();
 const RECIPIENT_PK = getPublicKey(RECIPIENT_SK);
 
 // ---- Mocks ----
+
+/** Fleet granters: the only key-wrap senders taken without asking. */
+const fleet = vi.hoisted(() => ({ granters: [] as string[] }));
+vi.mock('@/config/environment', () => ({
+  config: {
+    get threadGranters() {
+      return fleet.granters;
+    },
+  },
+}));
 
 const mockFetchEvents = vi.fn();
 const mockSigner = {
@@ -78,6 +89,9 @@ function makeKeyWrapEvent(
 ) {
   const threadPk = getPublicKey(threadSk);
   const granterPk = getPublicKey(granterSk);
+  // These tests exercise the loader with a trusted sender; a stranger's
+  // key-wrap is held instead (see the security tests at the end).
+  if (!fleet.granters.includes(granterPk)) fleet.granters.push(granterPk);
 
   // The content is the thread secret key hex, NIP-44 encrypted to the recipient
   const conversationKey = nip44.v2.utils.getConversationKey(granterSk, recipientPk);
@@ -311,9 +325,12 @@ describe('useThreadKeyLoader', () => {
       ],
     };
 
+    // From a fleet granter, so its key is taken without a prompt.
+    const fleetGranterPk = getPublicKey(generateSecretKey());
+    fleet.granters.push(fleetGranterPk);
     const goodEvent = {
       id: 'good-wrap',
-      pubkey: getPublicKey(generateSecretKey()),
+      pubkey: fleetGranterPk,
       kind: KEY_WRAP_KIND,
       content: 'valid-ciphertext',
       created_at: 1,
@@ -340,5 +357,75 @@ describe('useThreadKeyLoader', () => {
 
     // One key loaded despite the first failing
     expect(result.current.keyCount).toBe(1);
+  });
+});
+
+/**
+ * Security (2026-10-16): anyone can publish a key-wrap tagged to any pubkey.
+ * NIP-44 is symmetric, so a stranger who knows only the victim's pubkey can
+ * encrypt a thread key the victim's signer will open. The loader used to
+ * import it silently; now only the fleet granters' key-wraps are taken as
+ * they come, and anyone else's waits for the user.
+ */
+describe('useThreadKeyLoader with a key-wrap from a stranger', () => {
+  /** Built from public information only: the victim's pubkey. */
+  function strangerKeyWrap(threadSk: Uint8Array) {
+    const strangerSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    return {
+      id: 'stranger-' + threadPk.slice(0, 8),
+      pubkey: getPublicKey(strangerSk),
+      kind: KEY_WRAP_KIND,
+      content: nip44.v2.encrypt(bytesToHex(threadSk), nip44.v2.utils.getConversationKey(strangerSk, RECIPIENT_PK)),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['d', threadPk], ['p', RECIPIENT_PK]],
+    };
+  }
+
+  beforeEach(() => {
+    clearKeyWraps();
+    try { localStorage.clear(); } catch { /* none */ }
+    mockSigner.nip44Decrypt.mockImplementation(async (senderPubkey: string, ciphertext: string) =>
+      nip44.v2.decrypt(ciphertext, nip44.v2.utils.getConversationKey(RECIPIENT_SK, senderPubkey)),
+    );
+  });
+
+  it('holds the key for the user instead of importing it', async () => {
+    const threadSk = generateSecretKey();
+    mockFetchEvents.mockResolvedValue(new Set([strangerKeyWrap(threadSk)]));
+
+    const { result } = renderHook(() => ({ loader: useThreadKeyLoader(), offers: usePendingKeyWraps(), store: useThreadKeyStore() }));
+    await waitFor(() => expect(result.current.loader.loaded).toBe(true));
+
+    expect(result.current.store.has(getPublicKey(threadSk))).toBe(false);
+    expect(result.current.offers).toHaveLength(1);
+    expect(result.current.offers[0].threadPubkey).toBe(getPublicKey(threadSk));
+  });
+
+  it('imports it only when the user accepts', async () => {
+    const threadSk = generateSecretKey();
+    mockFetchEvents.mockResolvedValue(new Set([strangerKeyWrap(threadSk)]));
+    const { result } = renderHook(() => ({ loader: useThreadKeyLoader(), offers: usePendingKeyWraps(), store: useThreadKeyStore() }));
+    await waitFor(() => expect(result.current.offers).toHaveLength(1));
+
+    act(() => {
+      acceptKeyWrap(result.current.offers[0].eventId, result.current.store, RECIPIENT_PK, undefined);
+    });
+
+    expect(result.current.store.has(getPublicKey(threadSk))).toBe(true);
+    expect(result.current.offers).toHaveLength(0);
+  });
+
+  it('a dismissed key-wrap is not offered again', async () => {
+    const threadSk = generateSecretKey();
+    const wrap = strangerKeyWrap(threadSk);
+    dismissKeyWrap(wrap.id);
+    mockFetchEvents.mockResolvedValue(new Set([wrap]));
+
+    const { result } = renderHook(() => ({ loader: useThreadKeyLoader(), offers: usePendingKeyWraps(), store: useThreadKeyStore() }));
+    await waitFor(() => expect(result.current.loader.loaded).toBe(true));
+
+    expect(result.current.offers).toHaveLength(0);
+    expect(result.current.store.has(getPublicKey(threadSk))).toBe(false);
   });
 });

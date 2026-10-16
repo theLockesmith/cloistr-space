@@ -14,6 +14,8 @@ import { useNdk } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useAuthStore } from '@/stores/authStore';
 import { ThreadKeyStore, KEY_WRAP_KIND } from './threadKeyStore';
+import { offerKeyWrap, clearKeyWraps } from './pendingKeyOffers';
+import { config } from '@/config/environment';
 import {
   saveThreadKey,
   loadThreadKeys,
@@ -141,6 +143,13 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
             const secretKeyHex = await decrypt(event.pubkey, event.content);
 
             if (secretKeyHex && /^[0-9a-f]{64}$/i.test(secretKeyHex)) {
+              // Anyone can publish a key-wrap tagged to this user. Only the
+              // fleet granters' wraps are taken as they come; any other
+              // sender's key waits for the user (see pendingKeyOffers).
+              if (!config.threadGranters.includes(event.pubkey)) {
+                offerKeyWrap({ eventId: event.id, threadPubkey, secretHex: secretKeyHex, senderPubkey: event.pubkey });
+                continue;
+              }
               store.importHex(threadPubkey, secretKeyHex);
               if (!cancelled) setKeyCount(store.size);
 
@@ -171,6 +180,7 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
   useEffect(() => {
     if (!pubkey && prevPubkeyRef.current) {
       store.clear();
+      clearKeyWraps();
       const storage = getStorageAdapter();
       if (storage) {
         clearThreadKeys(prevPubkeyRef.current, storage);

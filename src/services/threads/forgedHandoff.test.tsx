@@ -118,6 +118,20 @@ describe.each([
     expect(result.current.pendingHandoffs).toHaveLength(0);
   });
 
+  it('stays on screen when the reader refreshes', async () => {
+    const secret = setup();
+    const { result } = renderHook(() => useBucketReader(secret, [trustedGranterPk]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+
+    // The relay does not send it again, as when the offer has scrolled out of
+    // the window the restarted subscription asks for.
+    relay.events = [];
+    act(() => result.current.refresh());
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(result.current.pendingHandoffs).toHaveLength(1);
+  });
+
   it('once dismissed, is not offered again', async () => {
     const secret = setup();
     const first = renderHook(() => useBucketReader(secret, [trustedGranterPk]));

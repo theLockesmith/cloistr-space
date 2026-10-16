@@ -39,8 +39,21 @@ vi.mock('@/services/threads', () => ({
   }),
   useThreadKeyStore: () => new Map(),
   useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
-  useBucketReader: () => ({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn() }),
+  useBucketReader: () => ({
+    messages: [],
+    handoffs: [],
+    pendingHandoffs: [],
+    acceptHandoff: vi.fn(),
+    dismissHandoff: vi.fn(),
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
   useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: false }),
+}));
+
+vi.mock('@/components/auth/AuthProvider', () => ({
+  useAuth: () => ({ signer: null }),
 }));
 
 vi.mock('@/stores/authStore', () => ({

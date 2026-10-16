@@ -8,8 +8,17 @@ const heldStore = { current: new Map<string, Uint8Array>() };
 vi.mock('@/services/threads', () => ({
   useThreadKeyStore: () => heldStore.current,
   useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
-  useBucketReader: (...args: unknown[]) => mockUseBucketReader(...args),
+  useBucketReader: (...args: unknown[]) => ({
+    pendingHandoffs: [],
+    acceptHandoff: vi.fn(),
+    dismissHandoff: vi.fn(),
+    ...mockUseBucketReader(...args),
+  }),
   useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: true }),
+}));
+
+vi.mock('@/components/auth/AuthProvider', () => ({
+  useAuth: () => ({ signer: null }),
 }));
 
 vi.mock('@/services/profile', () => ({
@@ -260,5 +269,26 @@ describe('SealedMessages hand-off prompt', () => {
     expect(acceptHandoff).toHaveBeenCalledWith('w9');
     getByRole('button', { name: 'Dismiss' }).click();
     expect(dismissHandoff).toHaveBeenCalledWith('w9');
+  });
+});
+
+describe('SealedMessages key-wrap prompt', () => {
+  it("shows a stranger's key-wrap as an offer from a sender Space does not trust", async () => {
+    const { generateSecretKey, getPublicKey } = await import('nostr-tools');
+    const { bytesToHex } = await import('nostr-tools/utils');
+    const { offerKeyWrap, clearKeyWraps } = await import('@/services/threads/pendingKeyOffers');
+    const threadSk = generateSecretKey();
+    clearKeyWraps();
+    offerKeyWrap({
+      eventId: 'kw1',
+      threadPubkey: getPublicKey(threadSk),
+      secretHex: bytesToHex(threadSk),
+      senderPubkey: getPublicKey(generateSecretKey()),
+    });
+
+    const { getByText, getByRole } = render(<SealedMessages />);
+    expect(getByText(/not a sender Space knows to trust/)).toBeTruthy();
+    expect(getByRole('button', { name: 'Accept key' })).toBeTruthy();
+    clearKeyWraps();
   });
 });

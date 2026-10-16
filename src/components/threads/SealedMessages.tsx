@@ -16,11 +16,16 @@ import {
   useBucketReader,
   useBucketWriter,
   type UnwrappedMessage,
-  type PendingHandoff,
 } from '@/services/threads';
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
 import { parseFleetEnvelope } from '@/services/threads/fleetEnvelope';
+import { useAuth } from '@/components/auth/AuthProvider';
+import {
+  usePendingKeyWraps,
+  acceptKeyWrap,
+  dismissKeyWrap,
+} from '@/services/threads/pendingKeyOffers';
 
 interface SealedMessagesProps {
   groupId?: string;
@@ -59,6 +64,8 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
   // message or hand-off, which is exactly when the store changes.
 
   const keyStore = useThreadKeyStore();
+  const { signer } = useAuth();
+  const pendingKeyWraps = usePendingKeyWraps();
 
   const heldKeys = Math.max(keyCount, keyStore.size);
 
@@ -114,12 +121,24 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
       )}
 
       <div className="flex-1 overflow-auto">
-        {pendingHandoffs?.map((offer) => (
-          <HandoffPrompt
+        {pendingHandoffs.map((offer) => (
+          <KeyOfferPrompt
             key={offer.wrapId}
-            offer={offer}
+            senderPubkey={offer.granterPubkey}
+            senderSigned={false}
             onAccept={() => acceptHandoff(offer.wrapId)}
             onDismiss={() => dismissHandoff(offer.wrapId)}
+          />
+        ))}
+        {pendingKeyWraps.map((offer) => (
+          <KeyOfferPrompt
+            key={offer.eventId}
+            senderPubkey={offer.senderPubkey}
+            senderSigned
+            onAccept={() => {
+              if (acceptKeyWrap(offer.eventId, keyStore, pubkey, signer?.nip44Encrypt?.bind(signer))) refresh();
+            }}
+            onDismiss={() => dismissKeyWrap(offer.eventId)}
           />
         ))}
 
@@ -194,14 +213,34 @@ function UnverifiedSender({ pubkeyHex }: { pubkeyHex: string }) {
   );
 }
 
-function HandoffPrompt({ offer, onAccept, onDismiss }: { offer: PendingHandoff; onAccept: () => void; onDismiss: () => void }) {
+/**
+ * An offered thread key, held until the user decides. A hand-off cannot say
+ * who really sent it; a key-wrap can, but its sender is not one Space was
+ * told to trust. Either way, accepting lets the sender put messages in front
+ * of the user.
+ */
+function KeyOfferPrompt({
+  senderPubkey,
+  senderSigned,
+  onAccept,
+  onDismiss,
+}: {
+  senderPubkey: string;
+  senderSigned: boolean;
+  onAccept: () => void;
+  onDismiss: () => void;
+}) {
+  const sender = <span className="font-mono">{shortNpub(senderPubkey)}</span>;
   return (
     <div role="alert" className="m-4 rounded border border-cloistr-warning/40 bg-cloistr-warning/10 p-3 text-sm text-cloistr-light">
       <p className="font-medium">Someone offered you a key to a sealed thread</p>
       <p className="mt-1 text-xs text-cloistr-light/70">
-        It says it comes from <span className="font-mono">{shortNpub(offer.granterPubkey)}</span>, but Space cannot
-        verify who sent it. Accept only if you were expecting it: accepting lets whoever sent it put messages in front
-        of you.
+        {senderSigned ? (
+          <>It was sent by {sender}, who is not a sender Space knows to trust.</>
+        ) : (
+          <>It says it comes from {sender}, but Space cannot verify who sent it.</>
+        )}{' '}
+        Accept only if you were expecting it: accepting lets whoever sent it put messages in front of you.
       </p>
       <div className="mt-2 flex gap-2">
         <button onClick={onAccept} className="rounded bg-cloistr-primary px-3 py-1 text-xs text-cloistr-dark">

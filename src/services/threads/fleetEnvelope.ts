@@ -8,6 +8,10 @@
  */
 export interface FleetEnvelope {
   body: string;
+  /**
+   * The sending role the message CLAIMS. Written by whoever holds the thread
+   * key and signed by nobody: never display it as the sender.
+   */
   from: string | null;
   /** The thread's name, carried inside the envelope since 2026-09-28. Older messages lack it. */
   thread: string | null;
