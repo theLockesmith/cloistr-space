@@ -21,24 +21,47 @@ vi.mock('@/services/cloistr/drive', () => ({
   }),
 }));
 vi.mock('@/config/environment', () => ({ config: { blossomApiUrl: 'https://files.example' } }));
+// Mutable per test: the signed-in key, the signer, and what relays answer.
+const env = vi.hoisted(() => ({
+  pubkey: 'ab'.repeat(32),
+  signerOn: true,
+  // Relay events per author; an author missing here gets no answer at all.
+  relayEvents: { ['ab'.repeat(32)]: [] } as Record<string, unknown[]>,
+}));
 vi.mock('@/services/nostr', () => ({
   useNdk: () => ({ subscribe: stableSubscribe, isConnected: true }),
-  useHeadlessAdapters: () => ({ signer, relay: null }),
-  subscribeStream: (_s: unknown, _f: unknown, handlers: { onEose?: (s: unknown) => void }) => {
-    queueMicrotask(() => handlers.onEose?.({ eosesSeen: new Set(['wss://r']) }));
+  useHeadlessAdapters: () => ({ signer: env.signerOn ? signer : null, relay: null }),
+  subscribeStream: (
+    _s: unknown,
+    filters: { authors: string[] }[],
+    handlers: { onEvent?: (e: unknown, r: unknown) => void; onEose?: (s: unknown) => void }
+  ) => {
+    const events = env.relayEvents[filters[0].authors[0]];
+    if (events) {
+      queueMicrotask(() => {
+        for (const e of events) handlers.onEvent?.(e, { url: 'wss://r' });
+        handlers.onEose?.({ eosesSeen: new Set(['wss://r']) });
+      });
+    }
     return { stop: vi.fn() };
   },
 }));
 const stableSubscribe = vi.fn();
-vi.mock('@/stores/authStore', () => ({ useAuthStore: () => ({ pubkey: ME, isAuthenticated: true }) }));
+vi.mock('@/stores/authStore', () => ({ useAuthStore: () => ({ pubkey: env.pubkey, isAuthenticated: true }) }));
 
 const { useRecentFiles } = await import('./useRecentFiles');
 const { listBlossomFiles, clearBlossomSession, mergeFiles } = await import('./fileSources');
+const { SIGNER_NOT_READY } = await import('./useRecentFiles');
+const { WIDGET_NO_ANSWER_MS } = await import('./widgetReads');
+const OTHER = 'cd'.repeat(32);
 
 const driveFile = { sha256: 'd1'.repeat(32), name: 'report.pdf', size: 10, mimeType: 'application/pdf', folderId: '', createdAt: 200 };
 const blob = { sha256: 'b1'.repeat(32), url: 'https://files.example/' + 'b1'.repeat(32) + '.png', size: 5, type: 'image/png', uploaded: 300 };
 
 beforeEach(() => {
+  env.pubkey = ME;
+  env.signerOn = true;
+  env.relayEvents = { [ME]: [] };
   clearBlossomSession();
   driveFiles.mockReset().mockResolvedValue([]);
   signEvent.mockReset().mockImplementation(async (e: object) => ({ ...e, id: 'id', sig: 'sig' }));
@@ -116,5 +139,82 @@ describe('useRecentFiles with Drive and Blossom', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.items).toEqual([]);
     expect(result.current.error).toBeNull();
+  });
+});
+
+describe('useRecentFiles never shows one key\'s files to another', () => {
+  it('a key switch drops the previous key\'s Drive and Blossom files at once', async () => {
+    driveFiles.mockResolvedValue([driveFile]);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [blob] });
+    const { result, rerender } = renderHook(() => useRecentFiles());
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+
+    // The new key's reads never answer, so anything shown now is the old key's.
+    driveFiles.mockReturnValue(new Promise(() => {}));
+    fetchMock.mockReturnValue(new Promise(() => {}));
+    env.pubkey = OTHER;
+    rerender();
+    expect(result.current.items).toEqual([]);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('a key switch drops the previous key\'s relay files at once', async () => {
+    env.relayEvents = {
+      [ME]: [{ id: 'e1', pubkey: ME, created_at: 100, tags: [['url', 'https://x/a.pdf'], ['x', 'h1']] }],
+    };
+    const { result, rerender } = renderHook(() => useRecentFiles({ includeServices: false }));
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    env.pubkey = OTHER; // no relay answers for OTHER
+    rerender();
+    // Not "No files yet" either: OTHER's read has not answered.
+    expect(result.current.items).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('a key switch then settles on the new key\'s own answer', async () => {
+    env.relayEvents = {
+      [ME]: [{ id: 'e1', pubkey: ME, created_at: 100, tags: [['url', 'https://x/a.pdf'], ['x', 'h1']] }],
+      [OTHER]: [],
+    };
+    const { result, rerender } = renderHook(() => useRecentFiles({ includeServices: false }));
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    env.pubkey = OTHER;
+    rerender();
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+});
+
+describe('useRecentFiles with no signer', () => {
+  it('is loading at first, then an error, never an endless skeleton', async () => {
+    vi.useFakeTimers();
+    try {
+      env.signerOn = false;
+      const { result } = renderHook(() => useRecentFiles());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.error).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(WIDGET_NO_ANSWER_MS);
+      });
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBe(SIGNER_NOT_READY);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

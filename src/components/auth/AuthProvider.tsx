@@ -19,6 +19,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
 import { useContactsStore } from '@/stores/contactsStore';
 import { clearAll as clearCache } from '@/services/cache';
+import { clearBlossomSession } from '@/services/activity/fileSources';
+import { clearTaskCardsCache } from '@/services/activity/useTaskCards';
 
 interface AuthContextValue {
   pubkey: string | null;
@@ -422,6 +424,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSharedSession();
       // Clear IndexedDB cache so the next user does not inherit this one's feed.
       void clearCache();
+      // And the Activity widgets' kept reads: the Blossom file list and the
+      // Tasks cards. Keyed by pubkey, but a signed-out device keeps neither.
+      clearBlossomSession();
+      clearTaskCardsCache();
       storeLogout();
     }
   }, [signer, storeLogout]);
