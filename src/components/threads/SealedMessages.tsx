@@ -238,7 +238,13 @@ function KeyOfferPrompt({
         {senderSigned ? (
           <>It was sent by {sender}, who is not a sender Space knows to trust.</>
         ) : (
-          <>It says it comes from {sender}, but Space cannot verify who sent it.</>
+          <>
+            The offer claims to come from {sender}{' '}
+            <span className="rounded border border-cloistr-warning/40 px-1 text-[10px] uppercase text-cloistr-warning">
+              claimed, unverified
+            </span>
+            . Anyone can claim any sender here, and Space cannot check it.
+          </>
         )}{' '}
         Accept only if you were expecting it: accepting lets whoever sent it put messages in front of you.
       </p>
