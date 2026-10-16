@@ -7,6 +7,7 @@ import NDK, {
   NDKEvent,
   NDKPublishError,
   NDKRelaySet,
+  calculateRelaySetFromEvent,
   NDKSigner,
   NDKUser,
   type NDKEncryptionScheme,
@@ -579,17 +580,26 @@ export class NdkService {
   }
 
   /**
-   * Ask each of the user's own relays separately, for a decision that is only
-   * safe when EVERY one of them answered. See probeRelays.ts. No configured
-   * relays gives no answers, which callers must treat as "can't tell".
+   * Ask each relay in `urls` separately, for a decision that is only safe when
+   * EVERY one of them answered. See probeRelays.ts.
    */
-  probeOwnRelays(filter: NDKFilter, timeoutMs?: number): Promise<RelayAnswer[]> {
+  probeRelays(urls: string[], filter: NDKFilter, timeoutMs?: number): Promise<RelayAnswer[]> {
     const subscribe = this.ndk.subscribe.bind(this.ndk) as unknown as ProbeSubscribe;
-    return Promise.all(
-      Array.from(this.configuredRelays).map((url) =>
-        probeRelay(subscribe, url, filter as Record<string, unknown>, timeoutMs),
-      ),
-    );
+    return Promise.all(urls.map((url) => probeRelay(subscribe, url, filter as Record<string, unknown>, timeoutMs)));
+  }
+
+  /**
+   * Where NDK would publish this event: the author's outbox relays, relays
+   * for its tagged pubkeys and every connected relay (calculateRelaySetFromEvent),
+   * plus the user's own configured relays. For a write that must check every
+   * relay it reaches; pair with pinnedRelays.ts so the publish goes only there.
+   */
+  async publishRelayUrls(template: { kind: number; tags: string[][]; content: string; pubkey: string }): Promise<string[]> {
+    const draft = new NDKEvent(this.ndk, { ...template, created_at: Math.floor(Date.now() / 1000) });
+    const set = await calculateRelaySetFromEvent(this.ndk, draft);
+    const urls = new Set(Array.from(this.configuredRelays));
+    for (const relay of set.relays) urls.add(NdkService.normalizeUrl(relay.url));
+    return Array.from(urls);
   }
 
   /**

@@ -50,8 +50,6 @@ interface NdkContextValue {
    * services/nostr/relayRouting.ts for the per-kind routing manifest.
    */
   fetchFromOwnRelays: NdkService['fetchFromOwnRelays'] | null;
-  /** Ask each own relay separately; see services/nostr/probeRelays.ts. */
-  probeOwnRelays: NdkService['probeOwnRelays'] | null;
   /** Create a new event */
   createEvent: () => NDKEvent | null;
   /** Publish an event */
@@ -255,17 +253,6 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
     []
   );
 
-  const probeOwnRelays = useCallback<NdkService['probeOwnRelays']>(
-    async (filter, timeoutMs) => {
-      const service = serviceRef.current;
-      if (!service) {
-        throw new Error('NDK not initialized');
-      }
-      return service.probeOwnRelays(filter, timeoutMs);
-    },
-    []
-  );
-
   const createEvent = useCallback(() => {
     const service = serviceRef.current;
     if (!service) {
@@ -295,11 +282,10 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
       subscribe: service ? subscribe : null,
       fetchEvents: service ? fetchEvents : null,
       fetchFromOwnRelays: service ? fetchFromOwnRelays : null,
-      probeOwnRelays: service ? probeOwnRelays : null,
       createEvent,
       publish: service ? publish : null,
     }),
-    [service, isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, fetchFromOwnRelays, probeOwnRelays, createEvent, publish]
+    [service, isConnected, isConnecting, relayStatuses, reconnect, subscribe, fetchEvents, fetchFromOwnRelays, createEvent, publish]
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;
