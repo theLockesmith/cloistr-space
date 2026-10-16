@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import type { NDKEvent, NDKFilter, NDKRelaySet } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import {
@@ -52,8 +53,57 @@ function newestOf<T extends { created_at?: number }>(events: Iterable<T>): T | n
   return newest;
 }
 
+/** How long the user's own write relays get to answer a profile read. */
+export const OWN_RELAY_PROFILE_TIMEOUT_MS = 8000;
+
+type SubscribeLike = (
+  filters: NDKFilter[],
+  opts: { closeOnEose: boolean; groupable: boolean; relaySet: NDKRelaySet },
+  handlers: { onEvent?: (e: NDKEvent) => void; onEose?: () => void }
+) => { eosesSeen?: Set<unknown>; stop: () => void };
+
+/**
+ * Read kind:0 from the user's own write relays (sweep #6).
+ *
+ * found: one of them holds it. absent: at least one answered (EOSE) and none
+ * holds it. unreadable: none answered within OWN_RELAY_PROFILE_TIMEOUT_MS,
+ * so we do not know, and a save must not publish over it.
+ */
+function readOwnRelayProfile(
+  subscribe: SubscribeLike,
+  relaySet: NDKRelaySet,
+  pubkey: string
+): Promise<{ status: 'found'; content: string } | { status: 'absent' } | { status: 'unreadable' }> {
+  return new Promise((resolve) => {
+    let newest: NDKEvent | null = null;
+    let done = false;
+    let sub: ReturnType<SubscribeLike> | undefined;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sub?.stop();
+      if (newest) resolve({ status: 'found', content: newest.content ?? '' });
+      else if ((sub?.eosesSeen?.size ?? 0) > 0) resolve({ status: 'absent' });
+      else resolve({ status: 'unreadable' });
+    };
+    const timer = setTimeout(finish, OWN_RELAY_PROFILE_TIMEOUT_MS);
+    sub = subscribe(
+      [{ kinds: [METADATA_KIND], authors: [pubkey], limit: 5 }],
+      { closeOnEose: true, groupable: false, relaySet },
+      {
+        onEvent: (e) => {
+          if (e.pubkey !== pubkey) return;
+          if (!newest || (e.created_at ?? 0) > (newest.created_at ?? 0)) newest = e;
+        },
+        onEose: () => queueMicrotask(finish),
+      }
+    );
+  });
+}
+
 export function useProfile(): UseProfileReturn {
-  const { fetchEvents, createEvent, publish, isConnected, service } = useNdk();
+  const { fetchEvents, createEvent, publish, isConnected, service, subscribe } = useNdk();
   const pubkey = useAuthStore((s) => s.pubkey);
 
   const [profile, setProfile] = useState<ProfileFields>({});
@@ -92,24 +142,38 @@ export function useProfile(): UseProfileReturn {
           fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
         ])
       )
-      .then(([metadataEvents, relayEvents]) => {
-        const newestMetadata = newestOf(metadataEvents);
+      .then(async ([metadataEvents, relayEvents]) => {
+        const newestRelayList = newestOf(relayEvents);
+        const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
+        setRelays(relayList);
 
+        const newestMetadata = newestOf(metadataEvents);
         if (newestMetadata) {
           const content = newestMetadata.content ?? '';
           setExisting({ status: 'found', content });
           setProfile(parseProfileContent(content));
-        } else {
-          // A relay answered and had nothing. Creating a profile from scratch is
-          // safe -- there is nothing to overwrite. Treating this as unreadable
-          // would mean a user with no kind:0 could never make one, which is the
-          // bug cloistr-stash had to fix in this same code path.
-          setExisting({ status: 'absent' });
-          setProfile({});
+          return;
         }
 
-        const newestRelayList = newestOf(relayEvents);
-        setRelays(newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : []);
+        // Nothing on Space's relays. That is only "absent" if the user's own
+        // write relays agree: a profile kept there alone used to read as
+        // absent here, and the next save replaced it with the form's fields.
+        const writeUrls = relayList.filter((r) => r.write).map((r) => r.url);
+        const relaySet = writeUrls.length && service ? service.getRelaySetFor(writeUrls) : undefined;
+        const own =
+          relaySet && subscribe
+            ? await readOwnRelayProfile(subscribe as unknown as SubscribeLike, relaySet, pubkey)
+            : // No relay list: a relay answered and had nothing. Creating a
+              // profile from scratch is safe; treating this as unreadable would
+              // mean a user with no kind:0 could never make one, the bug
+              // cloistr-stash had to fix in this same code path.
+              ({ status: 'absent' } as const);
+
+        setExisting(own);
+        setProfile(own.status === 'found' ? parseProfileContent(own.content) : {});
+        if (own.status === 'unreadable') {
+          setError('Could not reach your own relays to read your profile.');
+        }
       })
       .catch((err) => {
         // We reached for it and failed. Explicitly NOT `absent`.
@@ -117,7 +181,7 @@ export function useProfile(): UseProfileReturn {
         setError(err instanceof Error ? err.message : 'Could not read your profile');
       })
       .finally(() => setIsLoading(false));
-  }, [fetchEvents, pubkey, isConnected]);
+  }, [fetchEvents, pubkey, isConnected, service, subscribe]);
 
   useEffect(() => {
     void load();
