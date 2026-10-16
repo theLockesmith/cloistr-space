@@ -21,13 +21,13 @@ const W = 'wss://mine.example/';
 
 const W2 = 'wss://second.example/';
 
-type Behaviour = 'holds' | 'empty' | 'silent';
+type Behaviour = 'holds' | 'empty' | 'silent' | 'eoseWithoutRelay';
 
 const env = vi.hoisted(() => ({
   /** Behaviour of the first write relay; kept as `mode` for the original tests. */
   mode: 'holds' as 'holds' | 'empty' | 'silent',
   /** Extra write relays and how each behaves. */
-  extra: {} as Record<string, { behaviour: 'holds' | 'empty' | 'silent'; profile?: unknown; delayMs?: number }>,
+  extra: {} as Record<string, { behaviour: Behaviour; profile?: unknown; delayMs?: number }>,
   /** A kind:0 Space's own pool returns, if any. */
   poolProfile: null as unknown,
   relayList: true,
@@ -73,7 +73,10 @@ vi.mock('@/services/nostr', () => {
       const sub = { eosesSeen: new Set<unknown>(), stop: vi.fn() };
       const url = urls[0];
       const cfg = url === W ? { behaviour: env.mode as Behaviour, profile: ownProfile, delayMs: 0 } : env.extra[url];
-      if (cfg && cfg.behaviour !== 'silent') {
+      if (cfg && cfg.behaviour === 'eoseWithoutRelay') {
+        // NDK's own timer ends the subscription; the relay itself never sent EOSE.
+        setTimeout(() => handlers.onEose?.(), cfg.delayMs ?? 0);
+      } else if (cfg && cfg.behaviour !== 'silent') {
         setTimeout(() => {
           if (cfg.behaviour === 'holds') handlers.onEvent?.(cfg.profile ?? ownProfile);
           sub.eosesSeen.add({ url });
@@ -221,5 +224,16 @@ describe('several write relays (review of !228, and the ruling on found)', () =>
     env.extra = { [W2]: { behaviour: 'empty', delayMs: 20 } };
     const { result } = await loaded();
     expect(result.current.existing?.status).toBe('absent');
+  });
+
+  it('an EOSE that NDK fires without the relay having answered is silence, not "absent"', async () => {
+    env.mode = 'empty';
+    env.extra = { [W2]: { behaviour: 'eoseWithoutRelay' } };
+    const { result } = await loaded();
+    expect(result.current.existing?.status).toBe('unreadable');
+    await act(async () => {
+      await result.current.saveProfile({ about: 'hello' }).catch(() => undefined);
+    });
+    expect(env.published).toEqual([]);
   });
 });
