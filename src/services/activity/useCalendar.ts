@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import { trackAnswers, useUnreachable, withReachability, NO_RELAY_ANSWERED } from './widgetReads';
 import type { CalendarEvent, WidgetState } from '@/types/activity';
 import { CALENDAR_DATE_KIND, CALENDAR_TIME_KIND } from '@/types/activity';
 
@@ -124,6 +125,7 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
     autoSubscribe = true,
   } = options;
   const { subscribe, isConnected } = useNdk();
+  const unreachable = useUnreachable(isConnected);
   const { pubkey, isAuthenticated } = useAuthStore();
 
   const [state, setState] = useState<WidgetState<CalendarEvent>>({
@@ -156,7 +158,9 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
-      setState((prev) => ({ ...prev, isLoading: false }));
+      // Not connected is not "nothing here": stay loading, and useUnreachable
+      // turns it into an error if the connection does not come.
+      setState((prev) => ({ ...prev, isLoading: true }));
       return;
     }
 
@@ -188,7 +192,7 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
     }
 
     try {
-      const subscription = subscribeStream(subscribe, filters, {
+      const tracked = trackAnswers({
         onEvent: (event: NDKEvent) => {
         const calEvent = parseCalendarEvent(event);
         if (!calEvent) return;
@@ -213,13 +217,20 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
           lastUpdated: Date.now(),
         }));
       },
-      }, { closeOnEose: false });
+      }, () =>
+        // Nobody answered: an error, never "nothing here". Items that did arrive stay.
+        setState((prev) => ({ ...prev, isLoading: false, error: prev.items.length ? prev.error : NO_RELAY_ANSWERED }))
+      );
+      const subscription = subscribeStream(subscribe, filters, tracked.handlers, { closeOnEose: false });
 
 
 
 
       subscriptionRef.current = {
-        unsubscribe: () => subscription.stop(),
+        unsubscribe: () => {
+          tracked.cancel();
+          subscription.stop();
+        },
       };
     } catch (err) {
       setState({
@@ -305,7 +316,7 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
   }, [state.items]);
 
   return {
-    ...state,
+    ...withReachability(state, unreachable),
     refresh: startSubscription,
     todayEvents,
     upcomingEvents,

@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import { trackAnswers, useUnreachable, withReachability, NO_RELAY_ANSWERED } from './widgetReads';
 import type { FileMetadata, WidgetState } from '@/types/activity';
 
 /** NIP-94 File Metadata kind */
@@ -94,6 +95,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
 } {
   const { limit = MAX_FILES, groupId, autoSubscribe = true } = options;
   const { subscribe, isConnected } = useNdk();
+  const unreachable = useUnreachable(isConnected);
   const { pubkey, isAuthenticated } = useAuthStore();
 
   const [state, setState] = useState<WidgetState<FileMetadata>>({
@@ -108,7 +110,9 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
 
   const startSubscription = useCallback(() => {
     if (!subscribe || !isConnected || !pubkey) {
-      setState((prev) => ({ ...prev, isLoading: false }));
+      // Not connected is not "nothing here": stay loading, and useUnreachable
+      // turns it into an error if the connection does not come.
+      setState((prev) => ({ ...prev, isLoading: true }));
       return;
     }
 
@@ -131,7 +135,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     }
 
     try {
-      const subscription = subscribeStream(subscribe, [filter], {
+      const tracked = trackAnswers({
         onEvent: (event: NDKEvent) => {
         const file = parseFileEvent(event);
         if (!file) return;
@@ -157,13 +161,20 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
           lastUpdated: Date.now(),
         }));
       },
-      }, { closeOnEose: false });
+      }, () =>
+        // Nobody answered: an error, never "nothing here". Items that did arrive stay.
+        setState((prev) => ({ ...prev, isLoading: false, error: prev.items.length ? prev.error : NO_RELAY_ANSWERED }))
+      );
+      const subscription = subscribeStream(subscribe, [filter], tracked.handlers, { closeOnEose: false });
 
 
 
 
       subscriptionRef.current = {
-        unsubscribe: () => subscription.stop(),
+        unsubscribe: () => {
+          tracked.cancel();
+          subscription.stop();
+        },
       };
     } catch (err) {
       setState({
@@ -193,7 +204,7 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
   }, [autoSubscribe, isAuthenticated, isConnected, startSubscription]);
 
   return {
-    ...state,
+    ...withReachability(state, unreachable),
     refresh: startSubscription,
   };
 }
