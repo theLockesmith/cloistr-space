@@ -185,7 +185,7 @@ describe('SealedMessages key count', () => {
 });
 
 describe('SealedMessages renders the kit envelope', () => {
-  it('shows the message text and sending role, not raw JSON', () => {
+  it('shows the message text, and the sender as an unverified key rather than the name the message claims', () => {
     heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
     mockUseBucketReader.mockReturnValue({
       messages: [{
@@ -201,9 +201,12 @@ describe('SealedMessages renders the kit envelope', () => {
     });
     const { getByText, queryByText } = render(<SealedMessages />);
     expect(getByText('Fresh test from cloistr-orchestrator.')).toBeTruthy();
-    expect(getByText('cloistr-orchestrator')).toBeTruthy();
+    // `from` and the author field are written by whoever holds the thread
+    // key and nothing signs them, so neither may be shown as a trusted name.
+    expect(queryByText('cloistr-orchestrator')).toBeNull();
+    expect(getByText(/^npub1/)).toBeTruthy();
+    expect(getByText('unverified')).toBeTruthy();
     expect(queryByText(/arbiter-fleet-msg-v1/)).toBeNull();
-    expect(queryByText(/^3331f3b0/)).toBeNull();
   });
 });
 
@@ -227,5 +230,35 @@ describe('SealedMessages thread names', () => {
     }] });
     const { getByText } = render(<SealedMessages />);
     expect(getByText(/Thread c8e8289dec3e/)).toBeTruthy();
+  });
+});
+
+describe('SealedMessages hand-off prompt', () => {
+  it('asks before taking an offered key, and says the sender cannot be verified', async () => {
+    const acceptHandoff = vi.fn();
+    const dismissHandoff = vi.fn();
+    mockUseBucketReader.mockReturnValue({
+      messages: [],
+      handoffs: [],
+      pendingHandoffs: [{
+        wrapId: 'w9',
+        threadId: 'looks-official',
+        threadSecretHex: '11'.repeat(32),
+        granterPubkey: '3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4',
+        threadPubkey: 'bb'.repeat(32),
+      }],
+      acceptHandoff,
+      dismissHandoff,
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    const { getByText, getByRole } = render(<SealedMessages />);
+
+    expect(getByText(/cannot\s+verify who sent it/)).toBeTruthy();
+    getByRole('button', { name: 'Accept key' }).click();
+    expect(acceptHandoff).toHaveBeenCalledWith('w9');
+    getByRole('button', { name: 'Dismiss' }).click();
+    expect(dismissHandoff).toHaveBeenCalledWith('w9');
   });
 });

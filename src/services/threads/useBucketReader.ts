@@ -47,9 +47,29 @@ export interface BucketReaderDebug {
   signerError: string | null;
 }
 
+/**
+ * A thread key someone offered by hand-off, held back until the user accepts
+ * it. Nothing in a gift-wrapped hand-off authenticates the granter: the wrap
+ * is signed by a throwaway key and `g` is just a claim inside the payload, so
+ * anyone can send a key that claims to come from a trusted granter. Accepting
+ * one would put a stranger's thread in the user's mailbox under a trusted
+ * name. Until hand-offs are authenticated, the user decides.
+ */
+export interface PendingHandoff extends UnwrappedHandoff {
+  /** Public key of the offered thread key (hex). */
+  threadPubkey: string;
+}
+
 export interface BucketReaderReturn {
   messages: UnwrappedMessage[];
+  /** Hand-offs whose key the user holds (accepted now or earlier). */
   handoffs: UnwrappedHandoff[];
+  /** Hand-offs for keys the user does not hold, waiting for acceptance. */
+  pendingHandoffs: PendingHandoff[];
+  /** Take the offered key into the key store and start reading its thread. */
+  acceptHandoff: (wrapId: string) => void;
+  /** Refuse the offered key; it is not offered again on this device. */
+  dismissHandoff: (wrapId: string) => void;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
@@ -108,8 +128,13 @@ export function useBucketReader(
     signerError: null,
   });
 
+  const [pendingHandoffs, setPendingHandoffs] = useState<PendingHandoff[]>([]);
+
   const messagesRef = useRef(new Map<string, UnwrappedMessage>());
   const handoffsRef = useRef(new Map<string, UnwrappedHandoff>());
+  const pendingRef = useRef(
+    new Map<string, { handoff: PendingHandoff; ownerPk: string; encryptFn: (pk: string, pt: string) => Promise<string> }>(),
+  );
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   const canSubscribe = Boolean(subscribe && isConnected);
@@ -121,8 +146,10 @@ export function useBucketReader(
     subRef.current?.unsubscribe();
     messagesRef.current.clear();
     handoffsRef.current.clear();
+    pendingRef.current.clear();
     setMessages([]);
     setHandoffs([]);
+    setPendingHandoffs([]);
     setIsFetching(true);
     setError(null);
 
@@ -141,25 +168,22 @@ export function useBucketReader(
       }
     }
 
-    // Accept a thread key from a hand-off. A NEW key restarts the subscription,
-    // because the message buckets it was opened with did not include this
-    // thread's bucket; without the restart the key arrives and no message does.
+    // A hand-off for a key already held changes nothing and needs no prompt.
+    // Any other key waits in pendingHandoffs until the user accepts it.
     const acceptHandoff = (
       handoff: UnwrappedHandoff,
       ownerPk: string,
       encryptFn: (pk: string, pt: string) => Promise<string>,
     ) => {
-      const threadPk = getPublicKey(hexToBytes(handoff.threadSecretHex));
-      const isNew = !keyStore.get(threadPk);
-      keyStore.set(threadPk, hexToBytes(handoff.threadSecretHex));
-      handoffsRef.current.set(handoff.wrapId, handoff);
-      setHandoffs(Array.from(handoffsRef.current.values()));
-      let storage: StorageAdapter | null = null;
-      try { storage = localStorage; } catch { /* unavailable */ }
-      if (storage) {
-        saveThreadKey(threadPk, handoff.threadSecretHex, ownerPk, encryptFn, storage).catch(() => {});
+      const threadPubkey = getPublicKey(hexToBytes(handoff.threadSecretHex));
+      if (keyStore.get(threadPubkey)) {
+        handoffsRef.current.set(handoff.wrapId, handoff);
+        setHandoffs(Array.from(handoffsRef.current.values()));
+        return;
       }
-      if (isNew) setRefreshKey((k) => k + 1);
+      if (loadDismissed().has(handoff.wrapId)) return;
+      pendingRef.current.set(handoff.wrapId, { handoff: { ...handoff, threadPubkey }, ownerPk, encryptFn });
+      setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     };
 
     const realCurr = computeRealBuckets(keyStore, currWindow, recipientSecret, granterPubkeys);
@@ -301,14 +325,66 @@ export function useBucketReader(
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
+  // Taking the key restarts the subscription, because the message buckets it
+  // was opened with did not include this thread's bucket; without the restart
+  // the key arrives and no message does.
+  const acceptPending = useCallback((wrapId: string) => {
+    const entry = pendingRef.current.get(wrapId);
+    if (!entry) return;
+    const { handoff, ownerPk, encryptFn } = entry;
+    pendingRef.current.delete(wrapId);
+    setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
+    keyStore.set(handoff.threadPubkey, hexToBytes(handoff.threadSecretHex));
+    handoffsRef.current.set(wrapId, handoff);
+    setHandoffs(Array.from(handoffsRef.current.values()));
+    let storage: StorageAdapter | null = null;
+    try { storage = localStorage; } catch { /* unavailable */ }
+    if (storage) {
+      saveThreadKey(handoff.threadPubkey, handoff.threadSecretHex, ownerPk, encryptFn, storage).catch(() => {});
+    }
+    setRefreshKey((k) => k + 1);
+  }, [keyStore]);
+
+  const dismissPending = useCallback((wrapId: string) => {
+    pendingRef.current.delete(wrapId);
+    setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
+    saveDismissed(wrapId);
+  }, []);
+
   return {
     messages,
     handoffs,
+    pendingHandoffs,
+    acceptHandoff: acceptPending,
+    dismissHandoff: dismissPending,
     isLoading: canSubscribe && isFetching,
     error,
     refresh,
     debug,
   };
+}
+
+const DISMISSED_KEY = 'cloistr.threads.dismissedHandoffs';
+
+/** Wrap ids of hand-offs the user refused on this device. */
+function loadDismissed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    const ids: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissed(wrapId: string): void {
+  try {
+    const ids = loadDismissed();
+    ids.add(wrapId);
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(ids)));
+  } catch {
+    // Storage unavailable: the offer comes back on the next load.
+  }
 }
 
 // Re-export for the module; getPublicKey is used inside the hook

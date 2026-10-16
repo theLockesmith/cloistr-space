@@ -8,6 +8,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
+import { nip19 } from 'nostr-tools';
 import { useAuthStore } from '@/stores/authStore';
 import {
   useThreadKeyStore,
@@ -15,8 +16,8 @@ import {
   useBucketReader,
   useBucketWriter,
   type UnwrappedMessage,
+  type PendingHandoff,
 } from '@/services/threads';
-import { useAuthorProfiles } from '@/services/profile';
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
 import { parseFleetEnvelope } from '@/services/threads/fleetEnvelope';
@@ -44,7 +45,8 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
     return Array.from(set);
   }, [members, groupId, additionalGranters]);
 
-  const { messages, handoffs, isLoading, error, refresh, debug } = useBucketReader(null, granterPubkeys);
+  const { messages, handoffs, pendingHandoffs, acceptHandoff, dismissHandoff, isLoading, error, refresh, debug } =
+    useBucketReader(null, granterPubkeys);
 
   // Keys held NOW. The loader's keyCount is read once, from storage, when the
 
@@ -59,12 +61,6 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
   const keyStore = useThreadKeyStore();
 
   const heldKeys = Math.max(keyCount, keyStore.size);
-
-  const authorPubkeys = useMemo(
-    () => [...new Set(messages.map((m) => m.authorHex))],
-    [messages],
-  );
-  const profiles = useAuthorProfiles(authorPubkeys);
 
   const byThread = useMemo(() => {
     const map = new Map<string, UnwrappedMessage[]>();
@@ -118,6 +114,15 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
       )}
 
       <div className="flex-1 overflow-auto">
+        {pendingHandoffs?.map((offer) => (
+          <HandoffPrompt
+            key={offer.wrapId}
+            offer={offer}
+            onAccept={() => acceptHandoff(offer.wrapId)}
+            onDismiss={() => dismissHandoff(offer.wrapId)}
+          />
+        ))}
+
         {isLoading && !messages.length && (
           <p className="p-4 text-sm text-cloistr-light/50">
             {!loaded ? 'Loading thread keys…' : 'Scanning buckets…'}
@@ -149,14 +154,10 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
             </div>
             <div className="space-y-2 p-4">
               {msgs.map((msg) => {
-                const profile = profiles.get(msg.authorHex);
                 const envelope = parseFleetEnvelope(msg.plaintext);
-                const name = envelope?.from || profile?.displayName || profile?.name || msg.authorHex.slice(0, 8) + '…';
                 return (
                   <div key={msg.wrapId} className="rounded border border-cloistr-light/10 bg-cloistr-light/5 p-3">
-                    <div className="flex items-center gap-2 text-xs text-cloistr-light/50">
-                      <span>{name}</span>
-                    </div>
+                    <UnverifiedSender pubkeyHex={msg.authorHex} />
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">
                       {envelope ? envelope.body : msg.plaintext}
                     </p>
@@ -171,6 +172,59 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
       {heldKeys > 0 && <ComposeBar />}
     </div>
   );
+}
+
+/**
+ * The sender of a sealed message as the message itself claims it. The author
+ * field and any name in the body are written by whoever holds the thread key,
+ * and nothing signs them, so they are shown as a key with an "unverified"
+ * marker, never as a trusted name or profile.
+ */
+function UnverifiedSender({ pubkeyHex }: { pubkeyHex: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-cloistr-light/50">
+      <span className="font-mono">{shortNpub(pubkeyHex)}</span>
+      <span
+        className="rounded border border-cloistr-warning/40 px-1 text-[10px] uppercase text-cloistr-warning"
+        title="Space cannot verify who wrote this. Anyone holding the thread key can claim to be anyone."
+      >
+        unverified
+      </span>
+    </div>
+  );
+}
+
+function HandoffPrompt({ offer, onAccept, onDismiss }: { offer: PendingHandoff; onAccept: () => void; onDismiss: () => void }) {
+  return (
+    <div role="alert" className="m-4 rounded border border-cloistr-warning/40 bg-cloistr-warning/10 p-3 text-sm text-cloistr-light">
+      <p className="font-medium">Someone offered you a key to a sealed thread</p>
+      <p className="mt-1 text-xs text-cloistr-light/70">
+        It says it comes from <span className="font-mono">{shortNpub(offer.granterPubkey)}</span>, but Space cannot
+        verify who sent it. Accept only if you were expecting it: accepting lets whoever sent it put messages in front
+        of you.
+      </p>
+      <div className="mt-2 flex gap-2">
+        <button onClick={onAccept} className="rounded bg-cloistr-primary px-3 py-1 text-xs text-cloistr-dark">
+          Accept key
+        </button>
+        <button
+          onClick={onDismiss}
+          className="rounded px-3 py-1 text-xs text-cloistr-light/60 hover:bg-cloistr-light/5 hover:text-cloistr-light"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function shortNpub(pubkeyHex: string): string {
+  try {
+    const npub = nip19.npubEncode(pubkeyHex);
+    return `${npub.slice(0, 12)}…${npub.slice(-6)}`;
+  } catch {
+    return `${pubkeyHex.slice(0, 8)}…`;
+  }
 }
 
 function ComposeBar() {
