@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { LoginModal, Header as UnifiedHeader } from '@cloistr/ui/components';
 import { useAuth } from './AuthProvider';
 import { config } from '@/config/environment';
@@ -12,12 +12,30 @@ const FEATURES = [
   { icon: '🤝', title: 'Collaborate', body: 'Shared projects and real-time documents over Nostr relays — no central gatekeeper.' },
 ];
 
+/**
+ * Where to send a user once signed in: the page AuthGuard bounced them from,
+ * or /activity. Only an in-app path is accepted, so router state can never
+ * turn this into a redirect off the site.
+ */
+function returnPath(state: unknown): string {
+  const from = (state as { from?: { pathname?: unknown; search?: unknown; hash?: unknown } } | null)
+    ?.from;
+  const pathname = typeof from?.pathname === 'string' ? from.pathname : '';
+  if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname === '/login') {
+    return '/activity';
+  }
+  const search = typeof from?.search === 'string' ? from.search : '';
+  const hash = typeof from?.hash === 'string' ? from.hash : '';
+  return pathname + search + hash;
+}
+
 export function LoginPage() {
   const { isAuthenticated, isLoading, error } = useAuth();
+  const location = useLocation();
   const [modalOpen, setModalOpen] = useState(false);
 
   if (isAuthenticated) {
-    return <Navigate to="/activity" replace />;
+    return <Navigate to={returnPath(location.state)} replace />;
   }
 
   return (
