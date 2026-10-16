@@ -4,7 +4,7 @@
  * and a skeleton forever when Space was not connected (the operator's
  * "Activity has been empty since day one").
  *
- * Driven through useRecentFiles; the other three widget hooks use the same
+ * Driven through useRecentFiles; the other relay-backed widget hooks use the same
  * helper, and the per-hook wiring is checked at the end.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -108,7 +108,7 @@ describe('a widget read ends in items, empty, or a named error', () => {
 });
 
 describe('every Activity widget hook uses the same rule', () => {
-  it.each(['useRecentFiles', 'useTasks', 'useCalendar', 'useMentions'])('%s', (name) => {
+  it.each(['useRecentFiles', 'useCalendar', 'useMentions'])('%s', (name) => {
     const src = readFileSync(join(__dirname, `${name}.ts`), 'utf8');
     expect(src).toContain('trackAnswers(');
     expect(src).toContain('tracked.handlers');
