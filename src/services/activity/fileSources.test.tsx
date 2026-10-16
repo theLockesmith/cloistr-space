@@ -27,6 +27,9 @@ const env = vi.hoisted(() => ({
   signerOn: true,
   // Relay events per author; an author missing here gets no answer at all.
   relayEvents: { ['ab'.repeat(32)]: [] } as Record<string, unknown[]>,
+  // Every subscription's handlers, in order, so a test can fire a late event
+  // on one that was already stopped (NDK 2.18.1 stop() keeps its listeners).
+  subs: [] as { author: string; onEvent?: (e: unknown, r: unknown) => void; onEose?: (s: unknown) => void }[],
 }));
 vi.mock('@/services/nostr', () => ({
   useNdk: () => ({ subscribe: stableSubscribe, isConnected: true }),
@@ -36,6 +39,7 @@ vi.mock('@/services/nostr', () => ({
     filters: { authors: string[] }[],
     handlers: { onEvent?: (e: unknown, r: unknown) => void; onEose?: (s: unknown) => void }
   ) => {
+    env.subs.push({ author: filters[0].authors[0], onEvent: handlers.onEvent, onEose: handlers.onEose });
     const events = env.relayEvents[filters[0].authors[0]];
     if (events) {
       queueMicrotask(() => {
@@ -62,6 +66,7 @@ beforeEach(() => {
   env.pubkey = ME;
   env.signerOn = true;
   env.relayEvents = { [ME]: [] };
+  env.subs = [];
   clearBlossomSession();
   driveFiles.mockReset().mockResolvedValue([]);
   signEvent.mockReset().mockImplementation(async (e: object) => ({ ...e, id: 'id', sig: 'sig' }));
@@ -179,6 +184,45 @@ describe('useRecentFiles never shows one key\'s files to another', () => {
     });
     expect(result.current.items).toEqual([]);
     expect(result.current.isLoading).toBe(true);
+  });
+
+  it('a late event on the old key\'s stopped subscription changes nothing', async () => {
+    const fileOf = (id: string, author: string, hash: string) => ({
+      id, pubkey: author, created_at: 100, tags: [['url', `https://x/${hash}`], ['x', hash]],
+    });
+    env.relayEvents = { [ME]: [fileOf('a1', ME, 'ha1')], [OTHER]: [] };
+    const { result, rerender } = renderHook(() => useRecentFiles({ includeServices: false }));
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+
+    env.pubkey = OTHER;
+    rerender();
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const stale = env.subs.find((s) => s.author === ME)!;
+    const fresh = env.subs.filter((s) => s.author === OTHER).at(-1)!;
+
+    // ME's subscription was stopped, but its listener still fires.
+    await act(async () => {
+      stale.onEvent?.(fileOf('a2', ME, 'ha2'), { url: 'wss://r' });
+      // And its end-of-stored-events: it must not claim the widget back for ME.
+      stale.onEose?.({ eosesSeen: new Set(['wss://r']) });
+    });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+
+    // OTHER's own next file must arrive alone, not carrying ME's.
+    await act(async () => {
+      fresh.onEvent?.(fileOf('b1', OTHER, 'hb1'), { url: 'wss://r' });
+    });
+    expect(result.current.items.map((f) => f.id)).toEqual(['b1']);
+  });
+
+  it('an event not authored by the signed-in key is never listed', async () => {
+    env.relayEvents = {
+      [ME]: [{ id: 'x1', pubkey: OTHER, created_at: 100, tags: [['url', 'https://x/z'], ['x', 'hz']] }],
+    };
+    const { result } = renderHook(() => useRecentFiles({ includeServices: false }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.items).toEqual([]);
   });
 
   it('a key switch then settles on the new key\'s own answer', async () => {
