@@ -62,44 +62,75 @@ type SubscribeLike = (
   handlers: { onEvent?: (e: NDKEvent) => void; onEose?: () => void }
 ) => { eosesSeen?: Set<unknown>; stop: () => void };
 
+const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
+
 /**
- * Read kind:0 from the user's own write relays (sweep #6).
+ * Ask one write relay for the user's kind:0, on its own subscription.
  *
- * found: one of them holds it. absent: at least one answered (EOSE) and none
- * holds it. unreadable: none answered within OWN_RELAY_PROFILE_TIMEOUT_MS,
- * so we do not know, and a save must not publish over it.
+ * One subscription per relay because NDK's onEose is per subscription and
+ * fires without waiting for every relay (its own timers), and closeOnEose then
+ * stops it, losing a slow relay's answer. A relay counts as answered only when
+ * it is in eosesSeen.
  */
-function readOwnRelayProfile(
+function readOneRelay(
   subscribe: SubscribeLike,
-  relaySet: NDKRelaySet,
-  pubkey: string
-): Promise<{ status: 'found'; content: string } | { status: 'absent' } | { status: 'unreadable' }> {
+  service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
+  url: string,
+  pubkey: string,
+): Promise<{ url: string; answered: boolean; events: NDKEvent[] }> {
   return new Promise((resolve) => {
-    let newest: NDKEvent | null = null;
+    const relaySet = service.getRelaySetFor([url]);
+    if (!relaySet) {
+      resolve({ url, answered: false, events: [] });
+      return;
+    }
+    const events: NDKEvent[] = [];
     let done = false;
     let sub: ReturnType<SubscribeLike> | undefined;
-    const finish = () => {
+    const finish = (answered: boolean) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       sub?.stop();
-      if (newest) resolve({ status: 'found', content: newest.content ?? '' });
-      else if ((sub?.eosesSeen?.size ?? 0) > 0) resolve({ status: 'absent' });
-      else resolve({ status: 'unreadable' });
+      resolve({ url, answered, events });
     };
-    const timer = setTimeout(finish, OWN_RELAY_PROFILE_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(false), OWN_RELAY_PROFILE_TIMEOUT_MS);
     sub = subscribe(
       [{ kinds: [METADATA_KIND], authors: [pubkey], limit: 5 }],
       { closeOnEose: true, groupable: false, relaySet },
       {
         onEvent: (e) => {
-          if (e.pubkey !== pubkey) return;
-          if (!newest || (e.created_at ?? 0) > (newest.created_at ?? 0)) newest = e;
+          if (e.pubkey === pubkey) events.push(e);
         },
-        onEose: () => queueMicrotask(finish),
-      }
+        onEose: () =>
+          queueMicrotask(() =>
+            finish([...((sub?.eosesSeen ?? new Set()) as Set<{ url?: string }>)].some((r) => !!r.url && sameRelay(r.url, url))),
+          ),
+      },
     );
   });
+}
+
+/**
+ * Read kind:0 from every one of the user's write relays (sweep #6, and the
+ * ruling on !228).
+ *
+ * Waits for all of them, each up to OWN_RELAY_PROFILE_TIMEOUT_MS, and returns
+ * every profile seen plus the relays that never answered. The caller takes
+ * the newest across everything, never the first to arrive: a slow relay may
+ * hold the newer profile, and saving over it with older fields loses data.
+ */
+async function readOwnRelayProfiles(
+  subscribe: SubscribeLike,
+  service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
+  urls: string[],
+  pubkey: string,
+): Promise<{ events: NDKEvent[]; silent: string[] }> {
+  const answers = await Promise.all(urls.map((u) => readOneRelay(subscribe, service, u, pubkey)));
+  return {
+    events: answers.flatMap((a) => a.events),
+    silent: answers.filter((a) => !a.answered).map((a) => a.url),
+  };
 }
 
 export function useProfile(): UseProfileReturn {
@@ -147,33 +178,41 @@ export function useProfile(): UseProfileReturn {
         const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
         setRelays(relayList);
 
-        const newestMetadata = newestOf(metadataEvents);
-        if (newestMetadata) {
-          const content = newestMetadata.content ?? '';
+        // kind:0 is replaceable, so a save publishes the whole profile, built
+        // on the newest one seen. With a relay list, every write relay is
+        // asked as well as Space's pool, and the newest across all of them
+        // wins; the first to arrive may be older than what a slow relay holds.
+        const writeUrls = relayList.filter((r) => r.write).map((r) => r.url);
+        const own =
+          writeUrls.length && service && subscribe
+            ? await readOwnRelayProfiles(subscribe as unknown as SubscribeLike, service, writeUrls, pubkey)
+            : // No relay list: Space's pool is all there is to ask. If it had
+              // nothing, creating a profile from scratch is safe; treating this
+              // as unreadable would mean a user with no kind:0 could never make
+              // one, the bug cloistr-stash had to fix in this same code path.
+              { events: [] as NDKEvent[], silent: [] as string[] };
+
+        const newest = newestOf([...Array.from(metadataEvents), ...own.events]);
+        if (newest) {
+          const content = newest.content ?? '';
           setExisting({ status: 'found', content });
           setProfile(parseProfileContent(content));
           return;
         }
 
-        // Nothing on Space's relays. That is only "absent" if the user's own
-        // write relays agree: a profile kept there alone used to read as
-        // absent here, and the next save replaced it with the form's fields.
-        const writeUrls = relayList.filter((r) => r.write).map((r) => r.url);
-        const relaySet = writeUrls.length && service ? service.getRelaySetFor(writeUrls) : undefined;
-        const own =
-          relaySet && subscribe
-            ? await readOwnRelayProfile(subscribe as unknown as SubscribeLike, relaySet, pubkey)
-            : // No relay list: a relay answered and had nothing. Creating a
-              // profile from scratch is safe; treating this as unreadable would
-              // mean a user with no kind:0 could never make one, the bug
-              // cloistr-stash had to fix in this same code path.
-              ({ status: 'absent' } as const);
-
-        setExisting(own);
-        setProfile(own.status === 'found' ? parseProfileContent(own.content) : {});
-        if (own.status === 'unreadable') {
-          setError('Could not reach your own relays to read your profile.');
+        // Nothing anywhere. Only "absent" when every write relay said so;
+        // silence is never absent.
+        if (own.silent.length > 0) {
+          setExisting({ status: 'unreadable' });
+          setProfile({});
+          setError(
+            `Could not read your profile: ${own.silent.join(', ')} did not answer. Saving is disabled so it cannot replace a profile kept there.`,
+          );
+          return;
         }
+
+        setExisting({ status: 'absent' });
+        setProfile({});
       })
       .catch((err) => {
         // We reached for it and failed. Explicitly NOT `absent`.
