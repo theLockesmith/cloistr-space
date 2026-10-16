@@ -13,6 +13,8 @@ import type { NDKFilter } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useAuthStore } from '@/stores/authStore';
+import { getPublicKey } from 'nostr-tools';
+import { hexToBytes } from 'nostr-tools/utils';
 import { ThreadKeyStore, KEY_WRAP_KIND } from './threadKeyStore';
 import { offerKeyWrap, clearKeyWraps } from './pendingKeyOffers';
 import { config } from '@/config/environment';
@@ -150,6 +152,9 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
                 offerKeyWrap({ eventId: event.id, threadPubkey, secretHex: secretKeyHex, senderPubkey: event.pubkey });
                 continue;
               }
+              // The d-tag names the thread; a secret for another thread is
+              // malformed, from a granter or not.
+              if (getPublicKey(hexToBytes(secretKeyHex)) !== threadPubkey) continue;
               store.importHex(threadPubkey, secretKeyHex);
               if (!cancelled) setKeyCount(store.size);
 
