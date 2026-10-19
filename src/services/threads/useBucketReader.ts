@@ -321,6 +321,10 @@ export function useBucketReader(
     };
   }, [startSubscription, refreshKey]);
 
+  // A key added from anywhere (storage restore, the key-wrap loader, a hand-off)
+  // changes which buckets hold this reader's messages, so ask again.
+  useEffect(() => keyStore.onKeyAdded(() => setRefreshKey((k) => k + 1)), [keyStore]);
+
   useEffect(() => {
     const now = Math.floor(Date.now() / 1000);
     const wid = getWindowId(now);

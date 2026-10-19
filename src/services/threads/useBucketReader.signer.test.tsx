@@ -18,8 +18,11 @@ const relay: { events: Wrap[] } = { events: [] };
 const store = { current: new ThreadKeyStore() };
 const auth: { signer: unknown } = { signer: null };
 
+// ONE subscribe function, as the real NdkProvider gives: a new one per render
+// restarted the reader on every render and hid the cold-reload bug below.
+const subscribeFn = () => ({});
 vi.mock('@/services/nostr', () => ({
-  useNdk: () => ({ subscribe: () => ({}), isConnected: true }),
+  useNdk: () => ({ subscribe: subscribeFn, isConnected: true }),
   subscribeStream: (_s: unknown, filters: Array<Record<string, string[]>>, handlers: { onEvent: (e: Wrap) => void; onEose?: () => void }) => {
     const wanted = new Set(filters[0]['#t']);
     let stopped = false;
@@ -80,6 +83,18 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
     expect(result.current.handoffs).toHaveLength(1);
     expect(signer.nip44Decrypt).toHaveBeenCalled();
+  });
+
+  it('a key restored from storage AFTER the reader started still brings its messages (cold reload)', async () => {
+    // Live #325 proof, 2026-10-19: after a reload the saved key arrives through
+    // a signer round trip, after the reader has chosen its buckets. The
+    // hand-off then matched a held key, so nothing restarted, and the wrap-mode
+    // message vanished until the next day's window.
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    act(() => store.current.importHex(getPublicKey(threadSk), bytesToHex(threadSk)));
+    await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
   });
 
   it('refuses a hand-off from a granter it was not told to expect', async () => {
