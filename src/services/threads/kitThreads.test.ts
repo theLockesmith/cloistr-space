@@ -52,15 +52,20 @@ describe('the role-key kind:1111', () => {
 });
 
 describe('the wrap-mode kind:1059', () => {
-  it('opens with the held thread key and keeps the wrap’s time', () => {
-    const unwrapped = tryUnwrapMessage(kit.wrap, heldStore());
-    expect(unwrapped).toMatchObject({ authorHex: rolePk, threadId: threadPk, createdAt: kit.wrap.created_at });
+  // The kit seals no ts, so the time is the latest its wrap allows: the end of
+  // the wrap's window, read here long after that window closed.
+  const readLater = kit.wrap.created_at + 10 * 86400;
+  const latest = (Math.floor(kit.wrap.created_at / 86400) + 1) * 86400 - 1;
+
+  it('opens with the held thread key, at the latest time its wrap allows, marked approximate', () => {
+    const unwrapped = tryUnwrapMessage(kit.wrap, heldStore(), readLater);
+    expect(unwrapped).toMatchObject({ authorHex: rolePk, threadId: threadPk, createdAt: latest, approxTime: true });
   });
 
   it('is admitted as a sealed message in the thread’s conversation, named by its hand-off', () => {
     const store = heldStore();
     const ids = new Map([[threadPk, 'cloistr-group-wrap']]);
-    const msg = acceptWrapped(tryUnwrapMessage(kit.wrap, store)!, { keyStore: store, threadIds: ids });
+    const msg = acceptWrapped(tryUnwrapMessage(kit.wrap, store, readLater)!, { keyStore: store, threadIds: ids });
     expect(msg).toMatchObject({
       id: kit.wrap.id,
       threadKey: `sealed:${threadPk}`,
@@ -69,7 +74,8 @@ describe('the wrap-mode kind:1059', () => {
       from: 'cloistr-orchestrator',
       sealed: true,
       projectId: null,
-      createdAt: kit.wrap.created_at,
+      createdAt: latest,
+      approxTime: true,
     });
   });
 

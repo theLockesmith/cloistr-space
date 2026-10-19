@@ -144,9 +144,22 @@ describe('tryUnwrapMessage: the time a message was sent', () => {
     expect(msg.approxTime).toBe(false);
   });
 
-  it('with no time inside (the kit’s format today), falls back to the wrap’s time and says it is approximate', () => {
+  // With no usable ts, the send time lies between the wrap's randomised time and
+  // the end of its window (or now, if the window is still open). Space uses the
+  // LATEST possible time: the randomised one can be the evening before in local
+  // time, and an untimed message must never sort above timed ones sent after it.
+  const windowEnd = windowStart + WINDOW_SECONDS - 1;
+
+  it('with no time inside (the kit’s format), takes the latest possible send time and says it is approximate', () => {
     const msg = tryUnwrapMessage(wrapInner({ p: 'x', a: authorPk }, windowStart + 5), store)!;
-    expect(msg.createdAt).toBe(windowStart + 5);
+    expect(msg.createdAt).toBe(windowEnd);
+    expect(msg.approxTime).toBe(true);
+  });
+
+  it('while its window is still open, the latest possible send time is now, never the future', () => {
+    const readAt = windowStart + 500;
+    const msg = tryUnwrapMessage(wrapInner({ p: 'x', a: authorPk }, windowStart + 5), store, readAt)!;
+    expect(msg.createdAt).toBe(readAt);
     expect(msg.approxTime).toBe(true);
   });
 
@@ -157,7 +170,7 @@ describe('tryUnwrapMessage: the time a message was sent', () => {
     ['a string', String(windowStart + 200)],
   ])('ignores a claimed time %s', (_why, ts) => {
     const msg = tryUnwrapMessage(wrapInner({ p: 'x', a: authorPk, ts }, windowStart + 100), store)!;
-    expect(msg.createdAt).toBe(windowStart + 100);
+    expect(msg.createdAt).toBe(windowEnd);
     expect(msg.approxTime).toBe(true);
   });
 });
