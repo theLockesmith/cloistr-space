@@ -16,6 +16,7 @@ import {
   classifySignerError,
   useIdentityChange,
 } from '@cloistr/ui';
+import { useSharedSessionMaybe } from '@cloistr/ui/components';
 import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
 import { useContactsStore } from '@/stores/contactsStore';
@@ -52,6 +53,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // IMPORTANT: Use a different key than authStore's 'cloistr-space-auth'
 // to avoid zustand persist overwriting our session data
 const STORAGE_KEY = 'cloistr-space-session';
+
+/** How long a connected shared session may take to reach Space's store. */
+export const MIRROR_WAIT_MS = 5000;
 
 interface PersistedAuth {
   method: 'nip07' | 'nip46';
@@ -508,12 +512,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [signer]);
 
+  // A shared restore still in flight is LOADING, not signed out. Every sign-in
+  // goes through the shared LoginModal, so a reload depends on the shared
+  // provider reconnecting the signer, and that provider lets the app render
+  // before it finishes (its gate lifts once a backend token exists). Without
+  // this, the restore above finds only the cookie, reports signed out, and
+  // AuthGuard redirects a deep link to /login (#325 bug 2).
+  //
+  // isConnecting counts only with a shared session: a first sign-in also runs
+  // under isConnecting, and the overlay must not cover the modal then.
+  // isConnected-but-not-mirrored covers the bridge's queued storeLogin.
+  //
+  // The mirror wait is bounded: if storeLogin never lands, the user reaches the
+  // login page after MIRROR_WAIT_MS rather than an endless spinner. The other
+  // two waits are bounded by the shared provider (its safety cap and connect
+  // timeouts).
+  const sharedSession = useSharedSessionMaybe();
+  const awaitingMirror = !isAuthenticated && shared.authState.isConnected && !!shared.authState.pubkey;
+  const [mirrorTimedOut, setMirrorTimedOut] = useState(false);
+  useEffect(() => {
+    if (!awaitingMirror) {
+      const reset = setTimeout(() => setMirrorTimedOut(false), 0);
+      return () => clearTimeout(reset);
+    }
+    const timer = setTimeout(() => {
+      console.warn('[Auth] Shared session connected but never reached Space; showing sign-in.');
+      setMirrorTimedOut(true);
+    }, MIRROR_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingMirror]);
+  const sharedRestorePending =
+    !isAuthenticated &&
+    (!!sharedSession?.isResolving ||
+      (shared.authState.isConnecting && !!sharedSession?.hasSharedSession) ||
+      (awaitingMirror && !mirrorTimedOut));
+
   return (
     <AuthContext.Provider
       value={{
         pubkey,
         isAuthenticated,
-        isLoading,
+        isLoading: isLoading || sharedRestorePending,
         error,
         signer,
         nip07Available,
