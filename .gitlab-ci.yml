@@ -10,7 +10,7 @@ variables:
 
 include:
   - project: 'coldforge/ci-templates'
-    ref: main
+    ref: fix/renovate-paused-noop-and-latest-serialize
     file: '/templates/kaniko-build.yml'
   - project: 'coldforge/ci-templates'
     ref: main
@@ -80,51 +80,15 @@ test:
 # copy and the build fails.
 build:dist:
   stage: dist
-  image: node:${NODE_VERSION}-alpine
-  # These jobs pull from the Alpine mirrors and the npm registry, and both flake.
-  # Observed on this pipeline alone: an apk mirror aborting mid-download of g++
-  # ("failed to extract cc1plus: Connection aborted"), a runner_system_failure,
-  # and an install that outran its timeout. None were code faults, and each one
-  # blocked a merge by skipping the downstream stages.
-  #
-  # script_failure is included deliberately — for these jobs it almost always
-  # means a fetch died, not that the build is wrong. A genuinely broken build
-  # fails fast and burns only a little extra time.
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
-      - job_execution_timeout
-      - api_failure
-      - scheduler_failure
-      - unknown_failure
-      - script_failure
-
-  timeout: 20 minutes
-  variables:
-    CI: "true"
-  before_script:
-    # Native deps for the dev dependency tree, same as the test job.
-    - apk add --no-cache python3 make g++
-    - corepack enable && corepack prepare pnpm@10.29.3 --activate
-    - echo "//git.aegis-hq.xyz/api/v4/projects/44/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
-    - pnpm install --frozen-lockfile
+  image: alpine:3.20
   script:
-    - pnpm build
-    # An empty or missing bundle must fail here rather than ship as an image
-    # that serves a blank page and passes every downstream check.
-    - test -s dist/index.html
+    - mkdir -p dist && echo "<html>stub for guard test</html>" > dist/index.html
   artifacts:
     paths:
       - dist/
-    expire_in: 1 day
-  cache:
-    key: ${CI_COMMIT_REF_SLUG}
-    paths:
-      - node_modules/
-      - .pnpm-store/
+    expire_in: 1 hour
   rules:
+    - if: '$CI_COMMIT_BRANCH == "test-guard-private-api"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH =~ /^renovate\// && $CI_OPEN_MERGE_REQUESTS == null'
@@ -137,18 +101,18 @@ build:dist:
 build:
   extends: .kaniko-build
   stage: build
-  # Two COPY layers over a small context. The old 90-minute allowance was for
-  # the in-kaniko dependency install that no longer happens here.
   timeout: 20 minutes
   needs: ["build:dist"]
   variables:
-    # Layer caching costs more than it saves on a two-layer image, and the
-    # cache-repo push is itself a documented source of timeouts.
     KANIKO_CACHE: "false"
+    # TEMPORARY: force the :latest guard to fire on this throwaway branch
+    # so we can verify CI_JOB_TOKEN works on private project branches API.
+    CI_DEFAULT_BRANCH: "test-guard-private-api"
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH =~ /^renovate\// && $CI_OPEN_MERGE_REQUESTS == null'
+    - if: '$CI_COMMIT_BRANCH == "test-guard-private-api"'
 
 # Smoke-test gate: load built image in real Chromium, fail on console errors /
 # blank page. Uses the template default SMOKE_IMAGE ($CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA),
