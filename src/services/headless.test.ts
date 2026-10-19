@@ -21,6 +21,7 @@ import {
   GROUP_JOIN_REQUEST_KIND,
 } from '@/types/groups';
 import { GIFT_WRAP_KIND } from './threads/giftWrap';
+import type { WrapConnection } from './threads/wrapRelay';
 
 function createHeadlessSigner(secretKey: Uint8Array): SignerInterface {
   const pubkey = getPublicKey(secretKey);
@@ -43,6 +44,20 @@ function createHeadlessRelay(): RelayClient & { events: Event[] } {
     },
     fetch: async () => [],
   };
+}
+
+/** A headless caller's own connections for gift wraps: each signs in as the wrap's key. */
+function createHeadlessWrapRelay() {
+  const events: Event[] = [];
+  const open = async (): Promise<WrapConnection> => ({
+    publish: async (event: Event) => {
+      events.push(event);
+      return '';
+    },
+    signIn: async () => {},
+    close: () => {},
+  });
+  return { events, open };
 }
 
 describe('headless parity proof', () => {
@@ -92,9 +107,9 @@ describe('headless parity proof', () => {
     const sk = generateSecretKey();
     const pk = getPublicKey(sk);
     const threadSecret = bytesToHex(generateSecretKey());
-    const relay = createHeadlessRelay();
+    const relay = createHeadlessWrapRelay();
 
-    await publishMessage(relay, 'headless thread message', pk, threadSecret);
+    await publishMessage('headless thread message', pk, threadSecret, { relayUrls: ['wss://headless.test'], open: relay.open });
 
     expect(relay.events).toHaveLength(1);
     expect(relay.events[0].kind).toBe(GIFT_WRAP_KIND);
@@ -114,9 +129,9 @@ describe('headless parity proof', () => {
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const threadSecret = bytesToHex(generateSecretKey());
-    const relay = createHeadlessRelay();
+    const relay = createHeadlessWrapRelay();
 
-    await publishKeyHandoff(relay, 'thread-123', threadSecret, granterSk, recipientPk);
+    await publishKeyHandoff('thread-123', threadSecret, granterSk, recipientPk, { relayUrls: ['wss://headless.test'], open: relay.open });
 
     expect(relay.events).toHaveLength(1);
     expect(relay.events[0].kind).toBe(GIFT_WRAP_KIND);
