@@ -26,6 +26,8 @@ export interface UnwrappedMessage {
   authorHex: string;
   threadId: string;
   wrapId: string;
+  /** The wrap's created_at: the kit jitters it, so it orders roughly, not exactly. */
+  createdAt: number;
 }
 
 export interface UnwrappedHandoff {
@@ -82,7 +84,7 @@ export function wrapThreadMessage(
  * Trial-decrypts with each held thread key.
  */
 export function tryUnwrapMessage(
-  wrapEvent: { id: string; pubkey: string; content: string; tags: string[][] },
+  wrapEvent: { id: string; pubkey: string; content: string; tags: string[][]; created_at?: number },
   keyStore: ThreadKeyStore,
 ): UnwrappedMessage | null {
   for (const [threadPubkey, threadSk] of keyStore.entries()) {
@@ -97,6 +99,7 @@ export function tryUnwrapMessage(
           authorHex: inner.a,
           threadId: threadPubkey,
           wrapId: wrapEvent.id,
+          createdAt: wrapEvent.created_at ?? 0,
         };
       }
     } catch {

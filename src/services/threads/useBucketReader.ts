@@ -210,7 +210,7 @@ export function useBucketReader(
             if (messagesRef.current.has(event.id) || handoffsRef.current.has(event.id)) return;
 
             const msg = tryUnwrapMessage(
-              { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags },
+              { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags, created_at: event.created_at },
               keyStore,
             );
             if (msg) {

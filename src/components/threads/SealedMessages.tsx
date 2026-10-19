@@ -16,6 +16,7 @@ import {
   useBucketReader,
   useBucketWriter,
   type UnwrappedMessage,
+  type BucketReaderReturn,
 } from '@/services/threads';
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
@@ -33,8 +34,6 @@ interface SealedMessagesProps {
 }
 
 export function SealedMessages({ groupId, additionalGranters }: SealedMessagesProps) {
-  const { pubkey } = useAuthStore();
-  const { loaded, keyCount } = useThreadKeyLoader();
   const { members } = useGroupMembers(groupId ?? '');
 
   const granterPubkeys = useMemo(() => {
@@ -50,8 +49,19 @@ export function SealedMessages({ groupId, additionalGranters }: SealedMessagesPr
     return Array.from(set);
   }, [members, groupId, additionalGranters]);
 
-  const { messages, handoffs, pendingHandoffs, acceptHandoff, dismissHandoff, isLoading, error, refresh, debug } =
-    useBucketReader(null, granterPubkeys);
+  const reader = useBucketReader(null, granterPubkeys);
+  return <SealedMessagesPanel reader={reader} />;
+}
+
+/**
+ * The Sealed box itself, for a reader someone else already runs. The Threads
+ * page passes the one its list reads from, so the page holds one bucket
+ * subscription rather than two asking the relay the same thing.
+ */
+export function SealedMessagesPanel({ reader }: { reader: BucketReaderReturn }) {
+  const { pubkey } = useAuthStore();
+  const { loaded, keyCount } = useThreadKeyLoader();
+  const { messages, handoffs, pendingHandoffs, acceptHandoff, dismissHandoff, isLoading, error, refresh, debug } = reader;
 
   // Keys held NOW. The loader's keyCount is read once, from storage, when the
 

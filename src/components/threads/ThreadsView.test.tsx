@@ -21,6 +21,18 @@ vi.mock('react-router-dom', () => ({
 let allThreadFixtures: ReturnType<typeof makeThreadWithGroup>[] = [];
 let groupFixtures: { id: string; name: string }[] = [];
 let standaloneFixtures: import('@/services/threads').StandaloneThread[] = [];
+const ownReaderCalls: unknown[][] = [];
+const sharedReader = {
+  messages: [{ plaintext: 'from the shared reader', authorHex: 'ab'.repeat(32), threadId: 'cd'.repeat(32), wrapId: 'ef'.repeat(32), createdAt: 1 }],
+  handoffs: [],
+  pendingHandoffs: [],
+  acceptHandoff: vi.fn(),
+  dismissHandoff: vi.fn(),
+  isLoading: false,
+  error: null,
+  refresh: vi.fn(),
+  debug: {},
+};
 
 vi.mock('@/services/threads', () => ({
   useAllThreads: () => ({
@@ -28,6 +40,7 @@ vi.mock('@/services/threads', () => ({
     groups: groupFixtures,
     allAdminPubkeys: [],
     standalone: standaloneFixtures,
+    sealedReader: sharedReader,
     isLoading: false,
     error: null,
   }),
@@ -41,16 +54,20 @@ vi.mock('@/services/threads', () => ({
   }),
   useThreadKeyStore: () => new Map(),
   useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
-  useBucketReader: () => ({
-    messages: [],
-    handoffs: [],
-    pendingHandoffs: [],
-    acceptHandoff: vi.fn(),
-    dismissHandoff: vi.fn(),
-    isLoading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
+  useBucketReader: (...args: unknown[]) => {
+    ownReaderCalls.push(args);
+    return {
+      messages: [],
+      handoffs: [],
+      pendingHandoffs: [],
+      acceptHandoff: vi.fn(),
+      dismissHandoff: vi.fn(),
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+      debug: {},
+    };
+  },
   useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: false }),
 }));
 
@@ -277,3 +294,12 @@ describe('ThreadsView standalone threads', () => {
   });
 });
 
+
+describe('ThreadsView sealed box', () => {
+  it('reads from the list’s reader, opening no bucket subscription of its own', () => {
+    ownReaderCalls.length = 0;
+    render(<ThreadsView />);
+    expect(screen.getByText('from the shared reader')).toBeInTheDocument();
+    expect(ownReaderCalls).toHaveLength(0);
+  });
+});

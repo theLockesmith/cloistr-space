@@ -1,17 +1,23 @@
 /**
- * @fileoverview The Threads list reads standalone threads too: a fleet-style
- * sealed kind:1111 for a key the user holds, and the user's own thread with no
- * project. On master neither appears (useAllThreads only asks for #h of the
- * user's projects and drops anything without an h).
+ * @fileoverview The Threads list reads standalone threads too: a fleet thread
+ * whose key the user holds, and the user's own thread with no project. On
+ * master neither appears (useAllThreads only asks for #h of the user's
+ * projects and drops anything without an h).
+ *
+ * Fixtures are the kit's own output (see kitThreads.test.ts): a kind:1111
+ * signed by a ROLE key, and a wrap-mode kind 1059 under a one-time key.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { hexToBytes } from 'nostr-tools/utils';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
+import { tryUnwrapMessage, tryUnwrapHandoff, type UnwrappedMessage, type UnwrappedHandoff } from './giftWrap';
+import kit from './__fixtures__/kitThreadEvents.json';
 
-const threadSk = generateSecretKey();
-const threadPk = getPublicKey(threadSk);
+const threadSk = hexToBytes('11'.repeat(32));
+const threadPk = kit.keys.threadPk;
 const unheldSk = generateSecretKey();
 const unheldPk = getPublicKey(unheldSk);
 const fleetSk = generateSecretKey();
@@ -37,9 +43,24 @@ vi.mock('@/services/groups', () => ({
 }));
 const keyStore = new ThreadKeyStore();
 keyStore.set(threadPk, threadSk);
+
+// The one bucket reader the Threads page shares with its Sealed box. What it
+// returns is what the real reader would: only wraps that opened with a held
+// key, and the sealed hand-offs addressed to this user.
+const reader: { messages: UnwrappedMessage[]; handoffs: UnwrappedHandoff[] } = { messages: [], handoffs: [] };
+const ROLE = getPublicKey(generateSecretKey());
+const readerCalls: unknown[][] = [];
+vi.mock('./useBucketReader', () => ({
+  useBucketReader: (...args: unknown[]) => {
+    readerCalls.push(args);
+    return { ...reader, isLoading: false, error: null, refresh: vi.fn(), debug: {} };
+  },
+}));
+const handoff = tryUnwrapHandoff(kit.handoff, hexToBytes('33'.repeat(32)), [kit.keys.granterPk])!;
+reader.handoffs = [handoff];
 vi.mock('./useThreadKeyStore', () => ({ useThreadKeyStore: () => keyStore }));
 vi.mock('@/stores/authStore', () => ({ useAuthStore: (sel?: (s: { pubkey: string }) => unknown) => (sel ? sel({ pubkey: currentMe }) : { pubkey: currentMe }) }));
-vi.mock('@/config/environment', () => ({ config: { threadGranters: [FLEET] } }));
+vi.mock('@/config/environment', () => ({ config: { threadGranters: [FLEET, kit.keys.granterPk] } }));
 
 const { useAllThreads } = await import('./useAllThreads');
 
@@ -55,19 +76,49 @@ function fleetMessage(body: string, tsk: Uint8Array, tpk: string, id: string) {
   return {
     id: id.padEnd(64, '0'),
     kind: 1111,
-    pubkey: FLEET,
+    pubkey: ROLE,
     created_at: 1_790_000_100,
-    content: encryptThreadContent(env, tsk, FLEET),
+    content: encryptThreadContent(env, tsk, ROLE),
     tags: [['d', 'cloistr-group-wrap'], ['K', '1111'], ['thread', tpk]],
   };
 }
 
 describe('useAllThreads standalone threads', () => {
-  it('asks the relay for the fleet’s and the user’s own thread messages', () => {
+  it('asks for the user’s own messages by author, and fleet threads by thread id, never by the fleet’s key', () => {
     subs.length = 0;
     renderHook(() => useAllThreads());
-    const authors = subs.flatMap((s) => s.filters).find((f) => Array.isArray(f.authors))?.authors as string[] | undefined;
-    expect(authors?.sort()).toEqual([FLEET, ME].sort());
+    const filters = subs.flatMap((s) => s.filters);
+    const byAuthor = filters.filter((f) => Array.isArray(f.authors)).flatMap((f) => f.authors as string[]);
+    expect(byAuthor).toEqual([ME]);
+    expect(filters).toContainEqual({ kinds: [1111], '#d': ['cloistr-group-wrap'] });
+  });
+
+  it('a role-key kind:1111 and a wrap-mode kind 1059 of a held thread both appear, as one conversation', async () => {
+    subs.length = 0;
+    reader.messages = [tryUnwrapMessage(kit.wrap, keyStore)!];
+    const { result } = renderHook(() => useAllThreads());
+    relay(kit.legacy1111);
+
+    await waitFor(() => expect(result.current.standalone).toHaveLength(1));
+    const t = result.current.standalone[0];
+    expect(t.title).toBe('cloistr-group-wrap');
+    expect(t.messages.map((m) => m.text).sort()).toEqual(['legacy hello', 'wrap-mode hello']);
+    reader.messages = [];
+  });
+
+  it('a wrap for a key the user does NOT hold never reaches the list', () => {
+    subs.length = 0;
+    // The reader keeps only wraps that opened: this one does not.
+    expect(tryUnwrapMessage(kit.wrapUnheld, keyStore)).toBeNull();
+  });
+
+  it('shares one bucket reader, asking it for the fleet granters’ hand-offs', () => {
+    readerCalls.length = 0;
+    renderHook(() => useAllThreads());
+    expect(readerCalls.length).toBeGreaterThan(0);
+    const [secret, granters] = readerCalls[readerCalls.length - 1] as [unknown, string[]];
+    expect(secret).toBeNull();
+    expect(granters).toEqual(expect.arrayContaining([FLEET, kit.keys.granterPk]));
   });
 
   it('shows a fleet-style sealed thread whose key is held, and the user’s own root with no project', async () => {

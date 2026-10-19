@@ -29,10 +29,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
 import {
   acceptStandalone,
+  acceptWrapped,
   groupStandalone,
+  threadIdsFromHandoffs,
   type StandaloneMessage,
   type StandaloneThread,
 } from './standaloneThreads';
+import { useBucketReader, type BucketReaderReturn } from './useBucketReader';
 
 /** A thread plus the group it belongs to, for a listing that spans groups. */
 export interface ThreadWithGroup {
@@ -53,6 +56,12 @@ export interface UseAllThreadsReturn {
    * standaloneThreads.ts for exactly what is admitted.
    */
   standalone: StandaloneThread[];
+  /**
+   * The bucket reader behind the wrap-mode messages in `standalone`. The
+   * Threads page hands this same reader to its Sealed box, so the page runs
+   * one bucket subscription, not two.
+   */
+  sealedReader: BucketReaderReturn;
   isLoading: boolean;
   error: string | null;
 }
@@ -180,45 +189,68 @@ export function useAllThreads(): UseAllThreadsReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe, isConnected, groupIdsKey]);
 
-  // Standalone threads. Relays filter only on single-letter tags, and the
-  // fleet's `thread` tag is not one, so the question the relay CAN answer is
-  // by author: the fleet's key and the user's own. acceptStandalone then keeps
-  // only what the user may see; a message for a key they do not hold is
-  // dropped before it reaches state. A sealed message from a third person in a
-  // fleet thread is not fetched by this filter; that is the known limit.
+  // Standalone threads. The kit signs each message with the sending ROLE's own
+  // key (there are dozens), so asking by author cannot find them. What a relay
+  // CAN answer is the single-letter `d` tag, which carries the thread id, and
+  // the id comes from the sealed hand-off. Wrap-mode threads (the live kit's
+  // mode) are kind 1059 under one-time keys; those come from the bucket
+  // reader, the same one the Sealed box uses. The user's own unsealed threads
+  // are still asked for by author. acceptStandalone / acceptWrapped keep only
+  // what the user may see; a message for a key they do not hold is dropped
+  // before it reaches state.
+  const granters = useMemo(
+    () => Array.from(new Set([...config.threadGranters, ...allAdminPubkeys])),
+    [allAdminPubkeys],
+  );
+  const sealedReader = useBucketReader(null, granters);
+  const threadIds = useMemo(() => threadIdsFromHandoffs(sealedReader.handoffs), [sealedReader.handoffs]);
+  const threadIdsKey = [...new Set(threadIds.values())].sort().join(',');
+
   const membershipRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     membershipRef.current = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
   }, [groupIdsKey]);
-  const authorsKey = [...new Set([...config.threadGranters, ...(me ? [me] : [])])].sort().join(',');
+  const meKey = me ?? '';
 
   useEffect(() => {
-    if (!subscribe || !isConnected || !authorsKey) return;
-    const sub = subscribeStream(subscribe, [{ kinds: [THREAD_KIND as number], authors: authorsKey.split(',') }], {
+    if (!subscribe || !isConnected) return;
+    const filters: NDKFilter[] = [];
+    if (meKey) filters.push({ kinds: [THREAD_KIND as number], authors: [meKey] });
+    if (threadIdsKey) filters.push({ kinds: [THREAD_KIND as number], '#d': threadIdsKey.split(',') });
+    if (filters.length === 0) return;
+    const sub = subscribeStream(subscribe, filters, {
       onEvent: (event: NDKEvent) => {
         const msg = acceptStandalone(event, { keyStore, me, memberProjects: membershipRef.current });
         if (!msg) return;
-        // Merge into what this query already holds: a re-subscribe must add to
-        // the list, never restart it.
+        // Merge into what this user already holds: a new thread id re-subscribes,
+        // and that must add to the list, never restart it.
         setStandaloneState((prev) => {
-          const kept = prev.query === authorsKey ? prev.messages.filter((m) => m.id !== msg.id) : [];
-          return { query: authorsKey, messages: [...kept, msg] };
+          const kept = prev.query === meKey ? prev.messages.filter((m) => m.id !== msg.id) : [];
+          return { query: meKey, messages: [...kept, msg] };
         });
       },
     });
     if (!sub) return;
     return () => sub.stop();
-    // keyStore and me are read through authorsKey/closure; a new key held
-    // later is picked up on the next event, and a sign-in changes authorsKey.
+    // keyStore and me are read through meKey/closure; a key held later arrives
+    // with its hand-off, which changes threadIdsKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subscribe, isConnected, authorsKey]);
+  }, [subscribe, isConnected, meKey, threadIdsKey]);
 
   const standalone = useMemo(() => {
-    if (standaloneState.query !== authorsKey) return [];
+    const own = standaloneState.query === meKey ? standaloneState.messages : [];
+    const wrapped = sealedReader.messages
+      .map((m) => acceptWrapped(m, { keyStore, threadIds }))
+      .filter((m): m is StandaloneMessage => m !== null);
     // Re-filter on membership: a project joined later moves its threads to the project path.
     const member = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
-    return groupStandalone(standaloneState.messages.filter((m) => !m.projectId || !member.has(m.projectId)));
-  }, [standaloneState, authorsKey, groupIdsKey]);
+    const named = [...own, ...wrapped].map((m) =>
+      m.sealed && threadIds.has(m.threadKey.slice('sealed:'.length))
+        ? { ...m, title: threadIds.get(m.threadKey.slice('sealed:'.length))! }
+        : m
+    );
+    return groupStandalone(named.filter((m) => !m.projectId || !member.has(m.projectId)));
+  }, [standaloneState, meKey, sealedReader.messages, keyStore, threadIds, groupIdsKey]);
 
   // Stopped on unmount and on connection change only -- NOT on groupIdsKey.
   // The deps above describe which groups to ASK ABOUT; tearing the subscription
@@ -261,6 +293,7 @@ export function useAllThreads(): UseAllThreadsReturn {
     groups,
     allAdminPubkeys,
     standalone,
+    sealedReader,
     // Still loading while groups resolve: with no groups yet there is nothing
     // to subscribe to, and reporting "no threads" then would be the same lie as
     // every other empty-versus-unloaded confusion this app has had.

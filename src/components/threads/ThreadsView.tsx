@@ -12,10 +12,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAllThreads, type StandaloneThread } from '@/services/threads';
 import { useThreads } from '@/services/threads';
 import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
-import { SealedMessages } from './SealedMessages';
+import { SealedMessagesPanel } from './SealedMessages';
 
 export function ThreadsView() {
-  const { threads, groups, allAdminPubkeys, standalone, isLoading, error } = useAllThreads();
+  const { threads, groups, standalone, sealedReader, isLoading, error } = useAllThreads();
   const navigate = useNavigate();
 
   // The project is a filter, not a precondition (operator ruling 2026-10-13):
@@ -176,7 +176,7 @@ export function ThreadsView() {
       </ul>
 
       <div className="rounded-lg border border-cloistr-light/10">
-        <SealedMessages additionalGranters={allAdminPubkeys} />
+        <SealedMessagesPanel reader={sealedReader} />
       </div>
     </div>
   );

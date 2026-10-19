@@ -3,12 +3,17 @@
  * user is not in.
  *
  * The operator ruled (2026-10-13) that a thread is a thread whether or not a
- * project holds it; the project is a reference, not a container. The fleet
- * writes exactly these: every message is a standalone kind:1111, sealed to the
- * thread's key, with clear tags d (thread name), K and thread (thread pubkey),
- * and h only when the thread names a group (arbiter thread_daemon.py). There
- * is no E tag, so a conversation is the set of messages sharing a thread tag,
- * not a root and its replies.
+ * project holds it; the project is a reference, not a container. The kit
+ * (arbiter thread_daemon.py) writes fleet threads in one of two shapes, and
+ * signs neither with the fleet key:
+ *  - wrap mode, the live one: kind 1059 under a one-time key, `t` bucket tag,
+ *    content sealed to the thread key, inner {p: envelope, a: role pubkey}.
+ *    These arrive through the bucket reader; see acceptWrapped.
+ *  - legacy: kind:1111 signed by the sending ROLE's own key, content sealed to
+ *    the thread key, clear tags d (thread id), K, thread (thread pubkey), and h
+ *    only when the thread names a group. Fetched by `#d`; see acceptStandalone.
+ * There is no E tag, so a conversation is the set of messages sharing a thread
+ * key, not a root and its replies.
  *
  * What may be shown is decided here, before anything is stored:
  *  - sealed: only when the user holds the thread's key AND the content opens
@@ -23,6 +28,9 @@
 import { THREAD_KIND } from './threadEvents';
 import { decryptThreadContent, type ThreadKeyStore } from './threadKeyStore';
 import { parseFleetEnvelope } from './fleetEnvelope';
+import type { UnwrappedHandoff, UnwrappedMessage } from './giftWrap';
+import { getPublicKey } from 'nostr-tools';
+import { hexToBytes } from 'nostr-tools/utils';
 
 export interface StandaloneMessage {
   id: string;
@@ -133,4 +141,52 @@ export function groupStandalone(messages: StandaloneMessage[]): StandaloneThread
     });
   }
   return threads.sort((a, b) => b.lastActivity - a.lastActivity);
+}
+
+/**
+ * A wrap-mode message (kind 1059), already opened by the bucket reader with a
+ * held key. It joins the same conversation as that thread's kind:1111s.
+ *
+ * The key is checked again here because the reader's list outlives a key: one
+ * signed out, or replaced by another key's, must take its messages with it.
+ *
+ * The author is what the sender wrote inside the encryption, not a signature:
+ * the wrap is signed by a one-time key. Anyone holding the thread key can name
+ * any author, which is the same trust the Sealed box already extends.
+ */
+export function acceptWrapped(
+  msg: UnwrappedMessage,
+  ctx: { keyStore: ThreadKeyStore; threadIds: Map<string, string> }
+): StandaloneMessage | null {
+  if (!ctx.keyStore.has(msg.threadId)) return null;
+  const envelope = parseFleetEnvelope(msg.plaintext);
+  return {
+    id: msg.wrapId,
+    pubkey: msg.authorHex,
+    createdAt: msg.createdAt,
+    threadKey: `sealed:${msg.threadId}`,
+    title: ctx.threadIds.get(msg.threadId) || envelope?.thread || 'Sealed thread',
+    text: envelope ? envelope.body : msg.plaintext,
+    from: envelope?.from ?? null,
+    sealed: true,
+    projectId: null,
+  };
+}
+
+/**
+ * Thread pubkey to the kit's thread id, from the sealed hand-offs. The id is
+ * the kind:1111 `d` tag, the one way to ask a relay for a thread's messages
+ * whoever signed them. The kind 24242 hand-off carries no id (its `d` is the
+ * thread pubkey), so a key that arrived only that way has no entry here.
+ */
+export function threadIdsFromHandoffs(handoffs: UnwrappedHandoff[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const h of handoffs) {
+    try {
+      out.set(getPublicKey(hexToBytes(h.threadSecretHex)), h.threadId);
+    } catch {
+      // A malformed secret names nothing.
+    }
+  }
+  return out;
 }

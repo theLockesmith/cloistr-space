@@ -54,6 +54,11 @@ vi.mock('@/services/nostr', () => ({
   }),
 }));
 
+// The bucket reader (wrap-mode threads) has its own tests; here it reads nothing.
+vi.mock('./useBucketReader', () => ({
+  useBucketReader: () => ({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn(), debug: {} }),
+}));
+
 vi.mock('@/services/groups', () => ({
   useGroups: () => ({
     groups: [
