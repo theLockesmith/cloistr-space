@@ -231,7 +231,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           method: auth.method,
           hasBunkerUrl: !!auth.bunkerUrl,
           hasClientSecretKey: !!auth.clientSecretKey,
-          clientSecretKeyPrefix: auth.clientSecretKey?.slice(0, 16) + '...',
         });
 
         if (auth.method === 'nip07') {
@@ -409,7 +408,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'nip46',
         hasBunkerUrl: !!bunkerUrl,
         hasClientSecretKey: !!clientSecretKey,
-        clientSecretKeyPrefix: clientSecretKey?.slice(0, 16) + '...',
       });
       const auth: PersistedAuth = { method: 'nip46', bunkerUrl, clientSecretKey };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));

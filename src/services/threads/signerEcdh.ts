@@ -24,7 +24,9 @@ export async function signerEcdhTag(
       String(windowId),
     ]);
     if (/^[0-9a-f]{2}$/.test(result)) return result;
-    console.warn('[signerEcdhTag] result did not match 2-hex pattern:', result);
+    // Never log the value: a signer that answered with the shared secret
+    // instead of its one-byte tag would put key material in the console.
+    console.warn('[signerEcdhTag] result did not match 2-hex pattern (length', String(result).length + ')');
     return null;
   } catch (err) {
     console.warn('[signerEcdhTag] call failed:', err instanceof Error ? err.message : String(err));
