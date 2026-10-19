@@ -8,17 +8,14 @@
  */
 
 import { Link } from 'react-router-dom';
-import { useNdk, loadRelayAuthEnabled } from '@/services/nostr';
+import { useRelayAuthEnabled } from '@/services/nostr';
+import { useAuthStore } from '@/stores/authStore';
 
 export function RelayAuthOffNotice() {
-  const { service } = useNdk();
-  // Same fallback as Profile: before the provider hands over the service, the
-  // saved value is what the policy is about to be built with.
-  //
-  // Read at render, not subscribed to. The setting only changes on the Profile
-  // route, so the feed remounts and rereads it on the way back. A layout that
-  // kept the feed mounted across routes would need a subscription here.
-  const enabled = service ? service.getAuthPolicy().isEnabled() : loadRelayAuthEnabled();
+  // The signed-in user's saved choice, which NdkProvider keeps the live policy
+  // set to. Subscribed, so it updates on a change or an account switch.
+  const pubkey = useAuthStore((state) => state.pubkey);
+  const enabled = useRelayAuthEnabled(pubkey);
   if (enabled) return null;
 
   return (

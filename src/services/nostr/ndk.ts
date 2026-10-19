@@ -18,7 +18,6 @@ import type { UnsignedEvent } from 'nostr-tools';
 import type { SignerInterface } from '@cloistr/auth';
 import { defaultRelays } from '@/config/environment';
 import { RelayAuthPolicy } from './authPolicy';
-import { loadRelayAuthEnabled } from './authSetting';
 import { withPublishTimeout } from '../headless';
 
 /**
@@ -66,8 +65,8 @@ export interface NdkServiceConfig {
   autoConnect?: boolean;
   debug?: boolean;
   /**
-   * Authenticate to relays beyond the user's own set. Defaults to the user's
-   * saved choice (authSetting.ts), which is on until they switch it off.
+   * Authenticate to relays beyond the user's own set. Defaults to true; the
+   * per-user saved choice is applied later by NdkProvider (authSetting.ts).
    * Backs the single user-facing setting described in ded5c8fc.
    */
   relayAuthEnabled?: boolean;
@@ -213,12 +212,9 @@ export class NdkService {
     // These are the user's own relays, so they are tier 1: always authenticated.
     // Anything the outbox model discovers later is not, and has to earn a
     // signature by having an open subscription. See authPolicy.ts.
-    // The user's saved choice, not a fresh default: this runs on every page
-    // load, so defaulting here would undo a switch-off at each reload.
-    this.authPolicy = new RelayAuthPolicy(
-      relayUrls,
-      config.relayAuthEnabled ?? loadRelayAuthEnabled()
-    );
+    // Built before anyone signs in, so this is the default. NdkProvider applies
+    // the signed-in user's saved choice whenever the pubkey changes.
+    this.authPolicy = new RelayAuthPolicy(relayUrls, config.relayAuthEnabled ?? true);
 
     this.ndk = new NDK({
       explicitRelayUrls: relayUrls,

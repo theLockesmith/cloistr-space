@@ -21,7 +21,7 @@ export {
 export { useHeadlessAdapters, type HeadlessAdapters } from './useHeadlessAdapters';
 
 export { RelayAuthPolicy, type RelayAuthPolicyState } from './authPolicy';
-export { loadRelayAuthEnabled, saveRelayAuthEnabled } from './authSetting';
+export { loadRelayAuthEnabled, saveRelayAuthEnabled, useRelayAuthEnabled } from './authSetting';
 
 export {
   subscribeOnce,
