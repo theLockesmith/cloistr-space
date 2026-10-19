@@ -56,10 +56,6 @@ vi.mock('@cloistr/ui', async (importOriginal) => {
     getSharedSession: () => h.cookie,
     saveSharedSession: vi.fn(),
     clearSharedSession: vi.fn(),
-    // The library's own copy reads @cloistr/auth directly, past the mock above,
-    // and throws outside its provider. Identity changes are not under test here
-    // (contactsIdentityReset.test.tsx covers them).
-    useIdentityChange: vi.fn(),
   };
 });
 
