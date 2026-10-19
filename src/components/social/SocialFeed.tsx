@@ -19,6 +19,7 @@ import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import { QuoteComposer } from './QuoteComposer';
 import { OwnNoteMenu } from './OwnNoteMenu';
+import { RelayAuthOffNotice } from './RelayAuthOffNotice';
 import { NoteContent } from './NoteContent';
 import { useAuthorProfiles } from '@/services/profile';
 import { ACTION_BLOCKED_MESSAGE } from '@/services/social/useNoteActions';
@@ -313,6 +314,8 @@ export function SocialFeed() {
           </button>
         </div>
       </div>
+
+      <RelayAuthOffNotice />
 
       {/* Why actions are unavailable, stated once rather than under every note.
           Rendered as text, not a title attribute -- this was reported from a
