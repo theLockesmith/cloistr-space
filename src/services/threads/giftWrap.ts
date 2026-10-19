@@ -31,6 +31,11 @@ export interface UnwrappedMessage {
 export interface UnwrappedHandoff {
   threadId: string;
   threadSecretHex: string;
+  /**
+   * The granter the payload CLAIMS. Nothing signs it: the wrap is signed by a
+   * throwaway key, so anyone can put any pubkey here. Never treat it as who
+   * sent the key.
+   */
   granterPubkey: string;
   wrapId: string;
 }
@@ -166,6 +171,7 @@ export function parseHandoffPayload(
       typeof payload.g === 'string' &&
       /^[0-9a-f]{64}$/i.test(payload.sec)
     ) {
+      // Filters noise only: `g` is the sender's own claim, so this proves nothing.
       if (expectedGranters && !expectedGranters.includes(payload.g)) return null;
       return {
         threadId: payload.tid,

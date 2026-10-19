@@ -64,6 +64,7 @@ export {
   computeRealBuckets,
   type BucketReaderReturn,
   type BucketReaderDebug,
+  type PendingHandoff,
 } from './useBucketReader';
 
 export {

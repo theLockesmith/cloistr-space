@@ -6,7 +6,7 @@
  * exactly this kind of user.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
@@ -70,10 +70,13 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     ];
   });
 
-  it('opens the hand-off through the signer, then shows the thread message', async () => {
+  it('opens the hand-off through the signer and, once accepted, shows the thread message', async () => {
     const signer = remoteSigner(userSk);
     auth.signer = signer;
     const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    // A hand-off cannot prove who sent it, so its key waits for the user.
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    act(() => result.current.acceptHandoff(result.current.pendingHandoffs[0].wrapId));
     await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
     expect(result.current.handoffs).toHaveLength(1);
     expect(signer.nip44Decrypt).toHaveBeenCalled();
@@ -85,6 +88,7 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     const { result } = renderHook(() => useBucketReader(null, [stranger]));
     await new Promise((r) => setTimeout(r, 300));
     expect(result.current.handoffs).toHaveLength(0);
+    expect(result.current.pendingHandoffs).toHaveLength(0);
     expect(result.current.messages).toHaveLength(0);
   });
 });
