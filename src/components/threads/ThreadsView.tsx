@@ -9,14 +9,33 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAllThreads } from '@/services/threads';
+import { useAllThreads, type StandaloneThread } from '@/services/threads';
 import { useThreads } from '@/services/threads';
 import { looksLikeNip44 } from '@/services/threads/threadKeyStore';
 import { SealedMessages } from './SealedMessages';
 
 export function ThreadsView() {
-  const { threads, groups, allAdminPubkeys, isLoading, error } = useAllThreads();
+  const { threads, groups, allAdminPubkeys, standalone, isLoading, error } = useAllThreads();
   const navigate = useNavigate();
+
+  // The project is a filter, not a precondition (operator ruling 2026-10-13):
+  // threads outside any project, or in one the user is not in, are threads too.
+  const NO_PROJECT = '__none__';
+  const [filter, setFilter] = useState<string>('all');
+  const [openThread, setOpenThread] = useState<string | null>(null);
+  const groupName = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
+  const chips = useMemo(() => {
+    const out: { id: string; label: string }[] = groups.map((g) => ({ id: g.id, label: g.name }));
+    for (const t of standalone) {
+      if (t.projectId && !out.some((c) => c.id === t.projectId)) out.push({ id: t.projectId, label: t.projectId });
+    }
+    if (standalone.some((t) => !t.projectId)) out.push({ id: NO_PROJECT, label: 'No project' });
+    return out;
+  }, [groups, standalone]);
+  const shownProjectThreads = filter === 'all' ? threads : threads.filter((t) => t.groupId === filter);
+  const shownStandalone =
+    filter === 'all' ? standalone : standalone.filter((t) => (t.projectId ?? NO_PROJECT) === filter);
+  const nothingAtAll = threads.length === 0 && standalone.length === 0;
 
   const [composing, setComposing] = useState(false);
   const [targetGroup, setTargetGroup] = useState<string>('');
@@ -35,7 +54,7 @@ export function ThreadsView() {
         <div>
           <h1 className="text-xl font-medium text-cloistr-light">Threads</h1>
           <p className="mt-1 text-sm text-cloistr-light/60">
-            Longer discussions from your projects, kept separate from the chat.
+            Longer discussions you can read, in your projects or standing on their own.
           </p>
         </div>
         {groups.length > 0 && (
@@ -76,7 +95,7 @@ export function ThreadsView() {
       {/* Two different empties, said differently.
           A blank panel is how Threads read as not-shipped last time, and "no
           threads" would be a lie to someone who has no groups to hold one. */}
-      {!isLoading && groups.length === 0 && (
+      {!isLoading && groups.length === 0 && nothingAtAll && (
         <EmptyState
           title="You are not in any projects yet"
           body="Threads live inside a project. Join or create one, and you can start a discussion in it."
@@ -85,7 +104,7 @@ export function ThreadsView() {
         />
       )}
 
-      {!isLoading && groups.length > 0 && threads.length === 0 && !composing && (
+      {!isLoading && groups.length > 0 && nothingAtAll && !composing && (
         <EmptyState
           title="No threads yet"
           body={
@@ -98,8 +117,39 @@ export function ThreadsView() {
         />
       )}
 
+      {chips.length > 1 && (
+        <div role="group" aria-label="Filter by project" className="flex flex-wrap gap-1.5">
+          {[{ id: 'all', label: 'All' }, ...chips].map((c) => (
+            <button
+              key={c.id}
+              aria-pressed={filter === c.id}
+              onClick={() => setFilter(c.id)}
+              className={`min-h-[36px] rounded-full px-3 text-xs ${
+                filter === c.id ? 'bg-cloistr-primary text-cloistr-dark' : 'bg-cloistr-light/5 text-cloistr-light/70 hover:bg-cloistr-light/10'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {shownStandalone.length > 0 && (
+        <ul aria-label="Threads outside your projects" className="divide-y divide-cloistr-light/5">
+          {shownStandalone.map((t) => (
+            <StandaloneRow
+              key={t.threadKey}
+              thread={t}
+              projectLabel={t.projectId ? groupName.get(t.projectId) ?? t.projectId : 'No project'}
+              open={openThread === t.threadKey}
+              onToggle={() => setOpenThread((cur) => (cur === t.threadKey ? null : t.threadKey))}
+            />
+          ))}
+        </ul>
+      )}
+
       <ul className="divide-y divide-cloistr-light/5">
-        {threads.map(({ thread, groupId, groupName }) => (
+        {shownProjectThreads.map(({ thread, groupId, groupName }) => (
           <li key={thread.root.id}>
             <button
               onClick={() => navigate(`/projects/${encodeURIComponent(groupId)}`)}
@@ -129,6 +179,51 @@ export function ThreadsView() {
         <SealedMessages additionalGranters={allAdminPubkeys} />
       </div>
     </div>
+  );
+}
+
+/**
+ * A thread with no project page to open, so it opens in place. Only messages
+ * acceptStandalone admitted reach here: decrypted with a held key, or the
+ * user's own.
+ */
+function StandaloneRow({
+  thread,
+  projectLabel,
+  open,
+  onToggle,
+}: {
+  thread: StandaloneThread;
+  projectLabel: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const count = thread.messages.length;
+  return (
+    <li>
+      <button onClick={onToggle} aria-expanded={open} className="w-full px-1 py-3 text-left hover:bg-cloistr-light/5">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 rounded bg-cloistr-light/10 px-1.5 py-0.5 text-xs text-cloistr-light/70">{projectLabel}</span>
+          {thread.sealed && <span className="shrink-0" title="Encrypted thread">🔒</span>}
+          <span className="min-w-0 truncate text-sm text-cloistr-light">{thread.title}</span>
+        </div>
+        <div className="mt-1 text-xs text-cloistr-light/50">
+          {count} {count === 1 ? 'message' : 'messages'} · {new Date(thread.lastActivity * 1000).toLocaleString()}
+        </div>
+      </button>
+      {open && (
+        <ol className="mb-3 space-y-2 pl-3">
+          {thread.messages.map((m) => (
+            <li key={m.id} className="rounded bg-cloistr-light/5 p-2 text-sm">
+              <div className="text-xs text-cloistr-light/50">
+                {m.from ?? `${m.pubkey.slice(0, 8)}…`} · {new Date(m.createdAt * 1000).toLocaleString()}
+              </div>
+              <p className="whitespace-pre-wrap break-words text-cloistr-light/90">{m.text}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </li>
   );
 }
 

@@ -25,6 +25,14 @@ import {
 } from './threadEvents';
 import { decryptThreadContent, looksLikeNip44 } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
+import { useAuthStore } from '@/stores/authStore';
+import { config } from '@/config/environment';
+import {
+  acceptStandalone,
+  groupStandalone,
+  type StandaloneMessage,
+  type StandaloneThread,
+} from './standaloneThreads';
 
 /** A thread plus the group it belongs to, for a listing that spans groups. */
 export interface ThreadWithGroup {
@@ -39,6 +47,12 @@ export interface UseAllThreadsReturn {
   groups: { id: string; name: string }[];
   /** Admin pubkeys across all the user's groups, deduplicated. */
   allAdminPubkeys: string[];
+  /**
+   * Threads outside the user's projects: fleet-sealed threads whose key the
+   * user holds, and the user's own threads with no project. See
+   * standaloneThreads.ts for exactly what is admitted.
+   */
+  standalone: StandaloneThread[];
   isLoading: boolean;
   error: string | null;
 }
@@ -106,6 +120,14 @@ export function useAllThreads(): UseAllThreadsReturn {
   const commentsRef = useRef<Map<string, ThreadComment>>(new Map());
   const subsRef = useRef<NDKSubscription[]>([]);
 
+  const me = useAuthStore((s) => s.pubkey) ?? null;
+  // Keyed by the query that produced them, so a new query (another signed-in
+  // key) starts from nothing without a state reset inside an effect.
+  const [standaloneState, setStandaloneState] = useState<{ query: string; messages: StandaloneMessage[] }>({
+    query: '',
+    messages: [],
+  });
+
   const groups = useMemo(
     () => memberships.map((m) => ({ id: m.group.identifier, name: m.group.name })),
     [memberships]
@@ -158,6 +180,46 @@ export function useAllThreads(): UseAllThreadsReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe, isConnected, groupIdsKey]);
 
+  // Standalone threads. Relays filter only on single-letter tags, and the
+  // fleet's `thread` tag is not one, so the question the relay CAN answer is
+  // by author: the fleet's key and the user's own. acceptStandalone then keeps
+  // only what the user may see; a message for a key they do not hold is
+  // dropped before it reaches state. A sealed message from a third person in a
+  // fleet thread is not fetched by this filter; that is the known limit.
+  const membershipRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    membershipRef.current = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
+  }, [groupIdsKey]);
+  const authorsKey = [...new Set([...config.threadGranters, ...(me ? [me] : [])])].sort().join(',');
+
+  useEffect(() => {
+    if (!subscribe || !isConnected || !authorsKey) return;
+    const sub = subscribeStream(subscribe, [{ kinds: [THREAD_KIND as number], authors: authorsKey.split(',') }], {
+      onEvent: (event: NDKEvent) => {
+        const msg = acceptStandalone(event, { keyStore, me, memberProjects: membershipRef.current });
+        if (!msg) return;
+        // Merge into what this query already holds: a re-subscribe must add to
+        // the list, never restart it.
+        setStandaloneState((prev) => {
+          const kept = prev.query === authorsKey ? prev.messages.filter((m) => m.id !== msg.id) : [];
+          return { query: authorsKey, messages: [...kept, msg] };
+        });
+      },
+    });
+    if (!sub) return;
+    return () => sub.stop();
+    // keyStore and me are read through authorsKey/closure; a new key held
+    // later is picked up on the next event, and a sign-in changes authorsKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribe, isConnected, authorsKey]);
+
+  const standalone = useMemo(() => {
+    if (standaloneState.query !== authorsKey) return [];
+    // Re-filter on membership: a project joined later moves its threads to the project path.
+    const member = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
+    return groupStandalone(standaloneState.messages.filter((m) => !m.projectId || !member.has(m.projectId)));
+  }, [standaloneState, authorsKey, groupIdsKey]);
+
   // Stopped on unmount and on connection change only -- NOT on groupIdsKey.
   // The deps above describe which groups to ASK ABOUT; tearing the subscription
   // down when that set settles would cancel the query before its answer
@@ -198,6 +260,7 @@ export function useAllThreads(): UseAllThreadsReturn {
     threads,
     groups,
     allAdminPubkeys,
+    standalone,
     // Still loading while groups resolve: with no groups yet there is nothing
     // to subscribe to, and reporting "no threads" then would be the same lie as
     // every other empty-versus-unloaded confusion this app has had.
