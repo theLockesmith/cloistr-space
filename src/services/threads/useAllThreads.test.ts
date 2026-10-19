@@ -26,6 +26,14 @@ const authorPk = getPublicKey(authorSk);
 // subscribeStream: we capture the onEvent handler so we can feed it events.
 let capturedOnEvent: ((event: unknown) => void) | null = null;
 let capturedOnEose: (() => void) | null = null;
+// One relay connection delivers an event to every open subscription; keeping
+// only the last one opened would let a second subscription swallow the first's.
+let handlerList: { onEvent: (e: unknown) => void; onEose?: () => void }[] = [];
+function capture(handlers: { onEvent: (e: unknown) => void; onEose?: () => void }) {
+  handlerList.push(handlers);
+  capturedOnEvent = (e) => handlerList.forEach((h) => h.onEvent(e));
+  capturedOnEose = () => handlerList.forEach((h) => h.onEose?.());
+}
 
 vi.mock('@/services/nostr', () => ({
   useNdk: () => ({
@@ -41,10 +49,14 @@ vi.mock('@/services/nostr', () => ({
     fetchFromOwnRelays: null,
   }),
   subscribeStream: vi.fn((_subscribe, _filters, handlers) => {
-    capturedOnEvent = handlers.onEvent;
-    capturedOnEose = handlers.onEose;
+    capture(handlers);
     return { stop: vi.fn() };
   }),
+}));
+
+// The bucket reader (wrap-mode threads) has its own tests; here it reads nothing.
+vi.mock('./useBucketReader', () => ({
+  useBucketReader: () => ({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn(), debug: {} }),
 }));
 
 vi.mock('@/services/groups', () => ({
@@ -106,6 +118,7 @@ describe('useAllThreads NIP-44 decryption', () => {
   beforeEach(() => {
     capturedOnEvent = null;
     capturedOnEose = null;
+    handlerList = [];
   });
 
   it('decrypts sealed content when the thread key is held', async () => {
@@ -155,8 +168,7 @@ describe('useAllThreads NIP-44 decryption', () => {
         fetchFromOwnRelays: null,
       }),
       subscribeStream: vi.fn((_subscribe, _filters, handlers) => {
-        capturedOnEvent = handlers.onEvent;
-        capturedOnEose = handlers.onEose;
+        capture(handlers);
         return { stop: vi.fn() };
       }),
     }));

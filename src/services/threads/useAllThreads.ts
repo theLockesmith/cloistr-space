@@ -25,6 +25,17 @@ import {
 } from './threadEvents';
 import { decryptThreadContent, looksLikeNip44 } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
+import { useAuthStore } from '@/stores/authStore';
+import { config } from '@/config/environment';
+import {
+  acceptStandalone,
+  acceptWrapped,
+  groupStandalone,
+  threadIdsFromHandoffs,
+  type StandaloneMessage,
+  type StandaloneThread,
+} from './standaloneThreads';
+import { useBucketReader, type BucketReaderReturn } from './useBucketReader';
 
 /** A thread plus the group it belongs to, for a listing that spans groups. */
 export interface ThreadWithGroup {
@@ -39,6 +50,18 @@ export interface UseAllThreadsReturn {
   groups: { id: string; name: string }[];
   /** Admin pubkeys across all the user's groups, deduplicated. */
   allAdminPubkeys: string[];
+  /**
+   * Threads outside the user's projects: fleet-sealed threads whose key the
+   * user holds, and the user's own threads with no project. See
+   * standaloneThreads.ts for exactly what is admitted.
+   */
+  standalone: StandaloneThread[];
+  /**
+   * The bucket reader behind the wrap-mode messages in `standalone`. The
+   * Threads page hands this same reader to its Sealed box, so the page runs
+   * one bucket subscription, not two.
+   */
+  sealedReader: BucketReaderReturn;
   isLoading: boolean;
   error: string | null;
 }
@@ -106,6 +129,14 @@ export function useAllThreads(): UseAllThreadsReturn {
   const commentsRef = useRef<Map<string, ThreadComment>>(new Map());
   const subsRef = useRef<NDKSubscription[]>([]);
 
+  const me = useAuthStore((s) => s.pubkey) ?? null;
+  // Keyed by the query that produced them, so a new query (another signed-in
+  // key) starts from nothing without a state reset inside an effect.
+  const [standaloneState, setStandaloneState] = useState<{ query: string; messages: StandaloneMessage[] }>({
+    query: '',
+    messages: [],
+  });
+
   const groups = useMemo(
     () => memberships.map((m) => ({ id: m.group.identifier, name: m.group.name })),
     [memberships]
@@ -158,6 +189,69 @@ export function useAllThreads(): UseAllThreadsReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe, isConnected, groupIdsKey]);
 
+  // Standalone threads. The kit signs each message with the sending ROLE's own
+  // key (there are dozens), so asking by author cannot find them. What a relay
+  // CAN answer is the single-letter `d` tag, which carries the thread id, and
+  // the id comes from the sealed hand-off. Wrap-mode threads (the live kit's
+  // mode) are kind 1059 under one-time keys; those come from the bucket
+  // reader, the same one the Sealed box uses. The user's own unsealed threads
+  // are still asked for by author. acceptStandalone / acceptWrapped keep only
+  // what the user may see; a message for a key they do not hold is dropped
+  // before it reaches state.
+  const granters = useMemo(
+    () => Array.from(new Set([...config.threadGranters, ...allAdminPubkeys])),
+    [allAdminPubkeys],
+  );
+  const sealedReader = useBucketReader(null, granters);
+  const threadIds = useMemo(() => threadIdsFromHandoffs(sealedReader.handoffs), [sealedReader.handoffs]);
+  const threadIdsKey = [...new Set(threadIds.values())].sort().join(',');
+
+  const membershipRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    membershipRef.current = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
+  }, [groupIdsKey]);
+  const meKey = me ?? '';
+
+  useEffect(() => {
+    if (!subscribe || !isConnected) return;
+    const filters: NDKFilter[] = [];
+    if (meKey) filters.push({ kinds: [THREAD_KIND as number], authors: [meKey] });
+    if (threadIdsKey) filters.push({ kinds: [THREAD_KIND as number], '#d': threadIdsKey.split(',') });
+    if (filters.length === 0) return;
+    const sub = subscribeStream(subscribe, filters, {
+      onEvent: (event: NDKEvent) => {
+        const msg = acceptStandalone(event, { keyStore, me, memberProjects: membershipRef.current });
+        if (!msg) return;
+        // Merge into what this user already holds: a new thread id re-subscribes,
+        // and that must add to the list, never restart it.
+        setStandaloneState((prev) => {
+          const kept = prev.query === meKey ? prev.messages.filter((m) => m.id !== msg.id) : [];
+          return { query: meKey, messages: [...kept, msg] };
+        });
+      },
+    });
+    if (!sub) return;
+    return () => sub.stop();
+    // keyStore and me are read through meKey/closure; a key held later arrives
+    // with its hand-off, which changes threadIdsKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribe, isConnected, meKey, threadIdsKey]);
+
+  const standalone = useMemo(() => {
+    const own = standaloneState.query === meKey ? standaloneState.messages : [];
+    const wrapped = sealedReader.messages
+      .map((m) => acceptWrapped(m, { keyStore, threadIds }))
+      .filter((m): m is StandaloneMessage => m !== null);
+    // Re-filter on membership: a project joined later moves its threads to the project path.
+    const member = new Set(groupIdsKey ? groupIdsKey.split(',') : []);
+    const named = [...own, ...wrapped].map((m) =>
+      m.sealed && threadIds.has(m.threadKey.slice('sealed:'.length))
+        ? { ...m, title: threadIds.get(m.threadKey.slice('sealed:'.length))! }
+        : m
+    );
+    return groupStandalone(named.filter((m) => !m.projectId || !member.has(m.projectId)));
+  }, [standaloneState, meKey, sealedReader.messages, keyStore, threadIds, groupIdsKey]);
+
   // Stopped on unmount and on connection change only -- NOT on groupIdsKey.
   // The deps above describe which groups to ASK ABOUT; tearing the subscription
   // down when that set settles would cancel the query before its answer
@@ -198,6 +292,8 @@ export function useAllThreads(): UseAllThreadsReturn {
     threads,
     groups,
     allAdminPubkeys,
+    standalone,
+    sealedReader,
     // Still loading while groups resolve: with no groups yet there is nothing
     // to subscribe to, and reporting "no threads" then would be the same lie as
     // every other empty-versus-unloaded confusion this app has had.

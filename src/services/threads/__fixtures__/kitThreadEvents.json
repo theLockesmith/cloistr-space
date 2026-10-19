@@ -1,0 +1,85 @@
+{
+  "wrap": {
+    "id": "07c452031dce49dfb8667e7414cbee34b7c430c9710943420ca212529452dd3f",
+    "pubkey": "4482c2b0d948182c70dc66a1d9dbb58ff36c83e9414fd94a231a9d96a6a8e04d",
+    "created_at": 1792380337,
+    "kind": 1059,
+    "tags": [
+      [
+        "t",
+        "e4"
+      ],
+      [
+        "expiration",
+        "1792540800"
+      ]
+    ],
+    "content": "AvpfrIntpFuzAEF8qcxwRSAkHfwKtrobEckpg9b/t5OeLWKxgEp85gSJY+lq22v69M0w76l+dcJxzmRUwJF89w4bWDJz272OXua77dE5U9FawCcmKVjF6KFHcgDIMmrx8jU9rGMXg8mNMICdWLFZvMGdlYE0mP5Z3ipVeRsWY3W4kcU2+QHlvesVfNIodkKLPtFJ/ivpBGtAZ/nLVYe02ckZ3Df/siYnfdPsI5MexGaQnZ2d/VNMbMMcY7mzXUzsow/wBVyUiwyg0H/BexBJON88O+fevrSfNf60/1jovQmudltSUU36iPWbtgJo9pE1oaJLotQ/lBjl+bN0YClMdVohItOGoV+JJNFBL7voF0wq7UwNwwE/+ks2UMCoyZlhMqHsmYnFUf5V4kfLovlQKPJnmhMKDR6a3FM30FYwdsglBT0=",
+    "sig": "bcaba06990740b155c0d4ab7b46a90baf2adbdaccf23096c499b17b22fc740c08e26bf469a474ef24c2ef8fd8071dcebc5fbc35c56d8e3034409ffd17ea2a069"
+  },
+  "wrapUnheld": {
+    "id": "1d0992d00b01c7fdd8e7141f7518525e1c1e09cfefe3372313ab02daaa726587",
+    "pubkey": "6bd285b9c9eb669f6aab7a50840e5822db5641de2f47c2633e45c4017dce40d1",
+    "created_at": 1792385693,
+    "kind": 1059,
+    "tags": [
+      [
+        "t",
+        "52"
+      ],
+      [
+        "expiration",
+        "1792540800"
+      ]
+    ],
+    "content": "Aivcam7hkTTcmeZii4MLKVKtxJVUOHViSKatu74SLq+7Si8OaKyj1lHCCR4YZvvXnsjDQP8veEvCjfS/1tLXHt6bozFlRO/jtCslcVvJ1Jq8mVG1GtcIiNrlFfu2x39ei5fHAkxx0UcJPg9+VVUooW3Dnfh/8m/MwTJ+I46GiA8M5iE9v841rJGEl6FpTIf326shiNLl0zocWBUZhD8GjW7B5/5xRtYQC8C9M6GZsry/vDWfXqMZhSygq4gyk3M5AwsEzQr/19MvMQqvtUxvBtewLwpr1vlTlo+pgW+HAY+fEqVpvcIFKgYD0y4yQRpcloODM7aAtunU+l9kajg2tUQJTytiHNtv4H4WNBSrhwm/MhAwPG5uuZR1SzlcbSuiTtXK5AfWo9naiCn2XDZjCF2OG/Mjv5Rrq1a3RaWtE5Jo4ds=",
+    "sig": "7cb0944931e825a5107df8926cccd8732bc8d34df3ce58d5f2da2ce7f9329e1d59d85ebd627cd20dcb8c97aa2c28d42894520c25ab4383cf37ed25dba3cd2522"
+  },
+  "handoff": {
+    "id": "f45940d69769a9344ed4d6cb6ba7a3ee381aa9531e304603b65af9c3a4fad30e",
+    "pubkey": "5f0b456443c3568ad6b9cb59cdd43d5bfecca871e88c51622d3402bbd0404d4e",
+    "created_at": 1792400120,
+    "kind": 1059,
+    "tags": [
+      [
+        "t",
+        "5b"
+      ],
+      [
+        "expiration",
+        "1792540800"
+      ]
+    ],
+    "content": "AtDRPsbAvMphGmvSlLbe7Fz4Ve+zEUhNuG4SHg2bzW6BZ82mE494MCOCfOP8xsGrP6bm7Boi/gNQQHmFOD+99epey6W2AypgPCuxF8yTmSOwOwigiNpLQfx9gtYZZxGWdRa+akI1ZI718/rj4CHnjvfnoz7pH5IqxPftGnJ6pTMNVsuZjN9nlI6AbaSQGluH30sZydeApgNba/aZsPXqchTMGPpEb851T7+RYqmh0okH6zhs0X1Wlz+L9NI5sCMzmSVLt+RbejbJbAVtghLk2du7x7Hi1R1wNiaAsGSUlEaqvzyt1Zoi3yWjI9v/ToaEtaacP4ZFRQkWaHgGD/H609BNoQ==",
+    "sig": "9d8eeeac4b96b3538cc3f52fd71dad399448c1ec75a2234b90cefe1642dacf7e8f453b57e1da8612b24e80bdcb373ece5a6f73ec3a579d7937e870debc794e6b"
+  },
+  "legacy1111": {
+    "id": "dd5493861bb46cb81b5ff6fa59364e21dcb072a3826c321268158b6f24708ddf",
+    "pubkey": "466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+    "created_at": 1792409473,
+    "kind": 1111,
+    "tags": [
+      [
+        "d",
+        "cloistr-group-wrap"
+      ],
+      [
+        "K",
+        "1111"
+      ],
+      [
+        "thread",
+        "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa"
+      ]
+    ],
+    "content": "Al5buugx2gXzRtk30NsuH48o0cn7bPY1nrioY7pfeeLQT41sHDHkwAmIzm1KkhZ3wTc2G3NDhbJrGWr/7mTmELioj7UVwrpKkq0Sng256jZOpmwfjDvAllRHoG868CBN8jxz73WJcGJTaAQBQHI9cs+t3RfiBV7NJf/PldbHPlcfCVvfMsgneoni2aMbidOyNgKYyMFWx7F5daeT9uEl6HWi8RQ5Wl109igL0j+LdzhvlewWiFkxSGK2jDKcPwCm4h/GoXqq3JHgI4kHlcFPe6JWinnhAtr7eeqqDvMLs0B1Yx8=",
+    "sig": "c6a8d2e94760ba2f605fd12938880c4edecc5804035fe709e83ac1b1d677278dace27c8182bb7696d443e03b2b615ff5b07166b54985e287fb4d9a0d67f20df1"
+  },
+  "keys": {
+    "threadPk": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+    "rolePk": "466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27",
+    "memberPk": "3c72addb4fdf09af94f0c94d7fe92a386a7e70cf8a1d85916386bb2535c7b1b1",
+    "granterPk": "2c0b7cf95324a07d05398b240174dc0c2be444d96b159aa6c7f7b1e668680991",
+    "unheldPk": "9ac20335eb38768d2052be1dbbc3c8f6178407458e51e6b4ad22f1d91758895b"
+  }
+}
