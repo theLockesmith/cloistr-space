@@ -74,6 +74,21 @@ export function wrapThreadMessage(
   threadSecretHex: string,
   nowSec?: number,
 ): ReturnType<typeof finalizeEvent> {
+  return wrapThreadMessageWithKey(plaintext, authorPubkey, threadSecretHex, nowSec).event;
+}
+
+/** A wrap and the one-time key that signed it: publishing signs in to the relay as that key. */
+export interface SignedWrap {
+  event: ReturnType<typeof finalizeEvent>;
+  oneTimeSk: Uint8Array;
+}
+
+export function wrapThreadMessageWithKey(
+  plaintext: string,
+  authorPubkey: string,
+  threadSecretHex: string,
+  nowSec?: number,
+): SignedWrap {
   const now = nowSec ?? Math.floor(Date.now() / 1000);
   const wid = getWindowId(now);
   const threadPubkey = getPublicKey(hexToBytes(threadSecretHex));
@@ -86,7 +101,7 @@ export function wrapThreadMessage(
   const bucket = computeThreadBucket(threadSecretHex, wid);
   const expiry = expiryTimestamp(wid);
 
-  return finalizeEvent(
+  const event = finalizeEvent(
     {
       kind: GIFT_WRAP_KIND,
       content: encrypted,
@@ -95,6 +110,7 @@ export function wrapThreadMessage(
     },
     oneTimeSk,
   );
+  return { event, oneTimeSk };
 }
 
 /**
@@ -145,6 +161,16 @@ export function wrapKeyHandoff(
   memberPubkey: string,
   nowSec?: number,
 ): ReturnType<typeof finalizeEvent> {
+  return wrapKeyHandoffWithKey(threadId, threadSecretHex, granterSk, memberPubkey, nowSec).event;
+}
+
+export function wrapKeyHandoffWithKey(
+  threadId: string,
+  threadSecretHex: string,
+  granterSk: Uint8Array,
+  memberPubkey: string,
+  nowSec?: number,
+): SignedWrap {
   const now = nowSec ?? Math.floor(Date.now() / 1000);
   const wid = getWindowId(now);
   const granterPubkey = getPublicKey(granterSk);
@@ -158,7 +184,7 @@ export function wrapKeyHandoff(
   const payload = JSON.stringify({ tid: threadId, sec: threadSecretHex, g: granterPubkey });
   const encrypted = nip44.v2.encrypt(payload, conversationKey);
 
-  return finalizeEvent(
+  const event = finalizeEvent(
     {
       kind: GIFT_WRAP_KIND,
       content: encrypted,
@@ -167,6 +193,7 @@ export function wrapKeyHandoff(
     },
     oneTimeSk,
   );
+  return { event, oneTimeSk };
 }
 
 /**

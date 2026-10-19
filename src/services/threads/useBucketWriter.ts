@@ -8,12 +8,13 @@
  * Key handoffs carry the thread's secret key encrypted to the recipient,
  * bucketed by a value only the granter and recipient can compute.
  *
- * Core logic lives in threadPublish.ts (React-free, accepts RelayClient).
- * This hook provides the NDK-backed adapter.
+ * Core logic lives in threadPublish.ts (React-free). Each wrap is sent on a
+ * connection of its own, signed in as its one-time key, never the user's NDK
+ * connection; see wrapRelay.ts.
  */
 
 import { useCallback } from 'react';
-import { useNdk, useHeadlessAdapters } from '@/services/nostr';
+import { useNdk } from '@/services/nostr';
 import {
   publishMessage,
   publishKeyHandoff,
@@ -42,8 +43,6 @@ export function useBucketWriter(): BucketWriterReturn {
   const { publish, isConnected } = useNdk();
   const canPublish = Boolean(publish && isConnected);
 
-  const { relay } = useHeadlessAdapters();
-
   const sendMessage = useCallback(
     async (
       plaintext: string,
@@ -51,10 +50,9 @@ export function useBucketWriter(): BucketWriterReturn {
       threadSecretHex: string,
       nowSec?: number,
     ) => {
-      if (!relay) throw new Error('Not connected');
-      await publishMessage(relay, plaintext, authorPubkey, threadSecretHex, nowSec);
+      await publishMessage(plaintext, authorPubkey, threadSecretHex, { nowSec });
     },
-    [relay],
+    [],
   );
 
   const grantKey = useCallback(
@@ -65,10 +63,9 @@ export function useBucketWriter(): BucketWriterReturn {
       recipientPubkey: string,
       nowSec?: number,
     ) => {
-      if (!relay) throw new Error('Not connected');
-      await publishKeyHandoff(relay, threadId, threadSecretHex, granterSk, recipientPubkey, nowSec);
+      await publishKeyHandoff(threadId, threadSecretHex, granterSk, recipientPubkey, { nowSec });
     },
-    [relay],
+    [],
   );
 
   return { sendMessage, grantKey, canPublish };

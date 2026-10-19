@@ -3,6 +3,7 @@ import { render } from '@testing-library/react';
 import { SealedMessages } from './SealedMessages';
 
 const mockUseBucketReader = vi.fn();
+const mockSend = vi.fn();
 const heldStore = { current: new Map<string, Uint8Array>() };
 
 vi.mock('@/services/threads', () => ({
@@ -14,7 +15,7 @@ vi.mock('@/services/threads', () => ({
     dismissHandoff: vi.fn(),
     ...mockUseBucketReader(...args),
   }),
-  useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: true }),
+  useBucketWriter: () => ({ sendMessage: mockSend, canPublish: true }),
 }));
 
 vi.mock('@/components/auth/AuthProvider', () => ({
@@ -239,6 +240,22 @@ describe('SealedMessages thread names', () => {
     }] });
     const { getByText } = render(<SealedMessages />);
     expect(getByText(/Thread c8e8289dec3e/)).toBeTruthy();
+  });
+});
+
+describe('SealedMessages sending', () => {
+  it('shows the relay’s reason when a send fails, and keeps the text', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn() });
+    mockSend.mockRejectedValueOnce(new Error('restricted: you can only publish events as your authenticated identity'));
+    const { getByPlaceholderText, getByRole, findByText } = render(<SealedMessages />);
+
+    await userEvent.type(getByPlaceholderText('Sealed message…'), 'hello');
+    await userEvent.click(getByRole('button', { name: 'Send' }));
+
+    expect(await findByText(/you can only publish events as your authenticated identity/)).toBeTruthy();
+    expect((getByPlaceholderText('Sealed message…') as HTMLInputElement).value).toBe('hello');
   });
 });
 
