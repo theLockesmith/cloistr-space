@@ -10,7 +10,8 @@
 import { useState, useCallback } from 'react';
 import { useProfile } from '@/services/profile';
 import type { ProfileFields, RelayListEntry } from '@/services/profile';
-import { useNdk } from '@/services/nostr';
+import { useRelayAuthEnabled, saveRelayAuthEnabled } from '@/services/nostr';
+import { useAuthStore } from '@/stores/authStore';
 
 const FIELD_LABELS: { key: keyof ProfileFields; label: string; hint?: string; multiline?: boolean }[] =
   [
@@ -27,18 +28,20 @@ const FIELD_LABELS: { key: keyof ProfileFields; label: string; hint?: string; mu
 export function ProfileView() {
   const { profile, relays, existing, isLoading, isSaving, error, reload, saveProfile, saveRelays } =
     useProfile();
-  const { service } = useNdk();
 
   const [draft, setDraft] = useState<ProfileFields>({});
   const [relayDraft, setRelayDraft] = useState<RelayListEntry[]>([]);
   const [newRelayUrl, setNewRelayUrl] = useState('');
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
-  // The auth setting from fc863561. Read once from the live policy so the
-  // control reflects actual behaviour rather than a duplicate copy of it.
-  const [authEnabled, setAuthEnabled] = useState(
-    () => service?.getAuthPolicy().isEnabled() ?? true
-  );
+  // The auth setting from fc863561, for the signed-in user. NdkProvider applies
+  // the same value to the live policy, so saving it is all a click has to do --
+  // including a click made before the provider has handed over the service.
+  const pubkey = useAuthStore((state) => state.pubkey);
+  const authEnabled = useRelayAuthEnabled(pubkey);
+  // Set only when the setting will not survive a reload. Kept apart from
+  // savedNotice, which is styled as success and hidden while a profile error shows.
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   // Seed the editable drafts from whatever was last loaded or saved, without
   // clobbering in-progress edits on every render.
@@ -93,10 +96,13 @@ export function ProfileView() {
 
   const toggleAuth = useCallback(
     (next: boolean) => {
-      setAuthEnabled(next);
-      service?.getAuthPolicy().setEnabled(next);
+      setAuthNotice(
+        saveRelayAuthEnabled(pubkey, next)
+          ? null
+          : 'This browser would not save the setting, so it resets when you reload.'
+      );
     },
-    [service]
+    [pubkey]
   );
 
   return (
@@ -292,6 +298,11 @@ export function ProfileView() {
             className="mt-1"
           />
         </label>
+        {authNotice && (
+          <p role="alert" className="mt-2 text-xs text-cloistr-warning">
+            {authNotice}
+          </p>
+        )}
       </section>
     </div>
   );

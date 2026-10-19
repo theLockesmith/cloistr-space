@@ -22,6 +22,8 @@ import {
   NDKEvent,
 } from './ndk';
 import { loadTiming } from '@/services/performance';
+import { useAuthStore } from '@/stores/authStore';
+import { useRelayAuthEnabled } from './authSetting';
 
 interface NdkContextValue {
   /** NDK service instance */
@@ -165,6 +167,16 @@ export function NdkProvider({ children, config }: NdkProviderProps) {
       clearInterval(interval);
     };
   }, [updateServiceStatus]);
+
+  // The relay-auth setting belongs to the signed-in user. The service outlives
+  // sign-in, sign-out and account switches, so building it with the right value
+  // is not enough: whenever the pubkey or that user's choice changes, the live
+  // policy is set to it. Nobody signed in gets the default.
+  const pubkey = useAuthStore((state) => state.pubkey);
+  const relayAuthEnabled = useRelayAuthEnabled(pubkey);
+  useEffect(() => {
+    service?.getAuthPolicy().setEnabled(relayAuthEnabled);
+  }, [service, relayAuthEnabled]);
 
   // Update signer when auth changes
   useEffect(() => {

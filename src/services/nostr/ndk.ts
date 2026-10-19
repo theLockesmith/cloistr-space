@@ -65,7 +65,8 @@ export interface NdkServiceConfig {
   autoConnect?: boolean;
   debug?: boolean;
   /**
-   * Authenticate to relays beyond the user's own set. Defaults to true.
+   * Authenticate to relays beyond the user's own set. Defaults to true; the
+   * per-user saved choice is applied later by NdkProvider (authSetting.ts).
    * Backs the single user-facing setting described in ded5c8fc.
    */
   relayAuthEnabled?: boolean;
@@ -211,6 +212,8 @@ export class NdkService {
     // These are the user's own relays, so they are tier 1: always authenticated.
     // Anything the outbox model discovers later is not, and has to earn a
     // signature by having an open subscription. See authPolicy.ts.
+    // Built before anyone signs in, so this is the default. NdkProvider applies
+    // the signed-in user's saved choice whenever the pubkey changes.
     this.authPolicy = new RelayAuthPolicy(relayUrls, config.relayAuthEnabled ?? true);
 
     this.ndk = new NDK({
