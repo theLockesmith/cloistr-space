@@ -97,10 +97,26 @@ export function encryptThreadContent(
  */
 export class ThreadKeyStore {
   private keys = new Map<string, Uint8Array>();
+  private listeners = new Set<() => void>();
 
   /** Register a thread key. Overwrites any existing key for the same thread. */
   set(threadPubkey: string, secretKey: Uint8Array): void {
+    const isNew = !this.keys.has(threadPubkey);
     this.keys.set(threadPubkey, secretKey);
+    if (isNew) this.listeners.forEach((l) => l());
+  }
+
+  /**
+   * Be told when a key is added. Keys arrive late: a reload restores them
+   * through a signer round trip, after readers have already chosen what to ask
+   * the relay for, and a reader that never hears of the key never reads its
+   * messages. Returns the unsubscribe.
+   */
+  onKeyAdded(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   /** Look up a thread's secret key. Returns undefined when the key is not held. */
@@ -129,7 +145,7 @@ export class ThreadKeyStore {
    * decryption of the wrap.
    */
   importHex(threadPubkey: string, secretKeyHex: string): void {
-    this.keys.set(threadPubkey, hexToBytes(secretKeyHex));
+    this.set(threadPubkey, hexToBytes(secretKeyHex));
   }
 
   /**
