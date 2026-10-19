@@ -19,6 +19,9 @@ import { defaultRelays } from '@/config/environment';
 
 type Sign = (template: EventTemplate) => Promise<VerifiedEvent>;
 
+/** Under PUBLISH_TIMEOUT_MS, so a dead relay fails on its own reason, not the overall timeout. */
+const CONNECT_TIMEOUT_MS = 8_000;
+
 /** A relay connection that can sign in as one key; tests supply a fake. */
 export interface WrapConnection {
   /** Resolves when the relay stored the event; rejects with its reason. */
@@ -37,17 +40,34 @@ export interface WrapPublishOptions {
   challengeWaitMs?: number;
 }
 
-async function openRelay(url: string, sign: Sign): Promise<WrapConnection> {
-  const relay = await Relay.connect(url);
+export async function openRelay(
+  url: string,
+  sign: Sign,
+  opts: { connectTimeoutMs?: number; websocketImplementation?: typeof WebSocket } = {},
+): Promise<WrapConnection> {
+  // Relay's declared options omit websocketImplementation, but its constructor
+  // spreads them into AbstractRelay's, which takes it (nostr-tools relay.js).
+  // Passed only for tests; omitted, nostr-tools keeps its own default socket.
+  const relayOpts = opts.websocketImplementation ? { websocketImplementation: opts.websocketImplementation } : {};
+  const relay = new Relay(url, relayOpts as ConstructorParameters<typeof Relay>[1]);
   let challenged = () => {};
   const challenge = new Promise<void>((resolve) => {
     challenged = resolve;
   });
-  // nostr-tools calls onauth when the challenge arrives, whichever comes first.
+  // Set before connecting: a relay may send its challenge the moment the socket
+  // opens, and nostr-tools signs in only if onauth is already there to call.
   relay.onauth = (template) => {
     challenged();
     return sign(template);
   };
+  try {
+    // On timeout nostr-tools closes the socket itself, so a hung connect leaves nothing open.
+    await relay.connect({ timeout: opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS });
+  } catch (e) {
+    relay.close();
+    // nostr-tools rejects with a bare string ("connection timed out").
+    throw e instanceof Error ? e : new Error(`Could not connect to ${url}: ${String(e)}`);
+  }
   return {
     publish: (event) => relay.publish(event),
     async signIn(waitMs) {

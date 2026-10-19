@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
 import { bytesToHex } from 'nostr-tools/utils';
 import { acceptStandalone, acceptWrapped, groupStandalone, type StandaloneMessage } from './standaloneThreads';
@@ -174,6 +174,25 @@ describe('wrap-mode messages keep the order they were sent in', () => {
     expect(thread.messages.map((m) => m.text)).toEqual(['first', 'second']);
     expect(thread.lastActivity).toBe(day + 2000);
     expect(thread.lastActivityApprox).toBe(false);
+  });
+
+  it('an untimed message never sorts above a timed one sent after it', () => {
+    const secretHex = bytesToHex(threadSk);
+    // Kit message, no ts: sent at some point today, wrap time randomised back to 10s in.
+    const oneTime = generateSecretKey();
+    const untimed = {
+      id: 'k'.repeat(64),
+      pubkey: getPublicKey(oneTime),
+      tags: [],
+      created_at: day + 10,
+      content: nip44.v2.encrypt(JSON.stringify({ p: envelope('kit, untimed'), a: fleetPk }), nip44.v2.utils.getConversationKey(oneTime, threadPk)),
+    };
+    const timed = wrapThreadMessage(envelope('space, timed'), fleetPk, secretHex, day + 1000);
+    const readAt = day + 2000;
+    const accepted = [untimed, timed].map((w) => acceptWrapped(tryUnwrapMessage(w, keys, readAt)!, wrapCtx)!);
+
+    const [thread] = groupStandalone(accepted);
+    expect(thread.messages.map((m) => m.text)).toEqual(['space, timed', 'kit, untimed']);
   });
 
   it('a message whose time is only approximate stays marked so', () => {

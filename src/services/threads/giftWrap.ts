@@ -17,6 +17,7 @@ import {
   getWindowId,
   jitteredTimestamp,
   expiryTimestamp,
+  WINDOW_SECONDS,
 } from './bucketCrypto';
 import type { ThreadKeyStore } from './threadKeyStore';
 
@@ -28,9 +29,12 @@ export interface UnwrappedMessage {
   threadId: string;
   wrapId: string;
   /**
-   * When the message was sent: the `ts` sealed inside it. A message without a
-   * usable one gets the wrap's created_at, which is randomised back toward the
-   * start of its window and can be up to a day early; approxTime says so.
+   * When the message was sent: the `ts` sealed inside it. Without a usable one
+   * the send time is only known to lie between the wrap's created_at (randomised
+   * back toward its window's start) and the window's end or now, whichever is
+   * sooner; createdAt is then that LATEST bound, and approxTime says so. The
+   * latest, because the earliest can be the evening before in local time, and
+   * an untimed message must never sort above timed ones sent after it.
    */
   createdAt: number;
   approxTime: boolean;
@@ -117,9 +121,16 @@ export function wrapThreadMessageWithKey(
  * Try to unwrap a kind 1059 event as a thread message.
  * Trial-decrypts with each held thread key.
  */
+/** The latest the message in a wrap made at `wrapCreatedAt` can have been sent, as of `nowSec`. */
+function latestSendTime(wrapCreatedAt: number, nowSec: number): number {
+  const windowEnd = (getWindowId(wrapCreatedAt) + 1) * WINDOW_SECONDS - 1;
+  return Math.max(wrapCreatedAt, Math.min(windowEnd, nowSec));
+}
+
 export function tryUnwrapMessage(
   wrapEvent: { id: string; pubkey: string; content: string; tags: string[][]; created_at?: number },
   keyStore: ThreadKeyStore,
+  nowSec: number = Math.floor(Date.now() / 1000),
 ): UnwrappedMessage | null {
   for (const [threadPubkey, threadSk] of keyStore.entries()) {
     try {
@@ -134,7 +145,7 @@ export function tryUnwrapMessage(
           authorHex: inner.a,
           threadId: threadPubkey,
           wrapId: wrapEvent.id,
-          createdAt: sentAt ?? wrapEvent.created_at ?? 0,
+          createdAt: sentAt ?? (wrapEvent.created_at === undefined ? 0 : latestSendTime(wrapEvent.created_at, nowSec)),
           approxTime: sentAt === null,
         };
       }
