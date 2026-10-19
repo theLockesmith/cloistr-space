@@ -238,6 +238,7 @@ function standaloneThread(over: Partial<import('@/services/threads').StandaloneT
     sealed: true,
     projectId: null,
     lastActivity: 1_790_000_200,
+    lastActivityApprox: false,
     messages: [
       { id: 'm1', pubkey: 'a'.repeat(64), createdAt: 1_790_000_100, threadKey: 'sealed:' + 'f'.repeat(64), title: 'cloistr-group-wrap', text: 'staging deploy is broken', from: 'cloistr-orchestrator', sealed: true, projectId: null },
       { id: 'm2', pubkey: 'b'.repeat(64), createdAt: 1_790_000_200, threadKey: 'sealed:' + 'f'.repeat(64), title: 'cloistr-group-wrap', text: 'fixed in !229', from: 'cloistr-space', sealed: true, projectId: null },
@@ -261,6 +262,29 @@ describe('ThreadsView standalone threads', () => {
     expect(screen.getByText('staging deploy is broken')).toBeInTheDocument();
     expect(screen.getByText('fixed in !229')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows only the day for a message whose exact time is unknown, never a precise-looking clock time', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const at = 1_790_000_100;
+    const base = standaloneThread();
+    standaloneFixtures = [standaloneThread({
+      lastActivity: at,
+      lastActivityApprox: true,
+      messages: [{ ...base.messages[0], createdAt: at, approxTime: true }],
+    })];
+    render(<ThreadsView />);
+
+    const row = screen.getByRole('button', { name: /cloistr-group-wrap/ });
+    const day = new Date(at * 1000).toLocaleDateString();
+    const precise = new Date(at * 1000).toLocaleString();
+    expect(row).toHaveTextContent(`~${day}`);
+    expect(row).not.toHaveTextContent(precise);
+
+    await userEvent.click(row);
+    const item = screen.getByText('staging deploy is broken').closest('li')!;
+    expect(item).toHaveTextContent(`~${day}`);
+    expect(item).not.toHaveTextContent(precise);
   });
 
   it('does not say "not in any projects" when standalone threads exist', () => {

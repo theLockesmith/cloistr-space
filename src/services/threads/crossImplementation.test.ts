@@ -54,7 +54,9 @@ describe('cross-implementation: pure function vectors', () => {
 });
 
 describe('cross-implementation: inner payload format', () => {
-  it('message inner is JSON {p, a}', () => {
+  // The kit reads p and a and ignores other keys (thread_wrap.unwrap_event),
+  // so ts, the send time, is invisible to it and readable by Space.
+  it('message inner is JSON {p, a, ts}', () => {
     const threadSk = generateSecretKey();
     const threadHex = bytesToHex(threadSk);
     const authorPk = getPublicKey(generateSecretKey());
@@ -66,7 +68,7 @@ describe('cross-implementation: inner payload format', () => {
     const conversationKey = nip44.v2.utils.getConversationKey(threadSk, wrap.pubkey);
     const decrypted = nip44.v2.decrypt(wrap.content, conversationKey);
     const inner = JSON.parse(decrypted);
-    expect(inner).toEqual({ p: 'hello world', a: authorPk });
+    expect(inner).toEqual({ p: 'hello world', a: authorPk, ts: now });
   });
 
   it('handoff inner is JSON {tid, sec, g}', () => {

@@ -208,7 +208,7 @@ function StandaloneRow({
           <span className="min-w-0 truncate text-sm text-cloistr-light">{thread.title}</span>
         </div>
         <div className="mt-1 text-xs text-cloistr-light/50">
-          {count} {count === 1 ? 'message' : 'messages'} · {new Date(thread.lastActivity * 1000).toLocaleString()}
+          {count} {count === 1 ? 'message' : 'messages'} · <SentAt at={thread.lastActivity} approx={thread.lastActivityApprox} />
         </div>
       </button>
       {open && (
@@ -216,7 +216,7 @@ function StandaloneRow({
           {thread.messages.map((m) => (
             <li key={m.id} className="rounded bg-cloistr-light/5 p-2 text-sm">
               <div className="text-xs text-cloistr-light/50">
-                {m.from ?? `${m.pubkey.slice(0, 8)}…`} · {new Date(m.createdAt * 1000).toLocaleString()}
+                {m.from ?? `${m.pubkey.slice(0, 8)}…`} · <SentAt at={m.createdAt} approx={m.approxTime === true} />
               </div>
               <p className="whitespace-pre-wrap break-words text-cloistr-light/90">{m.text}</p>
             </li>
@@ -225,6 +225,16 @@ function StandaloneRow({
       )}
     </li>
   );
+}
+
+/**
+ * An approximate time is a wrap's randomised one, up to a day early, so a
+ * clock time would be precise-looking and wrong: show the day only.
+ */
+function SentAt({ at, approx }: { at: number; approx: boolean }) {
+  const d = new Date(at * 1000);
+  if (!approx) return <>{d.toLocaleString()}</>;
+  return <span title="Exact time not recorded by the sender">~{d.toLocaleDateString()}</span>;
 }
 
 function EmptyState({

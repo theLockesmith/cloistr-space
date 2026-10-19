@@ -242,6 +242,22 @@ describe('SealedMessages thread names', () => {
   });
 });
 
+describe('SealedMessages order', () => {
+  it('lists a thread’s messages in the order they were sent, not the order they arrived', () => {
+    heldStore.current = new Map([['threadpk', new Uint8Array(32)]]);
+    mockUseBucketReader.mockReturnValue({
+      handoffs: [], isLoading: false, error: null, refresh: vi.fn(),
+      messages: [
+        { plaintext: 'second', authorHex: 'aa', threadId: 'threadpk', wrapId: 'w2', createdAt: 20, approxTime: false },
+        { plaintext: 'first', authorHex: 'aa', threadId: 'threadpk', wrapId: 'w1', createdAt: 10, approxTime: false },
+      ],
+    });
+    const { getByText } = render(<SealedMessages />);
+    const first = getByText('first');
+    expect(first.compareDocumentPosition(getByText('second')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
 describe('SealedMessages hand-off prompt', () => {
   it('asks before taking an offered key, and says the sender cannot be verified', async () => {
     const acceptHandoff = vi.fn();

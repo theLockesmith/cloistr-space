@@ -15,7 +15,9 @@
 import { describe, it, expect } from 'vitest';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
-import { acceptStandalone, groupStandalone, type StandaloneMessage } from './standaloneThreads';
+import { bytesToHex } from 'nostr-tools/utils';
+import { acceptStandalone, acceptWrapped, groupStandalone, type StandaloneMessage } from './standaloneThreads';
+import { wrapThreadMessage, tryUnwrapMessage } from './giftWrap';
 
 const threadSk = generateSecretKey();
 const threadPk = getPublicKey(threadSk);
@@ -153,5 +155,33 @@ describe('groupStandalone: one conversation per thread', () => {
   it('the same event seen twice is one message', () => {
     const m = acceptStandalone(fleetMessage('once'), ctx)!;
     expect(groupStandalone([m, { ...m }])[0].messages).toHaveLength(1);
+  });
+});
+
+describe('wrap-mode messages keep the order they were sent in', () => {
+  const day = 1_790_006_400 - (1_790_006_400 % 86400);
+  const threadIds = new Map([[threadPk, 'cloistr-group-wrap']]);
+  const wrapCtx = { keyStore: keys, threadIds };
+
+  it('orders by the time inside the seal, whatever the wraps’ randomised times say', () => {
+    const secretHex = bytesToHex(threadSk);
+    // Sent 1000s then 2000s into the day; the wraps' outer times say the reverse.
+    const first = { ...wrapThreadMessage(envelope('first'), fleetPk, secretHex, day + 1000), created_at: day + 900 };
+    const second = { ...wrapThreadMessage(envelope('second'), fleetPk, secretHex, day + 2000), created_at: day + 10 };
+    const accepted = [second, first].map((w) => acceptWrapped(tryUnwrapMessage(w, keys)!, wrapCtx)!);
+
+    const [thread] = groupStandalone(accepted);
+    expect(thread.messages.map((m) => m.text)).toEqual(['first', 'second']);
+    expect(thread.lastActivity).toBe(day + 2000);
+    expect(thread.lastActivityApprox).toBe(false);
+  });
+
+  it('a message whose time is only approximate stays marked so', () => {
+    const msg = acceptWrapped(
+      { plaintext: envelope('old kit'), authorHex: fleetPk, threadId: threadPk, wrapId: 'w1', createdAt: day + 5, approxTime: true },
+      wrapCtx,
+    )!;
+    expect(msg.approxTime).toBe(true);
+    expect(groupStandalone([msg])[0].lastActivityApprox).toBe(true);
   });
 });

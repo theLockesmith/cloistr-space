@@ -86,6 +86,8 @@ export function SealedMessagesPanel({ reader }: { reader: BucketReaderReturn }) 
       list.push(msg);
       map.set(msg.threadId, list);
     }
+    // Arrival order is relay order, not send order.
+    for (const list of map.values()) list.sort((a, b) => a.createdAt - b.createdAt);
     return map;
   }, [messages]);
 

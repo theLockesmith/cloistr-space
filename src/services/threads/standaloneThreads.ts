@@ -36,6 +36,8 @@ export interface StandaloneMessage {
   id: string;
   pubkey: string;
   createdAt: number;
+  /** True when createdAt is a wrap's randomised time, not the send time; see UnwrappedMessage. */
+  approxTime?: boolean;
   /** Which conversation: `sealed:<thread pubkey>` or `root:<root event id>`. */
   threadKey: string;
   title: string;
@@ -56,6 +58,8 @@ export interface StandaloneThread {
   /** Oldest first. */
   messages: StandaloneMessage[];
   lastActivity: number;
+  /** The newest message's time is approximate. */
+  lastActivityApprox: boolean;
 }
 
 interface RawEvent {
@@ -138,6 +142,7 @@ export function groupStandalone(messages: StandaloneMessage[]): StandaloneThread
       projectId: msgs.find((m) => m.projectId)?.projectId ?? null,
       messages: msgs,
       lastActivity: msgs[msgs.length - 1].createdAt,
+      lastActivityApprox: msgs[msgs.length - 1].approxTime === true,
     });
   }
   return threads.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -164,6 +169,7 @@ export function acceptWrapped(
     id: msg.wrapId,
     pubkey: msg.authorHex,
     createdAt: msg.createdAt,
+    approxTime: msg.approxTime,
     threadKey: `sealed:${msg.threadId}`,
     title: ctx.threadIds.get(msg.threadId) || envelope?.thread || 'Sealed thread',
     text: envelope ? envelope.body : msg.plaintext,
