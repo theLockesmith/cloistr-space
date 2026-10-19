@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, verifyEvent, nip44 } from 'nostr-tools';
 import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
 import {
@@ -114,6 +114,51 @@ describe('tryUnwrapMessage', () => {
     const result = tryUnwrapMessage(wrap, store);
     expect(result).not.toBeNull();
     expect(result!.plaintext).toBe('target');
+  });
+});
+
+describe('tryUnwrapMessage: the time a message was sent', () => {
+  // The wrap's created_at is randomised back toward the start of its window on
+  // purpose, so it can sit up to a day before the real send time. The real time
+  // travels inside the seal, as `ts`.
+  const threadSk = generateSecretKey();
+  const threadSecretHex = bytesToHex(threadSk);
+  const threadPubkey = getPublicKey(threadSk);
+  const authorPk = getPublicKey(generateSecretKey());
+  const now = 1727222400 + 43200;
+  const windowStart = getWindowId(now) * WINDOW_SECONDS;
+  const store = new ThreadKeyStore();
+  store.set(threadPubkey, threadSk);
+
+  /** A wrap whose sealed payload is exactly `inner`, as the kit or anyone holding the key might write it. */
+  function wrapInner(inner: Record<string, unknown>, outerAt: number) {
+    const oneTimeSk = generateSecretKey();
+    const ck = nip44.v2.utils.getConversationKey(oneTimeSk, threadPubkey);
+    return { id: 'e'.repeat(64), pubkey: getPublicKey(oneTimeSk), content: nip44.v2.encrypt(JSON.stringify(inner), ck), tags: [], created_at: outerAt };
+  }
+
+  it('reads at the time it was sent, not the wrap’s randomised time', () => {
+    const wrap = { ...wrapThreadMessage('hello', authorPk, threadSecretHex, now), created_at: windowStart };
+    const msg = tryUnwrapMessage(wrap, store)!;
+    expect(msg.createdAt).toBe(now);
+    expect(msg.approxTime).toBe(false);
+  });
+
+  it('with no time inside (the kit’s format today), falls back to the wrap’s time and says it is approximate', () => {
+    const msg = tryUnwrapMessage(wrapInner({ p: 'x', a: authorPk }, windowStart + 5), store)!;
+    expect(msg.createdAt).toBe(windowStart + 5);
+    expect(msg.approxTime).toBe(true);
+  });
+
+  it.each([
+    ['earlier than the wrap, which the randomising never produces', windowStart + 99],
+    ['in another window', windowStart + 100 + WINDOW_SECONDS],
+    ['not a whole number', windowStart + 200.5],
+    ['a string', String(windowStart + 200)],
+  ])('ignores a claimed time %s', (_why, ts) => {
+    const msg = tryUnwrapMessage(wrapInner({ p: 'x', a: authorPk, ts }, windowStart + 100), store)!;
+    expect(msg.createdAt).toBe(windowStart + 100);
+    expect(msg.approxTime).toBe(true);
   });
 });
 

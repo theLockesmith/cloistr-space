@@ -2,7 +2,8 @@
  * Kind 1059 gift-wrap construction and trial decryption.
  *
  * Wire format matches the kit's thread_wrap.py:
- *   message inner: JSON {"p": plaintext, "a": author_pubkey_hex}
+ *   message inner: JSON {"p": plaintext, "a": author_pubkey_hex, "ts": sent_at_unix}
+ *     (`ts` added 2026-10-19; the kit reads only p and a, and writes no ts yet)
  *   handoff inner: JSON {"tid": thread_id, "sec": secret_hex, "g": granter_hex}
  *   tags: [['t', bucket_hex], ['expiration', String((window+2)*86400)]]
  */
@@ -26,8 +27,25 @@ export interface UnwrappedMessage {
   authorHex: string;
   threadId: string;
   wrapId: string;
-  /** The wrap's created_at: the kit jitters it, so it orders roughly, not exactly. */
+  /**
+   * When the message was sent: the `ts` sealed inside it. A message without a
+   * usable one gets the wrap's created_at, which is randomised back toward the
+   * start of its window and can be up to a day early; approxTime says so.
+   */
   createdAt: number;
+  approxTime: boolean;
+}
+
+/**
+ * The sealed send time, if it is consistent with the wrap around it. Nothing
+ * signs `ts`, so it is only checked against what the wrap proves: the
+ * randomised created_at is never later than the send and always in the same
+ * window.
+ */
+function sealedSendTime(ts: unknown, wrapCreatedAt: number | undefined): number | null {
+  if (typeof ts !== 'number' || !Number.isSafeInteger(ts) || wrapCreatedAt === undefined) return null;
+  if (ts < wrapCreatedAt || getWindowId(ts) !== getWindowId(wrapCreatedAt)) return null;
+  return ts;
 }
 
 export interface UnwrappedHandoff {
@@ -62,7 +80,7 @@ export function wrapThreadMessage(
 
   const oneTimeSk = generateSecretKey();
   const conversationKey = nip44.v2.utils.getConversationKey(oneTimeSk, threadPubkey);
-  const inner = JSON.stringify({ p: plaintext, a: authorPubkey });
+  const inner = JSON.stringify({ p: plaintext, a: authorPubkey, ts: now });
   const encrypted = nip44.v2.encrypt(inner, conversationKey);
 
   const bucket = computeThreadBucket(threadSecretHex, wid);
@@ -94,12 +112,14 @@ export function tryUnwrapMessage(
       const inner = JSON.parse(decrypted);
 
       if (typeof inner.p === 'string' && typeof inner.a === 'string') {
+        const sentAt = sealedSendTime(inner.ts, wrapEvent.created_at);
         return {
           plaintext: inner.p,
           authorHex: inner.a,
           threadId: threadPubkey,
           wrapId: wrapEvent.id,
-          createdAt: wrapEvent.created_at ?? 0,
+          createdAt: sentAt ?? wrapEvent.created_at ?? 0,
+          approxTime: sentAt === null,
         };
       }
     } catch {
