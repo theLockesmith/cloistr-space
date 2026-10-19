@@ -8,6 +8,13 @@ interface ContactsState {
   isSyncing: boolean;
   lastError: string | null;
   conflictLog: ConflictResolution[];
+  /**
+   * The key this list belongs to. Contacts are per-identity, and publishing
+   * one key's list under another corrupts it and publicly links the two.
+   */
+  owner: string | null;
+  /** The key whose list was successfully read from a relay. Writes need it. */
+  loadedFor: string | null;
 
   // Actions
   setContacts: (contacts: Map<string, Contact>) => void;
@@ -19,18 +26,34 @@ interface ContactsState {
   mergeCrdt: (remoteState: ContactsCrdtState) => void;
   getPendingChanges: () => ContactEntry[];
   markSynced: () => void;
+  /** Drop everything and start an empty, unread list for `owner`. */
+  resetFor: (owner: string | null) => void;
+  /** Record that `owner`'s list was read. */
+  markLoaded: (owner: string) => void;
 
   setLoading: (loading: boolean) => void;
   setSyncing: (syncing: boolean) => void;
   setError: (error: string | null) => void;
 }
 
-const generateClientId = () => {
-  const stored = localStorage.getItem('cloistr-space-client-id');
-  if (stored) return stored;
-  const id = crypto.randomUUID();
-  localStorage.setItem('cloistr-space-client-id', id);
-  return id;
+/**
+ * This device's id for `owner`, published in every kind:33000 it writes. One
+ * per key, never shared: a single id across keys would appear in each key's
+ * public list and link the identities that used this browser. With no owner
+ * the id is throwaway, since nothing is published without one.
+ */
+const clientIdFor = (owner: string | null) => {
+  if (!owner) return crypto.randomUUID();
+  const storageKey = `cloistr-space-client-id:${owner}`;
+  try {
+    const stored = localStorage.getItem(storageKey);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    localStorage.setItem(storageKey, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
 };
 
 export const useContactsStore = create<ContactsState>((set, get) => ({
@@ -39,13 +62,15 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     entries: new Map(),
     version: 0,
     lastSync: 0,
-    clientId: generateClientId(),
+    clientId: clientIdFor(null),
     pendingChanges: [],
   },
   isLoading: true,
   isSyncing: false,
   lastError: null,
   conflictLog: [],
+  owner: null,
+  loadedFor: null,
 
   setContacts: (contacts) => set({ contacts, isLoading: false }),
 
@@ -203,6 +228,30 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
       },
       isSyncing: false,
     }));
+  },
+
+  resetFor: (owner) => {
+    set(() => ({
+      contacts: new Map(),
+      crdt: {
+        entries: new Map(),
+        version: 0,
+        lastSync: 0,
+        clientId: clientIdFor(owner),
+        pendingChanges: [],
+      },
+      conflictLog: [],
+      lastError: null,
+      isLoading: true,
+      // A sync still running for the previous key is not this key's sync.
+      isSyncing: false,
+      owner,
+      loadedFor: null,
+    }));
+  },
+
+  markLoaded: (owner) => {
+    set((state) => (state.owner === owner ? { loadedFor: owner } : {}));
   },
 
   setLoading: (isLoading) => set({ isLoading }),

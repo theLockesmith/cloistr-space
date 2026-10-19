@@ -189,6 +189,9 @@ export class SignerAdapter implements NDKSigner {
 /**
  * NDK service singleton for managing Nostr connections
  */
+/** How long a read from the user's own relays may take before it counts as failed. */
+export const OWN_RELAY_READ_TIMEOUT_MS = 15_000;
+
 export class NdkService {
   private ndk: NDK;
   private statusListeners: Set<(statuses: Map<string, RelayStatus>) => void> = new Set();
@@ -522,6 +525,47 @@ export class NdkService {
     const relaySet = this.getOwnRelaySet();
     if (!relaySet) return this.ndk.fetchEvents(filterArray);
     return this.ndk.fetchEvents(filterArray, undefined, relaySet);
+  }
+
+  /**
+   * Read from the user's own relays, and say how many of them answered.
+   *
+   * fetchFromOwnRelays resolves empty both when relays answered with nothing
+   * and when none answered at all. For a list we are about to replace, those
+   * are opposite facts, so this counts end-of-results per relay
+   * (NDKSubscription.eosesSeen). NDK can declare the query finished without
+   * any relay sending end-of-results, which surfaces here as answeredBy 0.
+   * Rejects if nothing settles within OWN_RELAY_READ_TIMEOUT_MS.
+   */
+  readFromOwnRelays(filters: NDKFilter | NDKFilter[]): Promise<{ events: NDKEvent[]; answeredBy: number }> {
+    const filterArray = Array.isArray(filters) ? filters : [filters];
+    const relaySet = this.getOwnRelaySet();
+    return new Promise((resolve, reject) => {
+      const events = new Map<string, NDKEvent>();
+      let settled = false;
+      let sub: { stop(): void } | undefined;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        sub?.stop();
+        reject(new Error('None of your relays answered.'));
+      }, OWN_RELAY_READ_TIMEOUT_MS);
+      sub = this.ndk.subscribe(
+        filterArray,
+        { closeOnEose: true, groupable: false, ...(relaySet ? { relaySet } : {}) },
+        {
+          onEvent: (event: NDKEvent) => {
+            events.set(event.id, event);
+          },
+          onEose: (subscription: { eosesSeen: Set<unknown> }) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve({ events: [...events.values()], answeredBy: subscription.eosesSeen.size });
+          },
+        } as never
+      );
+    });
   }
 
   /**

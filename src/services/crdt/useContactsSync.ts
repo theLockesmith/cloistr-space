@@ -248,9 +248,15 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
   // Look for an overwritten contact list once the store is known to be empty.
   // Checked at the same gate as auto-import because it is the same evidence:
   // a confirmed-empty current list is what makes an older one worth restoring.
-  const [recovery, setRecovery] = useState<RecoveryCandidate | null>(null);
-  const [recoveryChecked, setRecoveryChecked] = useState(false);
+  // Kept with the key it was read for: another key's candidate or "checked"
+  // flag must not open or close this key's import gate.
+  const [recoveryState, setRecoveryState] = useState<{
+    owner: string;
+    candidate: RecoveryCandidate | null;
+  } | null>(null);
   const recoveryCheckedForRef = useRef<string | null>(null);
+  const recoveryChecked = Boolean(pubkey && recoveryState?.owner === pubkey);
+  const recovery = recoveryChecked ? recoveryState!.candidate : null;
 
   useEffect(() => {
     if (importState !== 'synced-empty' || !pubkey || !syncServiceRef.current) return;
@@ -263,12 +269,15 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
       service
         .findRecovery(pubkey)
         .then((found) => {
-          setRecovery(found);
-          setRecoveryChecked(true);
+          // A lookup for a key the user has since left must not hold up the
+          // new key's import (a non-null recovery closes that gate).
+          if (useContactsStore.getState().owner !== pubkey) return;
+          setRecoveryState({ owner: pubkey, candidate: found });
         })
         .catch(() => {
+          if (useContactsStore.getState().owner !== pubkey) return;
           // Do not block auto-import forever on a failed lookup.
-          setRecoveryChecked(true);
+          setRecoveryState({ owner: pubkey, candidate: null });
           // Recovery is a bonus path. Failing to find one must not disturb
           // normal sync, and leaves auto-import as the fallback.
           recoveryCheckedForRef.current = null;
@@ -279,11 +288,12 @@ export function useContactsSync(options: UseContactsSyncOptions = {}): UseContac
   }, [importState, pubkey]);
 
   const applyRecovery = useCallback(async (): Promise<boolean> => {
-    if (!syncServiceRef.current || !recovery) return false;
-    const ok = await syncServiceRef.current.applyRecovery(recovery);
-    if (ok) setRecovery(null);
+    if (!syncServiceRef.current || !recovery || !recoveryState) return false;
+    const { owner } = recoveryState;
+    const ok = await syncServiceRef.current.applyRecovery(recovery, owner);
+    if (ok) setRecoveryState({ owner, candidate: null });
     return ok;
-  }, [recovery]);
+  }, [recovery, recoveryState]);
 
   // Auto-import a kind:3 list for a user who has no NIP-0A list.
   //

@@ -14,6 +14,7 @@ import {
   clearSharedSession,
   withSignerRetry,
   classifySignerError,
+  useIdentityChange,
 } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
@@ -127,10 +128,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   //   1. Update the local authStore so all pubkey-scoped hooks (useGroups,
   //      useFeed, useContactsSync) re-scope to the new identity.
   //   2. Replace the local signer state so NdkProvider picks up the new signer.
-  //   3. Reset contactsStore (contacts + CRDT) because it holds in-memory data
-  //      scoped to the previous key; the sync hooks will repopulate it.
+  //   3. Reset contactsStore for the new key: contacts, CRDT entries and
+  //      pending changes, and mark it unread. Clearing only the contacts map
+  //      left the CRDT holding the previous key's follows, which the new key's
+  //      next sync then published -- under the new key, linking the two.
   const prevActivePubkeyRef = useRef<string | null>(null);
-  const resetContacts = useContactsStore((s) => s.setContacts);
+  const resetContacts = useContactsStore((s) => s.resetFor);
+  // Every identity change -- sign-in, key switch, SSO restore, cross-tab --
+  // starts an empty, unread contact list owned by the new key. The switch
+  // bridge below handles key switches it can see; this also covers Header
+  // sign-in and restores that never pass through it. Contacts are
+  // per-identity, and another key's entries must never reach this one.
+  useIdentityChange(
+    useCallback(
+      (event: { pubkey: string }) => {
+        if (useContactsStore.getState().owner !== event.pubkey) resetContacts(event.pubkey);
+      },
+      [resetContacts]
+    )
+  );
   useEffect(() => {
     const { activePubkey, isConnected, method, isSwitching } = shared.authState;
 
@@ -156,8 +172,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     //    read pubkey from here and will re-subscribe when it changes.
     storeLogin(activePubkey, method ?? 'nip46', config.signerUrl);
 
-    // 3. Clear contacts for the old key so useContactsSync starts fresh
-    resetContacts(new Map());
+    // 3. Start an empty, unread contact list owned by the new key, unless
+    //    useIdentityChange already did -- resetting again would mark a list
+    //    the new key's sync has just read as unread.
+    if (useContactsStore.getState().owner !== activePubkey) resetContacts(activePubkey);
   }, [shared.authState, shared.signer, storeLogin, resetContacts]);
 
   // Check for NIP-07 extension on mount
@@ -422,6 +440,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSharedSession();
       // Clear IndexedDB cache so the next user does not inherit this one's feed.
       void clearCache();
+      // And the in-memory contact list, CRDT and pending changes with it, so
+      // the next key to sign in in this tab starts from nothing.
+      useContactsStore.getState().resetFor(null);
       storeLogout();
     }
   }, [signer, storeLogout]);
