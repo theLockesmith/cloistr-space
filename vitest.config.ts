@@ -21,6 +21,12 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // Load @cloistr/ui through vitest rather than straight from node_modules,
+    // so a test's vi.mock('@cloistr/auth') also reaches the library's own
+    // imports of it. Without this, ui's useIdentityChange read the REAL
+    // @cloistr/auth and threw outside its provider while the test's fake
+    // sign-in state sat unused (deepLinkReload.test.tsx, red master 2026-10-19).
+    server: { deps: { inline: ['@cloistr/ui'] } },
     // CI-friendly settings
     pool: 'forks', // More reliable than threads on Alpine/CI
     testTimeout: 30000, // 30s per test
