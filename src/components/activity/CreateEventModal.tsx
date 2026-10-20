@@ -17,6 +17,25 @@ interface CreateEventModalProps {
   groupId?: string;
 }
 
+/**
+ * The start/end tags for a date-based (all-day) event, YYYY-MM-DD.
+ *
+ * `endDate` is the form's last day, which the event includes. NIP-52's `end`
+ * is exclusive, so a multi-day event carries the day after it; a single-day
+ * event carries no end at all.
+ */
+export function allDayTags(startDate: string, endDate: string): string[][] {
+  const tags = [['start', startDate]];
+  if (endDate && endDate > startDate) tags.push(['end', nextDay(endDate)]);
+  return tags;
+}
+
+/** The calendar day after a YYYY-MM-DD date. UTC arithmetic, so no DST edge. */
+function nextDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
 export function CreateEventModal({
   isOpen,
   onClose,
@@ -104,11 +123,7 @@ export function CreateEventModal({
       }
 
       if (isAllDay) {
-        // Date-based event: YYYY-MM-DD format
-        tags.push(['start', startDate]);
-        if (endDate && endDate !== startDate) {
-          tags.push(['end', endDate]);
-        }
+        tags.push(...allDayTags(startDate, endDate));
       } else {
         // Time-based event: Unix timestamp
         const startDateTime = new Date(`${startDate}T${startTime}`);

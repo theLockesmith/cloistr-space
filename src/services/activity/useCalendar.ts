@@ -13,8 +13,21 @@ import { CALENDAR_DATE_KIND, CALENDAR_TIME_KIND } from '@/types/activity';
 /** Maximum events to display */
 const MAX_EVENTS = 10;
 
+/**
+ * Local midnight of a NIP-52 date (YYYY-MM-DD), plus `addDays`, in seconds.
+ *
+ * `new Date('2026-10-20')` parses as UTC midnight, which is the previous
+ * evening anywhere west of Greenwich and the wrong day for every all-day
+ * comparison made against local time. NaN for anything that is not a date.
+ */
+function localDayStart(date: string, addDays = 0): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return NaN;
+  return Math.floor(new Date(+m[1], +m[2] - 1, +m[3] + addDays).getTime() / 1000);
+}
+
 /** Parse a NIP-52 calendar event */
-function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
+export function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
   const tags = event.tags;
   const isDateEvent = event.kind === CALENDAR_DATE_KIND;
 
@@ -36,9 +49,7 @@ function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
 
   let startTime: number;
   if (isDateEvent) {
-    // Date-based: YYYY-MM-DD format
-    const date = new Date(startTag[1]);
-    startTime = Math.floor(date.getTime() / 1000);
+    startTime = localDayStart(startTag[1]);
   } else {
     // Time-based: Unix timestamp
     startTime = parseInt(startTag[1], 10);
@@ -49,13 +60,14 @@ function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
   // End time
   const endTag = tags.find((t) => t[0] === 'end');
   let endTime: number | undefined;
-  if (endTag?.[1]) {
-    if (isDateEvent) {
-      const date = new Date(endTag[1]);
-      endTime = Math.floor(date.getTime() / 1000);
-    } else {
-      endTime = parseInt(endTag[1], 10);
-    }
+  if (isDateEvent) {
+    // NIP-52: a date-based end is exclusive, and with none the event occupies
+    // its start day. Defaulting it to "start + 1 hour" instead is what made an
+    // all-day event for today vanish from upcoming an hour after midnight.
+    endTime = endTag?.[1] ? localDayStart(endTag[1]) : localDayStart(startTag[1], 1);
+    if (isNaN(endTime)) endTime = undefined;
+  } else if (endTag?.[1]) {
+    endTime = parseInt(endTag[1], 10);
   }
 
   // Location
@@ -83,6 +95,13 @@ function parseCalendarEvent(event: NDKEvent): CalendarEvent | null {
     participants,
     createdAt: event.created_at || Math.floor(Date.now() / 1000),
   };
+}
+
+/** True while the event has not ended and starts within `daysAhead` days of `now`. */
+export function isUpcoming(e: CalendarEvent, now: number, daysAhead: number): boolean {
+  const futureLimit = now + daysAhead * 24 * 60 * 60;
+  const endTime = e.endTime || e.startTime + 3600; // Default 1 hour
+  return endTime >= now && e.startTime <= futureLimit;
 }
 
 /** Calendar view modes */
@@ -139,17 +158,8 @@ export function useCalendar(options: UseCalendarOptions = {}): UseCalendarReturn
 
   const filterAndSort = useCallback((events: CalendarEvent[]): CalendarEvent[] => {
     const now = Math.floor(Date.now() / 1000);
-    const futureLimit = now + daysAhead * 24 * 60 * 60;
-
     return events
-      .filter((e) => {
-        if (upcomingOnly) {
-          // Include events that haven't ended yet
-          const endTime = e.endTime || e.startTime + 3600; // Default 1 hour
-          return endTime >= now && e.startTime <= futureLimit;
-        }
-        return true;
-      })
+      .filter((e) => !upcomingOnly || isUpcoming(e, now, daysAhead))
       .sort((a, b) => a.startTime - b.startTime)
       .slice(0, limit);
   }, [upcomingOnly, daysAhead, limit]);
