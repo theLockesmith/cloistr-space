@@ -107,6 +107,48 @@ describe('a widget read ends in items, empty, or a named error', () => {
   });
 });
 
+// Review of !216 (cloistr-pr): guards no test reached. "Try again" on the
+// Files and Tasks widgets now calls refresh, so the first one is reachable.
+describe('survivors from review', () => {
+  it('a refresh while disconnected stays loading, not empty', async () => {
+    connected = false;
+    const { result } = await mounted();
+    act(() => result.current.refresh());
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('withReachability keeps a widget\'s items rather than replacing them with the error', async () => {
+    // Calendar and Mentions rely on this directly; Files also hides errors itself.
+    const { withReachability } = await import('./widgetReads');
+    const state = { items: [1], isLoading: false, error: null };
+    expect(withReachability(state, true)).toBe(state);
+    expect(withReachability({ ...state, items: [] }, true).error).toBe(NOT_CONNECTED);
+  });
+
+  it('a widget with files keeps showing them when the connection drops', async () => {
+    const hook = await mounted();
+    act(() => lastHandlers!.onEvent!(fileEvent));
+    connected = false;
+    hook.rerender();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WIDGET_NO_ANSWER_MS);
+    });
+    expect(hook.result.current.items).toHaveLength(1);
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it('an event the widget filters out still counts as a relay answering', async () => {
+    const { result } = await mounted();
+    act(() => lastHandlers!.onEvent!({ ...fileEvent, tags: [] }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WIDGET_NO_ANSWER_MS);
+    });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+});
+
 describe('every Activity widget hook uses the same rule', () => {
   it.each(['useRecentFiles', 'useCalendar', 'useMentions'])('%s', (name) => {
     const src = readFileSync(join(__dirname, `${name}.ts`), 'utf8');
