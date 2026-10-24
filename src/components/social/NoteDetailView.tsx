@@ -23,7 +23,7 @@ import { useNoteActions, ACTION_BLOCKED_MESSAGE } from '@/services/social';
 import { buildReplyTags } from '@/services/social/replyEvents';
 import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { useEmojiSets } from '@/services/social/useEmojiSets';
-import { reactionPayload, type EmojiEntry } from '@/services/social/emojiSets';
+import { reactionPayload, isRenderable, type EmojiEntry } from '@/services/social/emojiSets';
 import { useMirrorSign } from '@/services/cloistr/useMirrorSign';
 import { useContextMenuTrigger } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -274,7 +274,17 @@ function NoteActions({ note }: { note: Note }) {
   const { relayStatuses } = useNdk();
   const quoteHints = useMemo(() => ownRelayHints(relayStatuses), [relayStatuses]);
   const { emoji, isLoading: emojiLoading } = useEmojiSets();
-  const { mirrorMap, isSigning } = useMirrorSign();
+  const { sign, mirrorMap, isSigning } = useMirrorSign();
+
+  // Pre-sign custom emoji image URLs so images are ready when the picker opens.
+  // Without this call mirrorMap stays empty for every custom-emoji URL and all
+  // custom emoji render as :shortcode: text.  SocialFeed does the same.
+  useEffect(() => {
+    const urls = emoji
+      .filter((e) => !isRenderable(e) && typeof e.url === 'string')
+      .map((e) => e.url as string);
+    if (urls.length > 0) sign(urls);
+  }, [emoji, sign]);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [quoting, setQuoting] = useState(false);

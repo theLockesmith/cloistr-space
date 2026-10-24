@@ -45,18 +45,25 @@ export function ReactionPicker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    const onDown = (e: MouseEvent) => {
+    // Use pointerdown, not mousedown.  On mobile a long-press fires pointer
+    // events; the browser then synthesises a delayed compatibility mousedown at
+    // the original touch location.  With a mousedown listener that compatibility
+    // event fired after the picker mounted and immediately closed it.  Pointer
+    // events fire at the start of the gesture, before the picker exists, so they
+    // are safe: only a NEW touch or click after the picker is open will trigger
+    // this listener.
+    const onDown = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
 
     document.addEventListener('keydown', onKey);
     // Capture phase: the reaction button stops propagation on its own click,
     // so a bubble-phase listener would never see a second press on it.
-    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('pointerdown', onDown, true);
 
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('pointerdown', onDown, true);
     };
   }, [onClose]);
 
