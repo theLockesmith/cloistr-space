@@ -5,8 +5,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { NDKFilter } from '@nostr-dev-kit/ndk';
-import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
+import { useNdk, useHeadlessAdapters, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
+import { listDriveFiles, listBlossomFiles, mergeFiles } from './fileSources';
 import { trackAnswers, useUnreachable, withReachability, NO_RELAY_ANSWERED } from './widgetReads';
 import type { FileMetadata, WidgetState } from '@/types/activity';
 
@@ -84,6 +85,18 @@ interface UseRecentFilesOptions {
   groupId?: string;
   /** Auto-subscribe on mount */
   autoSubscribe?: boolean;
+  /**
+   * Also list the user's Drive and Blossom files (default: on, except for a
+   * group's files, which those services do not hold). Blossom needs a signed
+   * request, so this runs only where the widget is actually shown.
+   */
+  includeServices?: boolean;
+}
+
+interface ServiceFiles {
+  items: FileMetadata[];
+  isLoading: boolean;
+  error: string | null;
 }
 
 /**
@@ -93,7 +106,8 @@ interface UseRecentFilesOptions {
 export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState<FileMetadata> & {
   refresh: () => void;
 } {
-  const { limit = MAX_FILES, groupId, autoSubscribe = true } = options;
+  const { limit = MAX_FILES, groupId, autoSubscribe = true, includeServices = !groupId } = options;
+  const { signer } = useHeadlessAdapters();
   const { subscribe, isConnected } = useNdk();
   const unreachable = useUnreachable(isConnected);
   const { pubkey, isAuthenticated } = useAuthStore();
@@ -203,8 +217,68 @@ export function useRecentFiles(options: UseRecentFilesOptions = {}): WidgetState
     };
   }, [autoSubscribe, isAuthenticated, isConnected, startSubscription]);
 
+  // Drive and Blossom. Either failing is an error, never "no files"; a
+  // Blossom refusal is not cached, so refresh asks again.
+  const [services, setServices] = useState<ServiceFiles>({
+    items: [],
+    isLoading: includeServices,
+    error: null,
+  });
+  const [servicesRun, setServicesRun] = useState(0);
+
+  useEffect(() => {
+    if (!includeServices || !pubkey || !signer) return;
+    let cancelled = false;
+    const start = setTimeout(() => {
+      setServices((prev) => ({ ...prev, isLoading: true, error: null }));
+      void Promise.allSettled([listDriveFiles(pubkey), listBlossomFiles(signer, pubkey)]).then(
+        ([drive, blossom]) => {
+          if (cancelled) return;
+          const failures: string[] = [];
+          if (drive.status === 'rejected') failures.push(`Drive: ${sentence(reason(drive.reason))}`);
+          if (blossom.status === 'rejected') failures.push(`Cloistr Files: ${sentence(reason(blossom.reason))}`);
+          setServices({
+            items: [
+              ...(drive.status === 'fulfilled' ? drive.value : []),
+              ...(blossom.status === 'fulfilled' ? blossom.value : []),
+            ],
+            isLoading: false,
+            error: failures.length ? `Could not list all your files. ${failures.join(' ')}` : null,
+          });
+        }
+      );
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(start);
+    };
+  }, [includeServices, pubkey, signer, servicesRun]);
+
+  const refresh = useCallback(() => {
+    startSubscription();
+    setServicesRun((n) => n + 1);
+  }, [startSubscription]);
+
+  const relays = withReachability(state, unreachable);
+  const items = mergeFiles([relays.items, services.items], limit);
+  const servicesPending = includeServices && services.isLoading;
+  const isLoading = items.length === 0 && (relays.isLoading || servicesPending);
   return {
-    ...withReachability(state, unreachable),
-    refresh: startSubscription,
+    items,
+    isLoading,
+    // With files to show, a source that failed does not hide them.
+    error: items.length === 0 && !isLoading ? (relays.error ?? (includeServices ? services.error : null)) : null,
+    lastUpdated: relays.lastUpdated,
+    refresh,
   };
+}
+
+/** End a message with a full stop, so two failures read as two sentences. */
+function sentence(text: string): string {
+  const t = text.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+function reason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

@@ -155,7 +155,7 @@ function QuickAction({
 }
 
 function RecentFilesWidget() {
-  const { items: files, isLoading, error } = useRecentFiles({ limit: 5 });
+  const { items: files, isLoading, error, refresh } = useRecentFiles({ limit: 5 });
   const navigate = useNavigate();
 
   return (
@@ -166,7 +166,7 @@ function RecentFilesWidget() {
       {isLoading ? (
         <WidgetSkeleton count={4} />
       ) : error ? (
-        <WidgetError message={error} />
+        <WidgetError message={error} onRetry={refresh} />
       ) : files.length === 0 ? (
         <WidgetEmpty message="No files yet" />
       ) : (
@@ -809,10 +809,18 @@ function WidgetSkeleton({ count }: { count: number }) {
   );
 }
 
-function WidgetError({ message }: { message: string }) {
+function WidgetError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="rounded-lg border border-cloistr-error/20 bg-cloistr-error/5 p-4 text-center">
       <p className="text-sm text-cloistr-error">{message}</p>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="mt-2 rounded px-3 py-1 text-xs text-cloistr-light/70 hover:bg-cloistr-light/5 hover:text-cloistr-light"
+        >
+          Try again
+        </button>
+      )}
     </div>
   );
 }

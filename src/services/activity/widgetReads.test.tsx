@@ -21,6 +21,7 @@ const stableSubscribe = vi.fn();
 
 vi.mock('@/services/nostr', () => ({
   useNdk: () => ({ subscribe: stableSubscribe, isConnected: connected }),
+  useHeadlessAdapters: () => ({ signer: null, relay: null }),
   subscribeStream: (_s: unknown, _f: unknown, handlers: Handlers) => {
     lastHandlers = handlers;
     return { stop: vi.fn() };
@@ -43,7 +44,7 @@ const fileEvent = {
 };
 
 async function mounted() {
-  const hook = renderHook(() => useRecentFiles());
+  const hook = renderHook(() => useRecentFiles({ includeServices: false }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1);
   });
