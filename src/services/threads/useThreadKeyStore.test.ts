@@ -15,7 +15,7 @@ import {
   _resetGlobalStore,
 } from './useThreadKeyStore';
 import { KEY_WRAP_KIND } from './threadKeyStore';
-import { usePendingKeyWraps, acceptKeyWrap, dismissKeyWrap, clearKeyWraps } from './pendingKeyOffers';
+import { usePendingKeyWraps, acceptKeyWrap, dismissKeyWrap, clearKeyWraps, loadDismissed, MAX_DISMISSED } from './pendingKeyOffers';
 
 const { bytesToHex } = ntUtils;
 
@@ -429,3 +429,44 @@ describe('useThreadKeyLoader with a key-wrap from a stranger', () => {
     expect(result.current.store.has(getPublicKey(threadSk))).toBe(false);
   });
 });
+
+describe('useThreadKeyLoader with a fleet key-wrap that names the wrong thread', () => {
+  beforeEach(() => _resetGlobalStore());
+
+  it('does not import a secret under a thread it does not belong to', async () => {
+    const granterSk = generateSecretKey();
+    const granterPk = getPublicKey(granterSk);
+    fleet.granters.push(granterPk);
+    const realThreadSk = generateSecretKey();
+    const claimedThreadPk = getPublicKey(generateSecretKey());
+    mockFetchEvents.mockResolvedValue(new Set([{
+      id: 'mismatched',
+      pubkey: granterPk,
+      kind: KEY_WRAP_KIND,
+      content: nip44.v2.encrypt(bytesToHex(realThreadSk), nip44.v2.utils.getConversationKey(granterSk, RECIPIENT_PK)),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['d', claimedThreadPk], ['p', RECIPIENT_PK]],
+    }]));
+    mockSigner.nip44Decrypt.mockImplementation(async (senderPubkey: string, ciphertext: string) =>
+      nip44.v2.decrypt(ciphertext, nip44.v2.utils.getConversationKey(RECIPIENT_SK, senderPubkey)),
+    );
+
+    const { result } = renderHook(() => ({ loader: useThreadKeyLoader(), store: useThreadKeyStore() }));
+    await waitFor(() => expect(result.current.loader.loaded).toBe(true));
+
+    expect(result.current.store.has(claimedThreadPk)).toBe(false);
+    expect(result.current.loader.keyCount).toBe(0);
+  });
+});
+
+describe('remembered refusals', () => {
+  it('keep only the newest MAX_DISMISSED', () => {
+    localStorage.clear();
+    for (let i = 0; i < MAX_DISMISSED + 5; i++) dismissKeyWrap(`offer-${i}`);
+    const kept = loadDismissed();
+    expect(kept.size).toBe(MAX_DISMISSED);
+    expect(kept.has('offer-0')).toBe(false);
+    expect(kept.has(`offer-${MAX_DISMISSED + 4}`)).toBe(true);
+  });
+});
+

@@ -20,6 +20,12 @@ import { saveThreadKey } from './threadKeyPersistence';
 
 const DISMISSED_KEY = 'cloistr.threads.dismissedHandoffs';
 
+/**
+ * Most refusals remembered. Offers expire from the relay within days, so the
+ * oldest refusals stop mattering; the newest are kept.
+ */
+export const MAX_DISMISSED = 500;
+
 /** Event ids of offers the user refused on this device. */
 export function loadDismissed(): Set<string> {
   try {
@@ -34,8 +40,9 @@ export function loadDismissed(): Set<string> {
 export function saveDismissed(eventId: string): void {
   try {
     const ids = loadDismissed();
+    ids.delete(eventId);
     ids.add(eventId);
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(ids)));
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(ids).slice(-MAX_DISMISSED)));
   } catch {
     // Storage unavailable: the offer comes back on the next load.
   }
