@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
+import { finalizeEvent, getPublicKey } from 'nostr-tools';
+import { hexToBytes, bytesToHex } from 'nostr-tools/utils';
 import { SealedMessages } from './SealedMessages';
+import { ThreadKeyStore } from '@/services/threads/threadKeyStore';
+import { tryUnwrapMessage } from '@/services/threads/giftWrap';
+import gateFx from '@/services/threads/__fixtures__/kitGateRequest.json';
 
 const mockUseBucketReader = vi.fn();
 const mockSend = vi.fn();
+const mockGateYes = vi.fn();
+const authState = vi.hoisted(() => ({ signer: null as unknown, pubkey: 'aabbcc' }));
 const heldStore = { current: new Map<string, Uint8Array>() };
 
 vi.mock('@/services/threads', () => ({
@@ -15,11 +22,11 @@ vi.mock('@/services/threads', () => ({
     dismissHandoff: vi.fn(),
     ...mockUseBucketReader(...args),
   }),
-  useBucketWriter: () => ({ sendMessage: mockSend, canPublish: true }),
+  useBucketWriter: () => ({ sendMessage: mockSend, sendGateYes: mockGateYes, canPublish: true }),
 }));
 
 vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ signer: null }),
+  useAuth: () => ({ signer: authState.signer }),
 }));
 
 vi.mock('@/services/profile', () => ({
@@ -27,7 +34,7 @@ vi.mock('@/services/profile', () => ({
 }));
 
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({ pubkey: 'aabbcc' }),
+  useAuthStore: () => ({ pubkey: authState.pubkey }),
 }));
 
 const mockMembers = vi.fn((_id: string) => ({
@@ -53,6 +60,8 @@ vi.mock('@/config/environment', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  authState.signer = null;
+  authState.pubkey = 'aabbcc';
   heldStore.current = new Map();
   mockUseBucketReader.mockReturnValue({
     messages: [],
@@ -323,5 +332,102 @@ describe('SealedMessages key-wrap prompt', () => {
     expect(getByText(/not a sender Space knows to trust/)).toBeTruthy();
     expect(getByRole('button', { name: 'Accept key' })).toBeTruthy();
     clearKeyWraps();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Kit gate requests: the operator answers yes from here
+// ---------------------------------------------------------------------------
+//
+// The request comes from the kit's own code (kitGateRequest.json). The yes is
+// sent by sendGateYes, which has the user's own signer sign it; see
+// services/threads/gateRequest.test.ts for what the kit's gate makes of it.
+
+describe('SealedMessages gate requests', () => {
+  const OPERATOR_SK = hexToBytes('66'.repeat(32));
+  const OPERATOR_PK = getPublicKey(OPERATOR_SK);
+  const THREAD_SK = hexToBytes('11'.repeat(32));
+  const base = { handoffs: [], isLoading: false, error: null, refresh: vi.fn() };
+
+  function requestMessage() {
+    const store = new ThreadKeyStore();
+    store.set(gateFx.keys.threadPk, THREAD_SK);
+    return tryUnwrapMessage(gateFx.wrap, store)!;
+  }
+
+  function showMessages(messages: unknown[]) {
+    heldStore.current = new Map([[gateFx.keys.threadPk, THREAD_SK]]);
+    mockUseBucketReader.mockReturnValue({ ...base, messages });
+  }
+
+  it("shows the request's own signed text and asks for a yes", async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    authState.signer = { getPublicKey: async () => OPERATOR_PK };
+    showMessages([requestMessage()]);
+    const { getByRole, getAllByText } = render(<SealedMessages />);
+
+    expect(getAllByText(/aegis\/arbiter-client/).length).toBeGreaterThan(0);
+    await userEvent.click(getByRole('button', { name: /yes, let this change through/i }));
+
+    expect(mockGateYes).toHaveBeenCalledWith(authState.signer, gateFx.request.id, bytesToHex(THREAD_SK));
+    // Sent as its own signed event, never as composer text.
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('says why it cannot answer when there is no signer', () => {
+    showMessages([requestMessage()]);
+    const { getByRole, getByText } = render(<SealedMessages />);
+    expect(getByRole('button', { name: /yes, let this change through/i })).toBeDisabled();
+    expect(getByText(/sign in with your own key/i)).toBeTruthy();
+  });
+
+  it('shows the error and keeps the button when the yes could not be sent', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    authState.signer = { getPublicKey: async () => OPERATOR_PK };
+    mockGateYes.mockRejectedValueOnce(new Error('Your signer returned a reply that does not verify.'));
+    showMessages([requestMessage()]);
+    const { getByRole, findByText } = render(<SealedMessages />);
+
+    await userEvent.click(getByRole('button', { name: /yes, let this change through/i }));
+    expect(await findByText(/does not verify/)).toBeTruthy();
+    expect(getByRole('button', { name: /yes, let this change through/i })).toBeEnabled();
+  });
+
+  it('once your signed yes to it is in the thread, says so instead of asking again', () => {
+    authState.signer = { getPublicKey: async () => OPERATOR_PK };
+    authState.pubkey = OPERATOR_PK;
+    const yes = finalizeEvent(
+      { kind: 1111, content: 'yes', tags: [['e', gateFx.request.id]], created_at: 2_000_000_000 },
+      OPERATOR_SK,
+    );
+    const reply = { ...requestMessage(), wrapId: 'yes-wrap', plaintext: JSON.stringify(yes), createdAt: 2_000_000_000 };
+    showMessages([requestMessage(), reply]);
+    const { queryByRole, getAllByText } = render(<SealedMessages />);
+
+    expect(queryByRole('button', { name: /yes, let this change through/i })).toBeNull();
+    expect(getAllByText(/signed yes/i).length).toBeGreaterThan(0);
+    // Not the raw event JSON.
+    expect(getAllByText(/signed yes/i)[0].textContent).not.toMatch(/"sig"/);
+  });
+
+  it("someone else's signed yes does not hide your button", () => {
+    authState.signer = { getPublicKey: async () => OPERATOR_PK };
+    authState.pubkey = OPERATOR_PK;
+    const other = finalizeEvent(
+      { kind: 1111, content: 'yes', tags: [['e', gateFx.request.id]], created_at: 2_000_000_000 },
+      hexToBytes('77'.repeat(32)),
+    );
+    const reply = { ...requestMessage(), wrapId: 'other-yes', plaintext: JSON.stringify(other), createdAt: 2_000_000_000 };
+    showMessages([requestMessage(), reply]);
+    const { getByRole } = render(<SealedMessages />);
+    expect(getByRole('button', { name: /yes, let this change through/i })).toBeTruthy();
+  });
+
+  it('a "yes" nobody signed does not count as an answer', () => {
+    authState.signer = { getPublicKey: async () => OPERATOR_PK };
+    const unsigned = { ...requestMessage(), wrapId: 'plain-yes', plaintext: 'yes', createdAt: 2_000_000_000 };
+    showMessages([requestMessage(), unsigned]);
+    const { getByRole } = render(<SealedMessages />);
+    expect(getByRole('button', { name: /yes, let this change through/i })).toBeTruthy();
   });
 });

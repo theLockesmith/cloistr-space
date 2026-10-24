@@ -1,0 +1,65 @@
+{
+  "request": {
+    "id": "b343434b61ac0a72883cb6b5c8fa793f3884ff6dd91207743f888a7d4b3a6ed8",
+    "pubkey": "e3ff9374a67734b04af22388a74fb595657dc14e2e37bb67c784781f693c979b",
+    "created_at": 1792855005,
+    "kind": 1111,
+    "tags": [
+      [
+        "t",
+        "arbiter-grant-request"
+      ],
+      [
+        "gate",
+        "merge"
+      ],
+      [
+        "repo",
+        "aegis/arbiter-client"
+      ],
+      [
+        "target",
+        "main"
+      ],
+      [
+        "diff",
+        "abababababababababababababababababababababababababababababababab"
+      ],
+      [
+        "kind",
+        "kit-change"
+      ],
+      [
+        "unmet",
+        "council review"
+      ],
+      [
+        "why",
+        "adds council config to the protected list"
+      ]
+    ],
+    "content": "The merge gate needs your yes to push aegis/arbiter-client onto main (change abababababab, kit-change).\nWhat is not met:\n- council review\nWhy the session asks: adds council config to the protected list\nReply yes to let exactly this change through. Any new commit asks again.",
+    "sig": "14bb5babe45762c4e6896a5bdabffe44cb6668bbd2d40123be6ea9ebb1c91e3974c428ff4ebace65573f834f01c4246679cc8f1c0c32a40b872ba1a0ae75f9e5"
+  },
+  "wrap": {
+    "id": "296f6898a98cf89f129316745d12c3343aed7b847dd6e7ff95162afe690df1c1",
+    "pubkey": "257b572099b8fd9059ba85188844c06dec097af3108fe761967b2fb1483adc17",
+    "created_at": 1792849871,
+    "kind": 1059,
+    "tags": [
+      [
+        "t",
+        "46"
+      ],
+      [
+        "expiration",
+        "1792972800"
+      ]
+    ],
+    "content": "Auy8/MAgNMIa0E9Z8ISLKtd/qmTyoa8jBkeMNaj1P2GkLHPKYd9zWtm6ga4u0kAm94t4Up1IUu3qRsPz1DjWXReB0M5gNCdLDEqX7ovkLe+LzIDnsp12adIl+MyiApccAi1F6Ukmyv/79IODVoXL0iBNW+mPicaJokGU48nmGLcjh7X/yw2VhEw/l4JlZWnAl4mSJUXELftnDS5WYE4B840pdyeELUxE5xFHkMxPJj+Q1cyATp/a+k51HwALKGptrokw+9E3e50aHpBrsZ6y0sWWAkpUO2U8emeQyYoyq0JjD5yNSUY5zdVsXZJNReJXQkorD3rgx5Xe5Moi9z/fo6F2xhfzqNLS/kHa48dqjY0zhLN2sHIa90uerjk0edxVQkiVmYMv6UF+su1Cl9yHpVwuJz2pCthNINhm4Yl/t7k7plteeU/5j1g2jC/nU51TF6X9CX4EM3DpzHXMoE7+9N/rruivJc9IcNL9gVpSkQAwtDx85SRg92Q2dY4ZlTgr30gKOYa3FzuxtrMWntbaMKOvuaFVa6qufz12BslDmYFN219saACTK/uThM+HrCIGLra1rn/U2S4Oi2XjwnSrJUFj5gv22kocTpHxq3yt0xJ4RgFwe/J8M6+znFJ94MPvp6QLAMQw3cU9LvPOOiqIvjhrpDT6xJdmQB6riaWjpSllt+gJGYjm1TTWfahtoB3VdELjq+ujKhuKgI8KVgr3EuI7jYQBwtq9l8Ejk5qTZTzspV7U7M6jt3QkLpPH51UpqEdyMpetm7KRtaac9vXr6FJHe7jz23VSyf8nrvIvTuVxTpJshZLDlxZrklFlthVbMT2esxWOK516JIhUGx5O8Vxoy7WWIlUNSgqqeqnuVyPWccr0bpUVSFSL4FdLK+gE6nQJZ+8yAfN9OJ5uBP2a871d0QojNWmulkPt4YoLzqTCe9M2oioU3bs/XlT1RthuBfSUAAGU8X+46vErou8UdmjZFD2IQUjzXXqteO/b+1ibd0IeI6gsyTuw8tvnbBt3Q+e8Qs5WvjIW2Qm2HxH+Z09DmxUlFnfeByXSDekS29u3zVn0sKOhGEmHC3QKsNxf+6DsfxSmXyFJMHWeDq0xIBzos0uWWkWad3QqoSX3mbgEBlENzk3bC6GAwVAfoDE6zoXIswWbLg2cO0rA/Q3BVt8eoqIOmDoQKPiB+TEvpCRHSNjM+3dp7meBVGL+MOEjQMrooXiZ2urzfhGR+qYoL9oz2ROy57tRmPv58G5EmEgCMGi+5yuQiUxEYSoll/UsQytIX4Tvu/guNPwQIveLTQRijTni9eGMVz7mS9Q4i2Urx8jfz2hQ2ex0jMgp7uUNnUxNqw6NukV6RIL8eRgNwRjSoIHzOU+CF99vuxn5WLhQnsEwrm5TeqydXAgQ6iWMq132E4gYkKYevUuNUmHI9CBHz7ma3MlrXOT0S0IpbBWPh6znWmskjKxDx5Ke8JLW7v/mWcnyZjKr2gZ/yQ/77XcypbECGNqkzLyfB8x/2PgCbw7+n7ieg8S1ADWwvGmsrPYswHEewD2UYVmttetcNeEY5FbvevuVNrLxRFc30MSsaapDCuh5bXKRQNP/uk7IIyx/v2e+RVJCELqS6uVb80bVPJ8Qy2fG+LtJmymD9CBzqtSbHUIVzAEXzfHVEZuvu/MQyLqOQ+YfQ0nf+rO5WZblCDdfyk0xYLQn3W6jYKw3p5dW75sS3GZT/FQKWwxaKhpTScSw1zA+bivHuDZCiqoHYd1tkX14Io4B+xGdlyVUPGxvoQU9cezX6Ne8HMzvl9F0ODCD3O6UtCBJJtF5XrraPDa/89rSBTQ5Q7luRSQf070LQSExOhYu3zUI65792OQs2WBVw8jaDrmE8b2mxCXHendr+46yCNmLnnniHX2RfTLK0htqqj+zGzSouvyPD3XVPAbmu+eT8D+07RM1vA7Y4RUNbq8922EXMa8UZhcQdw6LMiM9FrgCT8Y6bqmf1p9RNphaRpBIyYEVueBvuhn8tbSYECOsuQc4YI7PyKykA3QqPR4NxWyyvPtPAIyP3q/X3Dg2ccbIvhHxNm4oX3DigkSX6gAK2VGIm1Pyk9c/WVEjWCPE+DZxr9ZTcn6hSJTQVFzqePI1B7yelmVZuD1xyw==",
+    "sig": "263e6362297a0afe3cafcf7d9dd87e255ec5f3d6e5aa2eb7cd1287dab708c9895768eab8191f02f615ae7ea1c2ca964e7fc2e333decea26bcb64eb47ebc5dafd"
+  },
+  "keys": {
+    "threadPk": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa"
+  }
+}

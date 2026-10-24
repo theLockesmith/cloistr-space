@@ -85,3 +85,12 @@ export {
   signerEcdhTag,
   signerHandoffBuckets,
 } from './signerEcdh';
+
+export {
+  parseGateRequest,
+  parseGateYes,
+  signGateYes,
+  wrapGateYes,
+  type GateRequest,
+  type GateYesSigner,
+} from './gateRequest';

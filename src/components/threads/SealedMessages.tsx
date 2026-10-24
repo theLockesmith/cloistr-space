@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { nip19 } from 'nostr-tools';
+import { bytesToHex } from 'nostr-tools/utils';
 import { useAuthStore } from '@/stores/authStore';
 import {
   useThreadKeyStore,
@@ -21,6 +22,7 @@ import {
 import { useGroupMembers } from '@/services/groups/useGroupMembers';
 import { config } from '@/config/environment';
 import { parseFleetEnvelope } from '@/services/threads/fleetEnvelope';
+import { parseGateYes, type GateRequest, type GateYesSigner } from '@/services/threads/gateRequest';
 import { useAuth } from '@/components/auth/AuthProvider';
 import {
   usePendingKeyWraps,
@@ -186,12 +188,36 @@ export function SealedMessagesPanel({ reader }: { reader: BucketReaderReturn }) 
             <div className="space-y-2 p-4">
               {msgs.map((msg) => {
                 const envelope = parseFleetEnvelope(msg.plaintext);
+                const yes = parseGateYes(msg.plaintext);
+                const threadSk = keyStore.get(threadId);
                 return (
                   <div key={msg.wrapId} className="rounded border border-cloistr-light/10 bg-cloistr-light/5 p-3">
-                    <UnverifiedSender pubkeyHex={msg.authorHex} />
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">
-                      {envelope ? envelope.body : msg.plaintext}
-                    </p>
+                    {yes ? (
+                      // Signed by the key it names, so this one is not "unverified".
+                      <p className="text-sm text-cloistr-light">
+                        Signed yes to request {yes.requestId.slice(0, 12)}, from{' '}
+                        <span className="font-mono">{shortNpub(yes.signer)}</span>
+                      </p>
+                    ) : (
+                      <>
+                        <UnverifiedSender pubkeyHex={msg.authorHex} />
+                        {envelope?.grantRequest && threadSk ? (
+                          <GateRequestCard
+                            request={envelope.grantRequest}
+                            answered={msgs.some((m) => {
+                              const y = parseGateYes(m.plaintext);
+                              return y?.requestId === envelope.grantRequest!.id && y.signer === pubkey;
+                            })}
+                            signer={signer}
+                            threadSecretHex={bytesToHex(threadSk)}
+                          />
+                        ) : (
+                          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-cloistr-light">
+                            {envelope ? envelope.body : msg.plaintext}
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -265,6 +291,69 @@ function KeyOfferPrompt({
           Dismiss
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A kit gate asking the operator to let one exact change through. Shows the
+ * request's own signed text, never the envelope body around it: the yes signs
+ * the request's id, and the id covers that text, so it is what is approved.
+ */
+function GateRequestCard({
+  request,
+  answered,
+  signer,
+  threadSecretHex,
+}: {
+  request: GateRequest;
+  answered: boolean;
+  signer: GateYesSigner | null;
+  threadSecretHex: string;
+}) {
+  const { sendGateYes, canPublish } = useBucketWriter();
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const sayYes = useCallback(async () => {
+    if (!signer || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await sendGateYes(signer, request.id, threadSecretHex);
+      setSent(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send your yes');
+    } finally {
+      setBusy(false);
+    }
+  }, [signer, busy, sendGateYes, request.id, threadSecretHex]);
+
+  return (
+    <div className="mt-1 text-sm text-cloistr-light">
+      <p className="whitespace-pre-wrap break-words">{request.text}</p>
+      {answered || sent ? (
+        <p className="mt-2 text-xs text-cloistr-light/60">
+          {answered ? 'You sent a signed yes to this.' : 'Signed yes sent. The gate checks it on the next push.'}
+        </p>
+      ) : (
+        <div className="mt-2">
+          {err && <p className="mb-1 text-xs text-cloistr-error">{err}</p>}
+          {!signer && (
+            <p className="mb-1 text-xs text-cloistr-light/60">
+              Sign in with your own key to answer this. A yes only counts when your own signer signs it.
+            </p>
+          )}
+          <button
+            onClick={() => void sayYes()}
+            disabled={!signer || !canPublish || busy}
+            className="rounded bg-cloistr-primary px-3 py-1 text-xs text-cloistr-dark disabled:opacity-50"
+          >
+            {busy ? 'Signing…' : 'Yes, let this change through'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,6 +6,8 @@
  * real name lives only in `from`. Without this the panel printed the raw JSON
  * and labelled every message with the fleet key (seen live 2026-09-28).
  */
+import { parseGateRequest, type GateRequest } from './gateRequest';
+
 export interface FleetEnvelope {
   body: string;
   /**
@@ -15,6 +17,8 @@ export interface FleetEnvelope {
   from: string | null;
   /** The thread's name, carried inside the envelope since 2026-09-28. Older messages lack it. */
   thread: string | null;
+  /** A kit gate request attached as `grant_request`, when its id covers what it says. */
+  grantRequest: GateRequest | null;
 }
 
 export function parseFleetEnvelope(plaintext: string): FleetEnvelope | null {
@@ -26,6 +30,7 @@ export function parseFleetEnvelope(plaintext: string): FleetEnvelope | null {
       body: d.body,
       from: typeof d.from === 'string' && d.from ? d.from : null,
       thread: typeof d.thread === 'string' && d.thread ? d.thread : null,
+      grantRequest: parseGateRequest(d.grant_request),
     };
   } catch {
     return null;

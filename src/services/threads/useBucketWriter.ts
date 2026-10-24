@@ -18,7 +18,9 @@ import { useNdk } from '@/services/nostr';
 import {
   publishMessage,
   publishKeyHandoff,
+  publishGateYes,
 } from './threadPublish';
+import type { GateYesSigner } from './gateRequest';
 
 export interface BucketWriterReturn {
   sendMessage: (
@@ -35,6 +37,9 @@ export interface BucketWriterReturn {
     recipientPubkey: string,
     nowSec?: number,
   ) => Promise<void>;
+
+  /** The user's own signed yes to a kit gate request; see gateRequest.ts. */
+  sendGateYes: (signer: GateYesSigner, requestId: string, threadSecretHex: string) => Promise<void>;
 
   canPublish: boolean;
 }
@@ -68,5 +73,12 @@ export function useBucketWriter(): BucketWriterReturn {
     [],
   );
 
-  return { sendMessage, grantKey, canPublish };
+  const sendGateYes = useCallback(
+    async (signer: GateYesSigner, requestId: string, threadSecretHex: string) => {
+      await publishGateYes(signer, requestId, threadSecretHex);
+    },
+    [],
+  );
+
+  return { sendMessage, grantKey, sendGateYes, canPublish };
 }

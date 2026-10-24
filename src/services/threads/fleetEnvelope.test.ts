@@ -4,7 +4,7 @@ import { parseFleetEnvelope } from './fleetEnvelope';
 describe('parseFleetEnvelope', () => {
   it('extracts body and sender from the kit envelope (as delivered live 2026-09-28)', () => {
     const raw = '{"v":"arbiter-fleet-msg-v1","body":"Fresh test from cloistr-orchestrator.","task":null,"role":"operator","from":"cloistr-orchestrator"}';
-    expect(parseFleetEnvelope(raw)).toEqual({ body: 'Fresh test from cloistr-orchestrator.', from: 'cloistr-orchestrator', thread: null });
+    expect(parseFleetEnvelope(raw)).toEqual({ body: 'Fresh test from cloistr-orchestrator.', from: 'cloistr-orchestrator', thread: null, grantRequest: null });
   });
   it('reads the thread name when the kit sends one', () => {
     const raw = '{"v":"arbiter-fleet-msg-v1","body":"hi","from":"conscience-orch","thread":"conscience-group-wrap"}';
@@ -18,7 +18,7 @@ describe('parseFleetEnvelope', () => {
     expect(parseFleetEnvelope('{"v":"something-else","body":"x"}')).toBeNull();
   });
   it('tolerates a missing sender', () => {
-    expect(parseFleetEnvelope('{"v":"arbiter-fleet-msg-v1","body":"x"}')).toEqual({ body: 'x', from: null, thread: null });
+    expect(parseFleetEnvelope('{"v":"arbiter-fleet-msg-v1","body":"x"}')).toEqual({ body: 'x', from: null, thread: null, grantRequest: null });
   });
   it('does not throw on malformed JSON', () => {
     expect(parseFleetEnvelope('{not json')).toBeNull();
