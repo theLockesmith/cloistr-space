@@ -145,6 +145,28 @@ describe('useThreadKeyLoader', () => {
     expect(result.current.keyCount).toBe(0);
   });
 
+  it('a reload restores each saved thread name with its key', async () => {
+    const threadSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    const selfCk = nip44.v2.utils.getConversationKey(RECIPIENT_SK, RECIPIENT_PK);
+    localStorage.setItem(
+      'cloistr:thread-keys:' + RECIPIENT_PK,
+      JSON.stringify({ [threadPk]: nip44.v2.encrypt(JSON.stringify({ k: bytesToHex(threadSk), t: 'cloistr-group-wrap' }), selfCk) }),
+    );
+    mockFetchEvents.mockResolvedValue(new Set());
+    mockSigner.nip44Decrypt.mockImplementation(async (pk: string, ct: string) =>
+      nip44.v2.decrypt(ct, nip44.v2.utils.getConversationKey(RECIPIENT_SK, pk)),
+    );
+    try {
+      renderHook(() => useThreadKeyLoader());
+      const { result: store } = renderHook(() => useThreadKeyStore());
+      await waitFor(() => expect(store.current.names().get(threadPk)).toBe('cloistr-group-wrap'));
+      expect(store.current.exportHex(threadPk)).toBe(bytesToHex(threadSk));
+    } finally {
+      localStorage.clear();
+    }
+  });
+
   it('loads and unwraps a key-wrap event', async () => {
     const threadSk = generateSecretKey();
     const threadPk = getPublicKey(threadSk);

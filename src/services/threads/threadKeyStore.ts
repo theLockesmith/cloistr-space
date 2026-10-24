@@ -98,11 +98,23 @@ export function encryptThreadContent(
 export class ThreadKeyStore {
   private keys = new Map<string, Uint8Array>();
   private listeners = new Set<() => void>();
+  /**
+   * Thread pubkey -> thread id (the `d` tag a legacy kit message carries). The
+   * hand-off that names a thread lives on the relays for about two days; this
+   * is what still names it afterwards, restored from storage with its key.
+   */
+  private threadNames = new Map<string, string>();
+  private nameListeners = new Set<() => void>();
+  private namesSnapshot: Map<string, string> | null = null;
 
   /** Register a thread key. Overwrites any existing key for the same thread. */
   set(threadPubkey: string, secretKey: Uint8Array): void {
     const isNew = !this.keys.has(threadPubkey);
     this.keys.set(threadPubkey, secretKey);
+    if (isNew && this.threadNames.has(threadPubkey)) {
+      this.namesSnapshot = null;
+      this.nameListeners.forEach((l) => l());
+    }
     if (isNew) this.listeners.forEach((l) => l());
   }
 
@@ -129,9 +141,48 @@ export class ThreadKeyStore {
     return this.keys.has(threadPubkey);
   }
 
-  /** Remove all stored keys. Call on logout / disconnect. */
+  /** Remove all stored keys and names. Call on logout / disconnect. */
   clear(): void {
     this.keys.clear();
+    if (this.threadNames.size > 0) {
+      this.threadNames.clear();
+      this.namesSnapshot = null;
+      this.nameListeners.forEach((l) => l());
+    }
+  }
+
+  /** Record a thread's id. Returns false when it already had that id. */
+  setName(threadPubkey: string, threadId: string): boolean {
+    if (this.threadNames.get(threadPubkey) === threadId) return false;
+    this.threadNames.set(threadPubkey, threadId);
+    this.namesSnapshot = null;
+    this.nameListeners.forEach((l) => l());
+    return true;
+  }
+
+  /** A thread's recorded id, held key or not. */
+  getName(threadPubkey: string): string | undefined {
+    return this.threadNames.get(threadPubkey);
+  }
+
+  /**
+   * Thread pubkey -> id, for threads whose key is held. The same Map until a
+   * name changes, so it can back useSyncExternalStore. A key removed without a
+   * name change cannot happen: clear() drops both.
+   */
+  names(): Map<string, string> {
+    if (!this.namesSnapshot) {
+      this.namesSnapshot = new Map([...this.threadNames].filter(([pk]) => this.keys.has(pk)));
+    }
+    return this.namesSnapshot;
+  }
+
+  /** Be told when a thread name is recorded. Returns the unsubscribe. */
+  onNamesChanged(listener: () => void): () => void {
+    this.nameListeners.add(listener);
+    return () => {
+      this.nameListeners.delete(listener);
+    };
   }
 
   /** Number of thread keys currently held. */

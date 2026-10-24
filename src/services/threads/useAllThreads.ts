@@ -13,7 +13,7 @@
  * author's relays -- so a loop multiplies connections rather than adding them.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useGroups } from '@/services/groups';
@@ -203,7 +203,17 @@ export function useAllThreads(): UseAllThreadsReturn {
     [allAdminPubkeys],
   );
   const sealedReader = useBucketReader(null, granters);
-  const threadIds = useMemo(() => threadIdsFromHandoffs(sealedReader.handoffs), [sealedReader.handoffs]);
+  // A hand-off lives on the relays for about two days; the name saved with the
+  // key is what keeps an older thread findable after that. Hand-offs win on a
+  // conflict because they are the newer word.
+  const savedNames = useSyncExternalStore(
+    (cb) => keyStore.onNamesChanged(cb),
+    () => keyStore.names(),
+  );
+  const threadIds = useMemo(
+    () => new Map([...savedNames, ...threadIdsFromHandoffs(sealedReader.handoffs)]),
+    [savedNames, sealedReader.handoffs],
+  );
   const threadIdsKey = [...new Set(threadIds.values())].sort().join(',');
 
   const membershipRef = useRef<Set<string>>(new Set());

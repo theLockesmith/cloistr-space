@@ -103,6 +103,20 @@ export function computeRealBuckets(
   return Array.from(buckets);
 }
 
+function persistKey(
+  threadPubkey: string,
+  secretHex: string,
+  ownerPk: string,
+  encryptFn: (pk: string, pt: string) => Promise<string>,
+  threadId?: string,
+): void {
+  let storage: StorageAdapter | null = null;
+  try { storage = localStorage; } catch { /* unavailable */ }
+  if (storage) {
+    saveThreadKey(threadPubkey, secretHex, ownerPk, encryptFn, storage, threadId || undefined).catch(() => {});
+  }
+}
+
 /**
  * Subscribe to bucketed gift wraps and trial-decrypt them.
  */
@@ -187,6 +201,11 @@ export function useBucketReader(
       if (keyStore.get(threadPubkey)) {
         handoffsRef.current.set(handoff.wrapId, handoff);
         setHandoffs(Array.from(handoffsRef.current.values()));
+        // A key saved before names were kept: save it again WITH the name, once,
+        // so the thread is still found after this hand-off leaves the relays.
+        if (handoff.threadId && keyStore.setName(threadPubkey, handoff.threadId)) {
+          persistKey(threadPubkey, handoff.threadSecretHex, ownerPk, encryptFn, handoff.threadId);
+        }
         return;
       }
       if (loadDismissed().has(handoff.wrapId) || pendingRef.current.has(handoff.wrapId)) return;
@@ -346,14 +365,11 @@ export function useBucketReader(
     const { handoff, ownerPk, encryptFn } = entry;
     pendingRef.current.delete(wrapId);
     setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
+    if (handoff.threadId) keyStore.setName(handoff.threadPubkey, handoff.threadId);
     keyStore.set(handoff.threadPubkey, hexToBytes(handoff.threadSecretHex));
     handoffsRef.current.set(wrapId, handoff);
     setHandoffs(Array.from(handoffsRef.current.values()));
-    let storage: StorageAdapter | null = null;
-    try { storage = localStorage; } catch { /* unavailable */ }
-    if (storage) {
-      saveThreadKey(handoff.threadPubkey, handoff.threadSecretHex, ownerPk, encryptFn, storage).catch(() => {});
-    }
+    persistKey(handoff.threadPubkey, handoff.threadSecretHex, ownerPk, encryptFn, handoff.threadId);
     setRefreshKey((k) => k + 1);
   }, [keyStore]);
 

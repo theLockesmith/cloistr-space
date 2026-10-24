@@ -94,8 +94,9 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
     (async () => {
       try {
         const persisted = await loadThreadKeys(pubkey, decrypt, storage);
-        for (const { threadPubkey, secretHex } of persisted) {
+        for (const { threadPubkey, secretHex, threadId } of persisted) {
           if (cancelled) break;
+          if (threadId) store.setName(threadPubkey, threadId);
           if (!store.has(threadPubkey)) {
             store.importHex(threadPubkey, secretHex);
           }
