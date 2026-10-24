@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import type { NDKEvent, NDKFilter, NDKRelaySet } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import {
@@ -52,8 +53,88 @@ function newestOf<T extends { created_at?: number }>(events: Iterable<T>): T | n
   return newest;
 }
 
+/** How long the user's own write relays get to answer a profile read. */
+export const OWN_RELAY_PROFILE_TIMEOUT_MS = 8000;
+
+type SubscribeLike = (
+  filters: NDKFilter[],
+  opts: { closeOnEose: boolean; groupable: boolean; relaySet: NDKRelaySet },
+  handlers: { onEvent?: (e: NDKEvent) => void; onEose?: () => void }
+) => { eosesSeen?: Set<unknown>; stop: () => void };
+
+const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
+
+/**
+ * Ask one write relay for the user's kind:0, on its own subscription.
+ *
+ * One subscription per relay because NDK's onEose is per subscription and
+ * fires without waiting for every relay (its own timers), and closeOnEose then
+ * stops it, losing a slow relay's answer. A relay counts as answered only when
+ * it is in eosesSeen.
+ */
+function readOneRelay(
+  subscribe: SubscribeLike,
+  service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
+  url: string,
+  pubkey: string,
+): Promise<{ url: string; answered: boolean; events: NDKEvent[] }> {
+  return new Promise((resolve) => {
+    const relaySet = service.getRelaySetFor([url]);
+    if (!relaySet) {
+      resolve({ url, answered: false, events: [] });
+      return;
+    }
+    const events: NDKEvent[] = [];
+    let done = false;
+    let sub: ReturnType<SubscribeLike> | undefined;
+    const finish = (answered: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sub?.stop();
+      resolve({ url, answered, events });
+    };
+    const timer = setTimeout(() => finish(false), OWN_RELAY_PROFILE_TIMEOUT_MS);
+    sub = subscribe(
+      [{ kinds: [METADATA_KIND], authors: [pubkey], limit: 5 }],
+      { closeOnEose: true, groupable: false, relaySet },
+      {
+        onEvent: (e) => {
+          if (e.pubkey === pubkey) events.push(e);
+        },
+        onEose: () =>
+          queueMicrotask(() =>
+            finish([...((sub?.eosesSeen ?? new Set()) as Set<{ url?: string }>)].some((r) => !!r.url && sameRelay(r.url, url))),
+          ),
+      },
+    );
+  });
+}
+
+/**
+ * Read kind:0 from every one of the user's write relays (sweep #6, and the
+ * ruling on !228).
+ *
+ * Waits for all of them, each up to OWN_RELAY_PROFILE_TIMEOUT_MS, and returns
+ * every profile seen plus the relays that never answered. The caller takes
+ * the newest across everything, never the first to arrive: a slow relay may
+ * hold the newer profile, and saving over it with older fields loses data.
+ */
+async function readOwnRelayProfiles(
+  subscribe: SubscribeLike,
+  service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
+  urls: string[],
+  pubkey: string,
+): Promise<{ events: NDKEvent[]; silent: string[] }> {
+  const answers = await Promise.all(urls.map((u) => readOneRelay(subscribe, service, u, pubkey)));
+  return {
+    events: answers.flatMap((a) => a.events),
+    silent: answers.filter((a) => !a.answered).map((a) => a.url),
+  };
+}
+
 export function useProfile(): UseProfileReturn {
-  const { fetchEvents, createEvent, publish, isConnected, service } = useNdk();
+  const { fetchEvents, createEvent, publish, isConnected, service, subscribe } = useNdk();
   const pubkey = useAuthStore((s) => s.pubkey);
 
   const [profile, setProfile] = useState<ProfileFields>({});
@@ -92,24 +173,46 @@ export function useProfile(): UseProfileReturn {
           fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
         ])
       )
-      .then(([metadataEvents, relayEvents]) => {
-        const newestMetadata = newestOf(metadataEvents);
+      .then(async ([metadataEvents, relayEvents]) => {
+        const newestRelayList = newestOf(relayEvents);
+        const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
+        setRelays(relayList);
 
-        if (newestMetadata) {
-          const content = newestMetadata.content ?? '';
+        // kind:0 is replaceable, so a save publishes the whole profile, built
+        // on the newest one seen. With a relay list, every write relay is
+        // asked as well as Space's pool, and the newest across all of them
+        // wins; the first to arrive may be older than what a slow relay holds.
+        const writeUrls = relayList.filter((r) => r.write).map((r) => r.url);
+        const own =
+          writeUrls.length && service && subscribe
+            ? await readOwnRelayProfiles(subscribe as unknown as SubscribeLike, service, writeUrls, pubkey)
+            : // No relay list: Space's pool is all there is to ask. If it had
+              // nothing, creating a profile from scratch is safe; treating this
+              // as unreadable would mean a user with no kind:0 could never make
+              // one, the bug cloistr-stash had to fix in this same code path.
+              { events: [] as NDKEvent[], silent: [] as string[] };
+
+        const newest = newestOf([...Array.from(metadataEvents), ...own.events]);
+        if (newest) {
+          const content = newest.content ?? '';
           setExisting({ status: 'found', content });
           setProfile(parseProfileContent(content));
-        } else {
-          // A relay answered and had nothing. Creating a profile from scratch is
-          // safe -- there is nothing to overwrite. Treating this as unreadable
-          // would mean a user with no kind:0 could never make one, which is the
-          // bug cloistr-stash had to fix in this same code path.
-          setExisting({ status: 'absent' });
-          setProfile({});
+          return;
         }
 
-        const newestRelayList = newestOf(relayEvents);
-        setRelays(newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : []);
+        // Nothing anywhere. Only "absent" when every write relay said so;
+        // silence is never absent.
+        if (own.silent.length > 0) {
+          setExisting({ status: 'unreadable' });
+          setProfile({});
+          setError(
+            `Could not read your profile: ${own.silent.join(', ')} did not answer. Saving is disabled so it cannot replace a profile kept there.`,
+          );
+          return;
+        }
+
+        setExisting({ status: 'absent' });
+        setProfile({});
       })
       .catch((err) => {
         // We reached for it and failed. Explicitly NOT `absent`.
@@ -117,7 +220,7 @@ export function useProfile(): UseProfileReturn {
         setError(err instanceof Error ? err.message : 'Could not read your profile');
       })
       .finally(() => setIsLoading(false));
-  }, [fetchEvents, pubkey, isConnected]);
+  }, [fetchEvents, pubkey, isConnected, service, subscribe]);
 
   useEffect(() => {
     void load();
