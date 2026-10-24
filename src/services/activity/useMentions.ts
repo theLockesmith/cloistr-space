@@ -20,25 +20,38 @@ import { inboxRelayUrls } from './inboxRelays';
 /** How long to wait for the user's relay list before asking our relays alone. */
 export const RELAY_LIST_READ_TIMEOUT_MS = 8_000;
 
-/** The user's newest kind:10002 tags, or null when none could be read in time. */
-function readRelayListTags(
+/**
+ * How a read of the user's relay list went. `unknown` (failed or not yet
+ * answered) is not an answer, and must never be kept as one.
+ */
+type RelayListRead = { status: 'found'; tags: string[][] } | { status: 'absent' } | { status: 'unknown' };
+
+/**
+ * Read the user's newest kind:10002. `initial` settles within
+ * RELAY_LIST_READ_TIMEOUT_MS (as `unknown` if the relays are slow); `settled`
+ * is the read's real outcome, however long it takes.
+ */
+export function readRelayList(
   fetchEvents: (filter: NDKFilter) => Promise<Set<NDKEvent>>,
   pubkey: string
-): Promise<string[][] | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), RELAY_LIST_READ_TIMEOUT_MS);
-  });
-  const read = fetchEvents({ kinds: [10002], authors: [pubkey], limit: 5 }).then(
+): { initial: Promise<RelayListRead>; settled: Promise<RelayListRead> } {
+  const settled: Promise<RelayListRead> = fetchEvents({ kinds: [10002], authors: [pubkey], limit: 5 }).then(
     (events) => {
       let newest: NDKEvent | null = null;
       for (const e of events) if (!newest || (e.created_at ?? 0) > (newest.created_at ?? 0)) newest = e;
-      return newest ? newest.tags : null;
+      return newest ? { status: 'found', tags: newest.tags } : { status: 'absent' };
     },
-    () => null
+    () => ({ status: 'unknown' })
   );
-  return Promise.race([read, timeout]).finally(() => clearTimeout(timer));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<RelayListRead>((resolve) => {
+    timer = setTimeout(() => resolve({ status: 'unknown' }), RELAY_LIST_READ_TIMEOUT_MS);
+  });
+  const initial = Promise.race([settled, timeout]).finally(() => clearTimeout(timer));
+  return { initial, settled };
 }
+
+const tagsOf = (read: RelayListRead) => (read.status === 'found' ? read.tags : null);
 
 /** Kind 1 - Text note */
 const NOTE_KIND = 1;
@@ -133,6 +146,8 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
   // the subscription, and that must not re-read the relay list each time.
   const inboxRef = useRef<{ pubkey: string; urls: Promise<string[]> } | null>(null);
   const runRef = useRef(0);
+  // Bumped when a relay list that arrived late should reopen the subscription.
+  const [inboxRetry, setInboxRetry] = useState(0);
 
   // Track read status
   const [readIds, setReadIds] = useState<Set<string>>(() => {
@@ -198,12 +213,28 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
     const run = ++runRef.current;
     if (!inboxRef.current || inboxRef.current.pubkey !== pubkey) {
       const own = service?.getOwnRelayUrls() ?? [];
-      inboxRef.current = {
-        pubkey,
-        urls: (fetchEvents ? readRelayListTags(fetchEvents, pubkey) : Promise.resolve(null)).then((tags) =>
-          inboxRelayUrls(tags, own)
-        ),
-      };
+      const forKey = pubkey;
+      const read = fetchEvents
+        ? readRelayList(fetchEvents, forKey)
+        : { initial: Promise.resolve<RelayListRead>({ status: 'unknown' }), settled: Promise.resolve<RelayListRead>({ status: 'unknown' }) };
+      const entry = { pubkey: forKey, urls: read.initial.then((r) => inboxRelayUrls(tagsOf(r), own)) };
+      inboxRef.current = entry;
+      // A slow or failed read is not an answer, so it is not kept. Once the
+      // real answer arrives it replaces the stand-in and the subscription
+      // reopens on the inbox relays; if the read failed outright, the next
+      // start reads again.
+      void read.initial.then((first) => {
+        if (first.status !== 'unknown') return;
+        void read.settled.then((late) => {
+          if (inboxRef.current !== entry) return;
+          if (late.status === 'unknown') {
+            inboxRef.current = null;
+            return;
+          }
+          inboxRef.current = { pubkey: forKey, urls: Promise.resolve(inboxRelayUrls(tagsOf(late), own)) };
+          if (late.status === 'found') setInboxRetry((n) => n + 1);
+        });
+      });
     }
 
     void inboxRef.current.urls.then((urls) => {
@@ -261,7 +292,9 @@ export function useMentions(options: UseMentionsOptions = {}): UseMentionsReturn
         });
       }
     });
-  }, [subscribe, isConnected, pubkey, limit, since, readIds, fetchEvents, service]);
+      // inboxRetry is a trigger: a relay list that arrived late reopens the read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribe, isConnected, pubkey, limit, since, readIds, fetchEvents, service, inboxRetry]);
 
   // Mark single mention as read
   const markAsRead = useCallback((id: string) => {

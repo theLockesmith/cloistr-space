@@ -474,6 +474,11 @@ export class NdkService {
     return this.ndk.fetchEvents(filterArray);
   }
 
+  /** The relays this app is configured with (ours), normalized. */
+  getOwnRelayUrls(): string[] {
+    return Array.from(this.configuredRelays);
+  }
+
   /**
    * A relay set pinned to the user's OWN relays, bypassing the outbox model.
    *
@@ -495,11 +500,6 @@ export class NdkService {
    * Returns undefined when nothing is configured, so callers fall back to
    * NDK's own routing rather than querying an empty set and getting silence.
    */
-  /** The relays this app is configured with (ours), normalized. */
-  getOwnRelayUrls(): string[] {
-    return Array.from(this.configuredRelays);
-  }
-
   getOwnRelaySet(): NDKRelaySet | undefined {
     const urls = Array.from(this.configuredRelays);
     if (urls.length === 0) return undefined;
