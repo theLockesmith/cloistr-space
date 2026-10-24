@@ -603,7 +603,7 @@ export class NdkService {
      */
     handlers?: {
       onEvent?: (event: NDKEvent) => void;
-      onEose?: () => void;
+      onEose?: (sub?: { eosesSeen?: Set<unknown> }) => void;
     }
   ) {
     const filterArray = Array.isArray(filters) ? filters : [filters];
