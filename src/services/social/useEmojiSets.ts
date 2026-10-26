@@ -8,7 +8,7 @@
  * Handlers therefore go in at subscribe time, never attached afterwards.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useNdk, subscribeOnce } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
 import type { NDKEvent, NDKSubscription } from '@nostr-dev-kit/ndk';
@@ -190,7 +190,12 @@ export function useEmojiSets(): UseEmojiSetsReturn {
   const current = resolved && resolved.owner === pubkey ? resolved : null;
 
   // Fallback LAST so it can never shadow a shortcode the user defined.
-  const emoji = mergeEmoji(current?.direct ?? [], current?.fromSets ?? [], FALLBACK_EMOJI);
+  // Memoised: callers key effects on this array (pre-signing mirror URLs), and
+  // a fresh array every render re-runs those effects on every render.
+  const emoji = useMemo(
+    () => mergeEmoji(current?.direct ?? [], current?.fromSets ?? [], FALLBACK_EMOJI),
+    [current]
+  );
 
   return {
     emoji,

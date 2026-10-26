@@ -110,6 +110,25 @@ async function checkMirrorCapability(baseUrl: string): Promise<boolean> {
   }
 }
 
+/**
+ * The URLs a sign() call should send: those with no result yet, an ok link
+ * about to expire, or an unreachable mark past its retryAfter. Fresh ok,
+ * refused and disabled entries are never re-sent.
+ */
+export function pendingMirrorUrls(
+  urls: string[],
+  mirrorMap: MirrorMap,
+  nowSeconds: number
+): string[] {
+  return urls.filter((url) => {
+    const existing = mirrorMap.get(url);
+    if (!existing) return true;
+    if (existing.state === "ok") return existing.expiresAt <= nowSeconds + 30;
+    if (existing.state === "unreachable") return existing.retryAfter <= nowSeconds;
+    return false; // refused or disabled
+  });
+}
+
 export function useMirrorSign(): UseMirrorSignReturn {
   const { createEvent } = useNdk();
   const [mirrorMap, setMirrorMap] = useState<MirrorMap>(new Map());
@@ -140,14 +159,7 @@ export function useMirrorSign(): UseMirrorSignReturn {
 
       const now = Math.floor(Date.now() / 1000);
 
-      // Skip URLs we already have a fresh result for.
-      const pending = urls.filter((url) => {
-        const existing = mirrorMap.get(url);
-        if (!existing) return true;
-        if (existing.state === "ok" && existing.expiresAt > now + 30) return false;
-        if (existing.state === "refused" || existing.state === "disabled") return false;
-        return true; // unreachable or expired ok
-      });
+      const pending = pendingMirrorUrls(urls, mirrorMap, now);
 
       if (pending.length === 0) return;
 
