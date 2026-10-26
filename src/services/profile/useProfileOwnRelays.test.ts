@@ -94,6 +94,9 @@ vi.mock('@/services/nostr', () => {
   };
   return { useNdk: () => ndk };
 });
+// useProfile keys each read to the signer; one stable object, as the provider gives.
+const SIGNER = vi.hoisted(() => ({}));
+vi.mock('@/components/auth/AuthProvider', () => ({ useAuth: () => ({ signer: SIGNER }) }));
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: (sel?: (s: { pubkey: string }) => unknown) => (sel ? sel({ pubkey: ME }) : { pubkey: ME }),
 }));

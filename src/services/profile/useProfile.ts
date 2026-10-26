@@ -261,7 +261,12 @@ export function useProfile(): UseProfileReturn {
         const writeUrls = entries.filter((r) => r.write).map((r) => r.url);
         const own =
           writeUrls.length && service && subscribe
-            ? await readOwnRelayProfiles(subscribe as unknown as SubscribeLike, service, writeUrls, pubkey)
+            ? // A per-relay read that throws heard from none of them: every write
+              // relay counts as silent. The relay list above WAS read, so only
+              // the profile becomes unreadable, not the list.
+              await readOwnRelayProfiles(subscribe as unknown as SubscribeLike, service, writeUrls, pubkey).catch(
+                () => ({ events: [] as NDKEvent[], silent: writeUrls }),
+              )
             : // No relay list: Space's pool is all there is to ask. If it had
               // nothing, creating a profile from scratch is safe; treating this
               // as unreadable would mean a user with no kind:0 could never make

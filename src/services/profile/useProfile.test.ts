@@ -70,9 +70,13 @@ function answering(relayUrls: string[] | null) {
 
 const mockFetchEvents = vi.fn((filter: { kinds: number[]; authors: string[] }) => fetchImpl(filter));
 
+// One subscribe for the test's lifetime, as NdkProvider gives: load() depends
+// on it, so a new one per render reloads on every render.
+const mockSubscribe = vi.fn();
+
 vi.mock('@/services/nostr', () => ({
   useNdk: () => ({
-    subscribe: vi.fn(),
+    subscribe: mockSubscribe,
     service: mockService,
     publish: mockPublish,
     createEvent: mockCreateEvent,
@@ -292,6 +296,9 @@ describe('useProfile.saveRelays read-before-write guard', () => {
 
 describe('useProfile.saveProfile is keyed the same way', () => {
   it("refuses after a key switch even though the previous key's profile was read", async () => {
+    // No relay list, so the pool's empty answer is a real "absent" (with write
+    // relays, the per-relay read would have to answer too).
+    fetchImpl = answering(null);
     const hook = await renderLoaded();
     expect(hook.result.current.existing?.status).toBe('absent');
     fetchImpl = () => new Promise(() => {});
