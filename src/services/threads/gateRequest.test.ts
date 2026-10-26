@@ -186,3 +186,68 @@ describe.skipIf(!kitHere)("the kit's merge gate, judging what Space sends", () =
     expect(kitAccepts(wrapGateYes(yes, THREAD_SECRET_HEX).event, getPublicKey(hexToBytes('77'.repeat(32))))).toBe(false);
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// The three precisions conscience-orch set on the one-tap design (2026-10-26),
+// each pinned against the kit's own gate rather than against our reading of it.
+// ---------------------------------------------------------------------------
+
+/** A kind 1059 to the thread whose decrypted body is `inner`, exactly. */
+function wrapWithInner(inner: unknown): Event {
+  const oneTimeSk = hexToBytes('55'.repeat(32));
+  const ck = nip44.v2.utils.getConversationKey(oneTimeSk, getPublicKey(THREAD_SK));
+  return finalizeEvent(
+    { kind: 1059, content: nip44.v2.encrypt(JSON.stringify(inner), ck), tags: [], created_at: Math.floor(Date.now() / 1000) },
+    oneTimeSk,
+  );
+}
+
+const DAY = 86_400;
+
+describe('the reply Space sends, against each precision', () => {
+  it('(1) is a kind 1059 thread wrap', async () => {
+    const yes = await signGateYes(operatorSigner(), fx.request.id);
+    expect(wrapGateYes(yes, THREAD_SECRET_HEX).event.kind).toBe(1059);
+  });
+
+  it('(2) its inner p is the 7-field signed event itself, with no envelope around it', async () => {
+    const yes = await signGateYes(operatorSigner(), fx.request.id);
+    const p = innerText(wrapGateYes(yes, THREAD_SECRET_HEX).event);
+    const parsed = JSON.parse(p);
+    expect(Object.keys(parsed).sort()).toEqual(['content', 'created_at', 'id', 'kind', 'pubkey', 'sig', 'tags']);
+    expect(verifyEvent({ ...parsed })).toBe(true);
+    expect(parsed).toEqual({ id: yes.id, pubkey: yes.pubkey, created_at: yes.created_at, kind: yes.kind, tags: yes.tags, content: yes.content, sig: yes.sig });
+  });
+});
+
+describe.skipIf(!kitHere)('the kit, on each precision', () => {
+  const sign = (content: string, tags: string[][], createdAt = Math.floor(Date.now() / 1000)) =>
+    finalizeEvent({ kind: 1111, content, tags, created_at: createdAt }, OPERATOR_SK);
+  const asSpaceSends = (ev: Event) => wrapWithInner({ p: JSON.stringify(ev), a: OPERATOR_PK, ts: ev.created_at });
+
+  it('(2) reads p as TEXT that is the event: the same event as a raw JSON object is never seen', () => {
+    const ev = sign('yes', [['e', fx.request.id]]);
+    expect(kitAccepts(asSpaceSends(ev))).toBe(true);
+    expect(kitAccepts(wrapWithInner({ p: ev, a: OPERATOR_PK, ts: ev.created_at }))).toBe(false);
+  }, 30_000);
+
+  it('(2) an envelope around the event hides it', () => {
+    const ev = sign('yes', [['e', fx.request.id]]);
+    const env = JSON.stringify({ v: 'arbiter-fleet-msg-v1', body: JSON.stringify(ev), from: 'cloistr-space' });
+    expect(kitAccepts(wrapWithInner({ p: env, a: OPERATOR_PK, ts: ev.created_at }))).toBe(false);
+  }, 30_000);
+
+  it('(3) takes y or yes in any case with a trailing . or !, and an e tag anywhere', () => {
+    expect(kitAccepts(asSpaceSends(sign('Y!', [['e', fx.request.id]])))).toBe(true);
+    expect(kitAccepts(asSpaceSends(sign('YES.', [['client', 'space'], ['e', fx.request.id]])))).toBe(true);
+    expect(kitAccepts(asSpaceSends(sign('yes please', [['e', fx.request.id]])))).toBe(false);
+  }, 60_000);
+
+  it('(3) refuses a yes signed more than 7 days ago, and one for a request the box never filed', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(kitAccepts(asSpaceSends(sign('yes', [['e', fx.request.id]], now - 6 * DAY)))).toBe(true);
+    expect(kitAccepts(asSpaceSends(sign('yes', [['e', fx.request.id]], now - 8 * DAY)))).toBe(false);
+    expect(kitAccepts(asSpaceSends(sign('yes', [['e', 'cd'.repeat(32)]])))).toBe(false);
+  }, 60_000);
+});
+

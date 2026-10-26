@@ -28,4 +28,4 @@ got = grant_request.find_yes(job['gate'], job['repo'], job['diff'],
                              operator_keys=[job['operatorPk']], target=job['target'])
 print(json.dumps({'accepted': got is not None,
                   'reason': got and got['reason'],
-                  'plaintextHead': opened['plaintext'][:40]}))
+                  'plaintextHead': str(opened['plaintext'])[:40]}))
