@@ -193,8 +193,9 @@ export function useAllThreads(): UseAllThreadsReturn {
   // Second question, once roots are known: replies to roots outside the user's
   // groups (the group filter cannot see them), and every root's status labels,
   // asked only of the root authors since nobody else's label counts.
+  const memberGroups = useMemo(() => new Set(groupIdsKey ? groupIdsKey.split(',') : []), [groupIdsKey]);
   const roots = comments.filter((c) => !c.rootId);
-  const outsideRootsKey = sortedKey(roots.filter((r) => !r.groupId || !membershipRef.current.has(r.groupId)).map((r) => r.id));
+  const outsideRootsKey = sortedKey(roots.filter((r) => !r.groupId || !memberGroups.has(r.groupId)).map((r) => r.id));
   const allRootsKey = sortedKey(roots.map((r) => r.id));
   const rootAuthorsKey = sortedKey(roots.map((r) => r.pubkey));
   useEffect(() => {
