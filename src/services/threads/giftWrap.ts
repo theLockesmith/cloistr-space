@@ -2,13 +2,17 @@
  * Kind 1059 gift-wrap construction and trial decryption.
  *
  * Wire format matches the kit's thread_wrap.py:
- *   message inner: JSON {"p": plaintext, "a": author_pubkey_hex, "ts": sent_at_unix}
- *     (`ts` added 2026-10-19; the kit reads only p and a, and writes no ts yet)
+ *   message inner, v2 (kit seal-author-v2): a kind 13 seal signed by the author,
+ *     its content NIP-44(author -> thread pubkey, rumor JSON), the rumor
+ *     {pubkey, created_at, kind, tags, content}. Read; Space does not write it yet.
+ *   message inner, v1: JSON {"p": plaintext, "a": author_pubkey_hex, "ts": sent_at_unix}
+ *     (`ts` added 2026-10-19). Still read, and still what Space writes.
  *   handoff inner: JSON {"tid": thread_id, "sec": secret_hex, "g": granter_hex}
  *   tags: [['t', bucket_hex], ['expiration', String((window+2)*86400)]]
  */
 
-import { generateSecretKey, getPublicKey, nip44, finalizeEvent } from 'nostr-tools';
+import { generateSecretKey, getPublicKey, nip44, finalizeEvent, type Event } from 'nostr-tools';
+import { verifyFresh } from '../nostr/verifyFresh';
 import { hexToBytes } from 'nostr-tools/utils';
 import {
   computeThreadBucket,
@@ -38,6 +42,52 @@ export interface UnwrappedMessage {
    */
   createdAt: number;
   approxTime: boolean;
+  /**
+   * True only for a v2 message: authorHex signed the seal, and the rumor inside
+   * names the same key. A v1 message's author is whatever its sender typed.
+   */
+  verified: boolean;
+}
+
+export const SEAL_KIND = 13;
+
+const EVENT_FIELDS = ['id', 'pubkey', 'created_at', 'kind', 'tags', 'content', 'sig'] as const;
+
+type SealVerdict =
+  | { kind: 'notSeal' }
+  | { kind: 'foreign' }
+  | { kind: 'refused' }
+  | { kind: 'ok'; plaintext: string; authorHex: string; sentAt: unknown };
+
+/**
+ * Open a v2 seal with a thread key, as the kit's _verify_seal_json does.
+ *
+ * `refused` is a forgery or corruption addressed to this thread (the wrap
+ * opened with its key), so nothing of it may be shown. `foreign` is a valid
+ * seal for someone else; `notSeal` means try the v1 shape.
+ */
+function openSeal(inner: unknown, threadSk: Uint8Array): SealVerdict {
+  if (!inner || typeof inner !== 'object' || !EVENT_FIELDS.every((f) => f in inner)) return { kind: 'notSeal' };
+  const seal = inner as Event;
+  if (seal.kind !== SEAL_KIND || typeof seal.pubkey !== 'string' || !verifyFresh(seal)) return { kind: 'refused' };
+
+  let rumor: unknown;
+  try {
+    rumor = nip44.v2.decrypt(seal.content, nip44.v2.utils.getConversationKey(threadSk, seal.pubkey));
+  } catch {
+    return { kind: 'foreign' };
+  }
+  try {
+    rumor = JSON.parse(rumor as string);
+  } catch {
+    return { kind: 'refused' };
+  }
+  const r = rumor as { pubkey?: unknown; content?: unknown; created_at?: unknown };
+  // NIP-59's anti-impersonation rule: the rumor's claimed author must be the
+  // key that signed the seal around it.
+  if (typeof r.pubkey !== 'string' || r.pubkey.toLowerCase() !== seal.pubkey.toLowerCase()) return { kind: 'refused' };
+  if (typeof r.content !== 'string') return { kind: 'refused' };
+  return { kind: 'ok', plaintext: r.content, authorHex: seal.pubkey.toLowerCase(), sentAt: r.created_at };
 }
 
 /**
@@ -137,16 +187,36 @@ export function tryUnwrapMessage(
       const conversationKey = nip44.v2.utils.getConversationKey(threadSk, wrapEvent.pubkey);
       const decrypted = nip44.v2.decrypt(wrapEvent.content, conversationKey);
       const inner = JSON.parse(decrypted);
+      const time = (ts: unknown) => {
+        const sentAt = sealedSendTime(ts, wrapEvent.created_at);
+        return {
+          createdAt: sentAt ?? (wrapEvent.created_at === undefined ? 0 : latestSendTime(wrapEvent.created_at, nowSec)),
+          approxTime: sentAt === null,
+        };
+      };
 
-      if (typeof inner.p === 'string' && typeof inner.a === 'string') {
-        const sentAt = sealedSendTime(inner.ts, wrapEvent.created_at);
+      const seal = openSeal(inner, threadSk);
+      if (seal.kind === 'refused') return null;
+      if (seal.kind === 'ok') {
+        // The rumor's created_at is the real send time, and the seal's
+        // signature covers it.
+        return {
+          plaintext: seal.plaintext,
+          authorHex: seal.authorHex,
+          threadId: threadPubkey,
+          wrapId: wrapEvent.id,
+          ...time(seal.sentAt),
+          verified: true,
+        };
+      }
+      if (seal.kind === 'notSeal' && typeof inner.p === 'string' && typeof inner.a === 'string') {
         return {
           plaintext: inner.p,
           authorHex: inner.a,
           threadId: threadPubkey,
           wrapId: wrapEvent.id,
-          createdAt: sentAt ?? (wrapEvent.created_at === undefined ? 0 : latestSendTime(wrapEvent.created_at, nowSec)),
-          approxTime: sentAt === null,
+          ...time(inner.ts),
+          verified: false,
         };
       }
     } catch {
