@@ -1,8 +1,6 @@
 /**
- * @fileoverview The Threads list reads standalone threads too: a fleet thread
- * whose key the user holds, and the user's own thread with no project. On
- * master neither appears (useAllThreads only asks for #h of the user's
- * projects and drops anything without an h).
+ * @fileoverview The Threads list reads private threads: a fleet thread whose
+ * key the user holds, by thread id, whoever signed each message.
  *
  * Fixtures are the kit's own output (see kitThreads.test.ts): a kind:1111
  * signed by a ROLE key, and a wrap-mode kind 1059 under a one-time key.
@@ -84,12 +82,12 @@ function fleetMessage(body: string, tsk: Uint8Array, tpk: string, id: string) {
 }
 
 describe('useAllThreads standalone threads', () => {
-  it('asks for the user’s own messages by author, and fleet threads by thread id, never by the fleet’s key', () => {
+  it('asks for fleet threads by thread id, never by the fleet’s key', () => {
     subs.length = 0;
     renderHook(() => useAllThreads());
     const filters = subs.flatMap((s) => s.filters);
     const byAuthor = filters.filter((f) => Array.isArray(f.authors)).flatMap((f) => f.authors as string[]);
-    expect(byAuthor).toEqual([ME]);
+    expect(byAuthor).not.toContain(FLEET);
     expect(filters).toContainEqual({ kinds: [1111], '#d': ['cloistr-group-wrap'] });
   });
 
@@ -99,8 +97,8 @@ describe('useAllThreads standalone threads', () => {
     const { result } = renderHook(() => useAllThreads());
     relay(kit.legacy1111);
 
-    await waitFor(() => expect(result.current.standalone).toHaveLength(1));
-    const t = result.current.standalone[0];
+    await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
+    const t = result.current.privateThreads[0];
     expect(t.title).toBe('cloistr-group-wrap');
     expect(t.messages.map((m) => m.text).sort()).toEqual(['legacy hello', 'wrap-mode hello']);
     reader.messages = [];
@@ -121,17 +119,17 @@ describe('useAllThreads standalone threads', () => {
     expect(granters).toEqual(expect.arrayContaining([FLEET, kit.keys.granterPk]));
   });
 
-  it('shows a fleet-style sealed thread whose key is held, and the user’s own root with no project', async () => {
+  it('shows a fleet-style sealed thread whose key is held as private, and the user’s own root as public', async () => {
     subs.length = 0;
     const { result } = renderHook(() => useAllThreads());
     relay(fleetMessage('deploy is broken', threadSk, threadPk, 'a'));
     relay({ id: 'b'.padEnd(64, '0'), kind: 1111, pubkey: ME, created_at: 1_790_000_200, content: 'my own thread', tags: [['subject', 'Mine']] });
 
-    await waitFor(() => expect(result.current.standalone).toHaveLength(2));
-    const titles = result.current.standalone.map((t) => t.title).sort();
-    expect(titles).toEqual(['Mine', 'cloistr-group-wrap']);
-    const fleet = result.current.standalone.find((t) => t.title === 'cloistr-group-wrap')!;
-    expect(fleet.messages[0].text).toBe('deploy is broken');
+    await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
+    await waitFor(() => expect(result.current.publicThreads).toHaveLength(1));
+    expect(result.current.privateThreads[0].title).toBe('cloistr-group-wrap');
+    expect(result.current.privateThreads[0].messages[0].text).toBe('deploy is broken');
+    expect(result.current.publicThreads[0].thread.root.subject).toBe('Mine');
   });
 
   it('a thread for a key the user does NOT hold stays invisible and uncounted', async () => {
@@ -140,21 +138,24 @@ describe('useAllThreads standalone threads', () => {
     relay(fleetMessage('not yours', unheldSk, unheldPk, 'c'));
     relay(fleetMessage('yours', threadSk, threadPk, 'd'));
 
-    await waitFor(() => expect(result.current.standalone).toHaveLength(1));
+    await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
     expect(JSON.stringify(result.current)).not.toContain(unheldPk);
-    expect(result.current.standalone[0].messages.map((m) => m.text)).toEqual(['yours']);
+    expect(result.current.privateThreads[0].messages.map((m) => m.text)).toEqual(['yours']);
   });
 
   it('switching keys drops the previous key’s threads before the new key’s arrive', async () => {
     subs.length = 0;
     currentMe = ME;
     const { result, rerender } = renderHook(() => useAllThreads());
-    relay({ id: 'e'.padEnd(64, '0'), kind: 1111, pubkey: ME, created_at: 1_790_000_300, content: 'A’s own thread', tags: [] });
-    await waitFor(() => expect(result.current.standalone).toHaveLength(1));
+    relay({ id: 'e'.padEnd(64, '0'), kind: 11, pubkey: ME, created_at: 1_790_000_300, content: 'A’s own thread', tags: [['title', 'A']] });
+    relay(fleetMessage('for A', threadSk, threadPk, 'f'));
+    await waitFor(() => expect(result.current.publicThreads).toHaveLength(1));
+    await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
 
     currentMe = OTHER_ME;
     rerender();
-    expect(result.current.standalone).toEqual([]);
+    expect(result.current.publicThreads).toEqual([]);
+    expect(result.current.privateThreads).toEqual([]);
     currentMe = ME;
   });
 

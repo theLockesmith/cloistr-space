@@ -24,6 +24,7 @@
   "dependencies": {
     "@cloistr/auth": "^1.4.1",
     "@cloistr/collab-common": "^0.8.0",
+    "@cloistr/threads": "^0.3.0",
     "@cloistr/ui": "^0.50.4",
     "@noble/hashes": "^2.4.0",
     "@nostr-dev-kit/ndk": "^2.18.1",

@@ -16,7 +16,9 @@ export {
 
 export { useThreads } from './useThreads';
 
-export { useAllThreads, type ThreadWithGroup, type UseAllThreadsReturn } from './useAllThreads';
+export { useAllThreads, type UseAllThreadsReturn } from './useAllThreads';
+export { admitPublicEvent, foldPublicThreads, matchesSearch, type PublicThreadItem } from './publicThreadList';
+export { createPublicThread, replyToPublicThread, archivePublicThread, type NewPublicThread } from './publicThreadService';
 export { type StandaloneThread, type StandaloneMessage } from './standaloneThreads';
 
 export {

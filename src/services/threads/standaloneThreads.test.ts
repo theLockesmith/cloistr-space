@@ -1,15 +1,13 @@
 /**
- * @fileoverview Threads that stand alone: no project tag, or a project the
- * user is not in. The operator's ruling (2026-10-13) is that a thread is a
- * thread whether or not a project holds it. The fleet writes exactly these:
- * each message a standalone kind:1111, sealed to the thread's key, tags d
- * (thread name), K and thread (thread pubkey), h only sometimes
- * (thread_daemon.py). Space showed none of them anywhere.
+ * @fileoverview Private threads: the sealed ones whose key the user holds. The
+ * fleet writes exactly these: each message a kind:1111 sealed to the thread's
+ * key, tags d (thread name), K and thread (thread pubkey), h only sometimes
+ * (thread_daemon.py).
  *
  * What may be shown is the whole question, so it is decided here, before
  * anything is stored: a sealed message only when its key is held AND it
- * opens; an unsealed one only when the user wrote it. Everything else is
- * dropped, tags and all.
+ * opens. Everything else is dropped, tags and all; unsealed threads are public
+ * and are publicThreadList.ts's to show.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -58,7 +56,7 @@ function fleetMessage(body: string, opts: { sk?: Uint8Array; pk?: string; author
   return ev({ pubkey: author, content: encryptThreadContent(envelope(body), tsk, author), tags, created_at: opts.at });
 }
 
-const ctx = { keyStore: keys, me, memberProjects: new Set(['devs']) };
+const ctx = { keyStore: keys };
 
 describe('acceptStandalone: what may be shown', () => {
   it('a fleet-style sealed message whose key is held, with no project tag, is shown decrypted', () => {
@@ -73,24 +71,10 @@ describe('acceptStandalone: what may be shown', () => {
     });
   });
 
-  it('the user’s own unsealed root with no project tag is shown', () => {
-    const own = ev({ pubkey: me, content: 'hello, a thread of my own', tags: [['subject', 'My thread']] });
-    expect(acceptStandalone(own, ctx)).toMatchObject({
-      threadKey: `root:${own.id}`,
-      title: 'My thread',
-      text: 'hello, a thread of my own',
-      sealed: false,
-      projectId: null,
-    });
-  });
-
-  it('the user’s own reply joins its root', () => {
-    const reply = ev({ pubkey: me, content: 'and a follow-up', tags: [['E', 'r'.repeat(64), '', me]] });
-    expect(acceptStandalone(reply, ctx)?.threadKey).toBe(`root:${'r'.repeat(64)}`);
-  });
-
-  it('a sealed message for a project the user is NOT in is shown, labelled with that project', () => {
+  it('a sealed message tagged with a project is shown, labelled with that project', () => {
+    // In the user's project or not: the public list never shows sealed ones.
     expect(acceptStandalone(fleetMessage('x', { h: 'conscience-g' }), ctx)?.projectId).toBe('conscience-g');
+    expect(acceptStandalone(fleetMessage('x', { h: 'devs' }), ctx)?.projectId).toBe('devs');
   });
 
   describe('dropped, so nothing about it is stored, shown or counted', () => {
@@ -104,26 +88,19 @@ describe('acceptStandalone: what may be shown', () => {
       expect(acceptStandalone(forged, ctx)).toBeNull();
     });
 
-    it('an unsealed message by someone else', () => {
+    it('an unsealed message, whoever wrote it (it is public, not private)', () => {
       expect(acceptStandalone(ev({ pubkey: stranger, content: 'public spam' }), ctx)).toBeNull();
+      expect(acceptStandalone(ev({ pubkey: me, content: 'mine', tags: [['subject', 'Mine']] }), ctx)).toBeNull();
     });
 
     it('a sealed-looking message by someone else with no thread tag', () => {
       expect(acceptStandalone(ev({ pubkey: stranger, content: 'A'.repeat(60) }), ctx)).toBeNull();
     });
 
-    it('a message tagged with a project the user IS in (the project view shows it already)', () => {
-      expect(acceptStandalone(fleetMessage('x', { h: 'devs' }), ctx)).toBeNull();
-      expect(acceptStandalone(ev({ pubkey: me, content: 'mine', tags: [['h', 'devs']] }), ctx)).toBeNull();
-    });
-
     it('another kind', () => {
       expect(acceptStandalone(ev({ pubkey: me, kind: 1, content: 'a note' }), ctx)).toBeNull();
     });
 
-    it('with no user signed in, nothing unsealed is the user’s', () => {
-      expect(acceptStandalone(ev({ pubkey: me, content: 'mine' }), { ...ctx, me: null })).toBeNull();
-    });
   });
 
   it('a body that is not a fleet envelope is shown as the plaintext itself', () => {
