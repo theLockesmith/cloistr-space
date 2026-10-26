@@ -30,10 +30,6 @@ vi.mock('@/services/profile', () => ({
   }),
 }));
 
-vi.mock('@/services/nostr', () => ({
-  useNdk: () => ({ service: null }),
-}));
-
 const { ProfileView } = await import('./ProfileView');
 
 const saveButton = () => screen.getByRole('button', { name: 'Save relay list' }) as HTMLButtonElement;
