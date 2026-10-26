@@ -14,6 +14,9 @@ importers:
       '@cloistr/collab-common':
         specifier: ^0.8.0
         version: 0.8.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
+      '@cloistr/threads':
+        specifier: ^0.3.1
+        version: 0.3.1(typescript@5.9.3)
       '@cloistr/ui':
         specifier: ^0.50.4
         version: 0.50.5(@cloistr/auth@1.4.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -275,6 +278,9 @@ packages:
     resolution: {integrity: sha1-gfdaQxSYEglLTTjzkZjrkmE6GIA=, tarball: https://git.aegis-hq.xyz/api/v4/projects/185/packages/npm/@cloistr/tailwind-config/-/@cloistr/tailwind-config-0.1.0.tgz}
     peerDependencies:
       tailwindcss: '>=3'
+
+  '@cloistr/threads@0.3.1':
+    resolution: {integrity: sha1-31Y55+ZsZrOfsY55s2RSp5SAEO0=, tarball: https://git.aegis-hq.xyz/api/v4/projects/325/packages/npm/@cloistr/threads/-/@cloistr/threads-0.3.1.tgz}
 
   '@cloistr/ui@0.50.5':
     resolution: {integrity: sha1-Vy2sXdqH+5DpLC7NywU4Hi5IyzU=, tarball: https://git.aegis-hq.xyz/api/v4/projects/59/packages/npm/@cloistr/ui/-/@cloistr/ui-0.50.5.tgz}
@@ -591,6 +597,10 @@ packages:
 
   '@noble/curves@2.0.1':
     resolution: {integrity: sha512-vs1Az2OOTBiP4q0pwjW5aF0xp9n4MxVrmkFBxc6EKZc6ddYx5gaZiAsZoq0uRRXWbi3AT/sBqn05eRPtn1JCPw==}
+    engines: {node: '>= 20.19.0'}
+
+  '@noble/curves@2.4.0':
+    resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
     engines: {node: '>= 20.19.0'}
 
   '@noble/hashes@1.8.0':
@@ -2528,6 +2538,14 @@ snapshots:
     dependencies:
       tailwindcss: 4.3.3
 
+  '@cloistr/threads@0.3.1(typescript@5.9.3)':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      nostr-tools: 2.25.2(typescript@5.9.3)
+    transitivePeerDependencies:
+      - typescript
+
   '@cloistr/ui@0.50.5(@cloistr/auth@1.4.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@cloistr/auth': 1.4.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
@@ -2745,6 +2763,10 @@ snapshots:
   '@noble/curves@2.0.1':
     dependencies:
       '@noble/hashes': 2.0.1
+
+  '@noble/curves@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
 
   '@noble/hashes@1.8.0': {}
 
