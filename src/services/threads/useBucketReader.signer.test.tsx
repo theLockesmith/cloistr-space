@@ -135,3 +135,45 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     expect(result.current.messages).toHaveLength(0);
   });
 });
+
+/**
+ * The signer the app actually holds. @cloistr/ui's shared sign-in wraps the
+ * NIP-46 signer for re-authentication and forwards only the standard methods,
+ * so `sendRequest` is gone (live 2026-10-27: zero cloistr_ecdh_tag requests on
+ * the signer, and the operator saw "No threads yet"). The fake above has
+ * sendRequest, which is why these tests stayed green while that broke.
+ */
+function wrappedSigner(userSk: Uint8Array) {
+  const signer: Partial<ReturnType<typeof remoteSigner>> = remoteSigner(userSk);
+  delete signer.sendRequest;
+  return signer;
+}
+
+describe('useBucketReader when the signer cannot locate hand-offs', () => {
+  const userSk = generateSecretKey();
+  const granterSk = generateSecretKey();
+  const threadSk = generateSecretKey();
+
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    try { localStorage.clear(); } catch { /* none */ }
+    const now = Math.floor(Date.now() / 1000);
+    relay.events = [
+      wrapKeyHandoff('cloistr-coord-wrap', bytesToHex(threadSk), granterSk, getPublicKey(userSk), now) as unknown as Wrap,
+    ];
+  });
+
+  it('says the lookup was unavailable instead of reporting no hand-offs', async () => {
+    auth.signer = wrappedSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [getPublicKey(granterSk)]));
+    await waitFor(() => expect(result.current.handoffLookupUnavailable).toBe(true), { timeout: 3000 });
+    expect(result.current.pendingHandoffs).toHaveLength(0);
+  });
+
+  it('does not claim that when the signer can locate them', async () => {
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [getPublicKey(granterSk)]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    expect(result.current.handoffLookupUnavailable).toBe(false);
+  });
+});
