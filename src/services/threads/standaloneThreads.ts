@@ -1,28 +1,23 @@
 /**
- * @fileoverview Threads that stand alone: no project tag, or a project the
- * user is not in.
+ * @fileoverview Private threads: the sealed ones whose key the user holds.
  *
- * The operator ruled (2026-10-13) that a thread is a thread whether or not a
- * project holds it; the project is a reference, not a container. The kit
- * (arbiter thread_daemon.py) writes fleet threads in one of two shapes, and
- * signs neither with the fleet key:
+ * The kit (arbiter thread_daemon.py) writes fleet threads in one of two
+ * shapes, and signs neither with the fleet key:
  *  - wrap mode, the live one: kind 1059 under a one-time key, `t` bucket tag,
  *    content sealed to the thread key, inner {p: envelope, a: role pubkey}.
  *    These arrive through the bucket reader; see acceptWrapped.
  *  - legacy: kind:1111 signed by the sending ROLE's own key, content sealed to
  *    the thread key, clear tags d (thread id), K, thread (thread pubkey), and h
- *    only when the thread names a group. Fetched by `#d`; see acceptStandalone.
+ *    only when the thread names a group. Fetched by `#d` and by group; see
+ *    acceptStandalone.
  * There is no E tag, so a conversation is the set of messages sharing a thread
  * key, not a root and its replies.
  *
- * What may be shown is decided here, before anything is stored:
- *  - sealed: only when the user holds the thread's key AND the content opens
- *    with it. A message for a key the user does not hold is dropped whole, so
- *    not even its tags are stored, shown or counted.
- *  - unsealed: only the user's own messages. Public standalone threads from
- *    people the user follows or trusts are the next step, not this one.
- *  - anything tagged with a project the user IS in is left to the project
- *    path, which already shows it.
+ * What may be shown is decided here, before anything is stored: only when the
+ * user holds the thread's key AND the content opens with it. A message for a
+ * key the user does not hold is dropped whole, so not even its tags are
+ * stored, shown or counted. Unsealed threads are public and belong to
+ * publicThreadList.ts; this module never shows one.
  */
 
 import { THREAD_KIND } from './threadEvents';
@@ -38,7 +33,7 @@ export interface StandaloneMessage {
   createdAt: number;
   /** True when createdAt is a wrap's randomised time, not the send time; see UnwrappedMessage. */
   approxTime?: boolean;
-  /** Which conversation: `sealed:<thread pubkey>` or `root:<root event id>`. */
+  /** Which conversation: `sealed:<thread pubkey>`. */
   threadKey: string;
   title: string;
   /** The readable text: a fleet envelope's body, or the plaintext itself. */
@@ -46,7 +41,7 @@ export interface StandaloneMessage {
   /** The sender role a fleet envelope names; null otherwise. */
   from: string | null;
   sealed: boolean;
-  /** The project tag, when it names one the user is not in; null when there is none. */
+  /** The project the message is tagged with; null when there is none. */
   projectId: string | null;
 }
 
@@ -73,51 +68,28 @@ interface RawEvent {
 
 const tag = (e: RawEvent, name: string) => e.tags.find((t) => t[0] === name)?.[1];
 
-/** The message, if the user may see it; null drops it entirely. */
-export function acceptStandalone(
-  event: RawEvent,
-  ctx: { keyStore: ThreadKeyStore; me: string | null; memberProjects: Set<string> }
-): StandaloneMessage | null {
+/** The sealed message, if the user may see it; null drops it entirely. */
+export function acceptStandalone(event: RawEvent, ctx: { keyStore: ThreadKeyStore }): StandaloneMessage | null {
   if (event.kind !== THREAD_KIND) return null;
 
-  const h = tag(event, 'h') ?? null;
-  if (h && ctx.memberProjects.has(h)) return null;
-
-  const createdAt = event.created_at ?? 0;
   const threadPk = tag(event, 'thread');
+  if (!threadPk) return null;
+  const sk = ctx.keyStore.get(threadPk);
+  if (!sk) return null;
+  const plaintext = decryptThreadContent(event.content, sk, event.pubkey);
+  if (plaintext === null) return null;
 
-  if (threadPk) {
-    const sk = ctx.keyStore.get(threadPk);
-    if (!sk) return null;
-    const plaintext = decryptThreadContent(event.content, sk, event.pubkey);
-    if (plaintext === null) return null;
-    const envelope = parseFleetEnvelope(plaintext);
-    return {
-      id: event.id,
-      pubkey: event.pubkey,
-      createdAt,
-      threadKey: `sealed:${threadPk}`,
-      title: tag(event, 'd') || envelope?.thread || tag(event, 'subject') || 'Sealed thread',
-      text: envelope ? envelope.body : plaintext,
-      from: envelope?.from ?? null,
-      sealed: true,
-      projectId: h,
-    };
-  }
-
-  // With no one signed in, me is null and no event's pubkey matches it.
-  if (event.pubkey !== ctx.me) return null;
-  const rootId = tag(event, 'E');
+  const envelope = parseFleetEnvelope(plaintext);
   return {
     id: event.id,
     pubkey: event.pubkey,
-    createdAt,
-    threadKey: `root:${rootId ?? event.id}`,
-    title: tag(event, 'subject') || event.content.slice(0, 80) || 'Untitled thread',
-    text: event.content,
-    from: null,
-    sealed: false,
-    projectId: h,
+    createdAt: event.created_at ?? 0,
+    threadKey: `sealed:${threadPk}`,
+    title: tag(event, 'd') || envelope?.thread || tag(event, 'subject') || 'Sealed thread',
+    text: envelope ? envelope.body : plaintext,
+    from: envelope?.from ?? null,
+    sealed: true,
+    projectId: tag(event, 'h') ?? null,
   };
 }
 
@@ -133,8 +105,7 @@ export function groupStandalone(messages: StandaloneMessage[]): StandaloneThread
   const threads: StandaloneThread[] = [];
   for (const [threadKey, bucket] of byThread) {
     const msgs = Array.from(bucket.values()).sort((a, b) => a.createdAt - b.createdAt);
-    // A root's own subject names the conversation; replies only fall back to it.
-    const root = msgs.find((m) => threadKey === `root:${m.id}`) ?? msgs[0];
+    const root = msgs[0];
     threads.push({
       threadKey,
       title: root.title,

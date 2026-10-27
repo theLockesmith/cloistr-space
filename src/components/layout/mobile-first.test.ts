@@ -296,7 +296,7 @@ describe('user content cannot widen the page', () => {
   const CONTENT_SURFACES = [
     'src/components/social/NoteContent.tsx',
     'src/components/projects/GroupChat.tsx',
-    'src/components/projects/GroupThreads.tsx',
+    'src/components/threads/ThreadDetail.tsx',
   ];
 
   for (const file of CONTENT_SURFACES) {

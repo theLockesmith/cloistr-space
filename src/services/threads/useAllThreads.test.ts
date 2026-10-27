@@ -1,219 +1,126 @@
 /**
- * @fileoverview Tests for useAllThreads, focused on the NIP-44 decryption path.
+ * @fileoverview useAllThreads, public side: what it asks the relays, and what
+ * reaches the one list (threads.md 6).
  *
- * The cross-group thread listing must decrypt sealed content the same way the
- * per-group view does. These tests pin that behavior: a message whose thread
- * key is held decrypts, one without a key (or without a thread tag) passes
- * through as raw ciphertext.
+ * The questions matter as much as the answers: kind 11 roots are invisible to
+ * a filter that asks only for 1111, replies to a thread outside the user's
+ * groups are invisible to the group filter, and an archive is invisible unless
+ * labels are asked for at all.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { STATUS_LABEL_KIND, STATUS_NAMESPACE } from '@cloistr/threads';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
-import { THREAD_KIND } from './threadEvents';
 
-
-// ---- Test keys ----
-
+const ME = getPublicKey(generateSecretKey());
+const OTHER = getPublicKey(generateSecretKey());
+const ROLE = getPublicKey(generateSecretKey());
 const threadSk = generateSecretKey();
 const threadPk = getPublicKey(threadSk);
-const authorSk = generateSecretKey();
-const authorPk = getPublicKey(authorSk);
 
-// ---- Mocks ----
-
-// subscribeStream: we capture the onEvent handler so we can feed it events.
-let capturedOnEvent: ((event: unknown) => void) | null = null;
-let capturedOnEose: (() => void) | null = null;
-// One relay connection delivers an event to every open subscription; keeping
-// only the last one opened would let a second subscription swallow the first's.
-let handlerList: { onEvent: (e: unknown) => void; onEose?: () => void }[] = [];
-function capture(handlers: { onEvent: (e: unknown) => void; onEose?: () => void }) {
-  handlerList.push(handlers);
-  capturedOnEvent = (e) => handlerList.forEach((h) => h.onEvent(e));
-  capturedOnEose = () => handlerList.forEach((h) => h.onEose?.());
-}
+type Sub = { filters: Record<string, unknown>[]; onEvent: (e: unknown) => void; onEose?: () => void; stopped: boolean };
+const subs: Sub[] = [];
 
 vi.mock('@/services/nostr', () => ({
-  useNdk: () => ({
-    subscribe: vi.fn(),
-    isConnected: true,
-    fetchEvents: vi.fn(),
-    service: null,
-    isConnecting: false,
-    relayStatuses: new Map(),
-    reconnect: vi.fn(),
-    publish: null,
-    createEvent: vi.fn(),
-    fetchFromOwnRelays: null,
-  }),
-  subscribeStream: vi.fn((_subscribe, _filters, handlers) => {
-    capture(handlers);
-    return { stop: vi.fn() };
+  useNdk: () => ({ subscribe: vi.fn(), isConnected: true }),
+  subscribeStream: vi.fn((_subscribe, filters, handlers) => {
+    const sub: Sub = { filters, ...handlers, stopped: false };
+    subs.push(sub);
+    return { stop: () => (sub.stopped = true) };
   }),
 }));
-
-// The bucket reader (wrap-mode threads) has its own tests; here it reads nothing.
-vi.mock('./useBucketReader', () => ({
-  useBucketReader: () => ({ messages: [], handoffs: [], isLoading: false, error: null, refresh: vi.fn(), debug: {} }),
-}));
-
 vi.mock('@/services/groups', () => ({
   useGroups: () => ({
-    groups: [
-      {
-        group: { identifier: 'devs', name: 'Developers' },
-        role: 'member',
-        pubkey: '1'.repeat(64),
-      },
-    ],
+    groups: [{ group: { identifier: 'devs', name: 'Developers' }, role: 'member', adminPubkeys: [] }],
     isLoading: false,
-    error: null,
-    refresh: vi.fn(),
   }),
 }));
-
-// Build a real ThreadKeyStore with the test thread key loaded.
-const testKeyStore = new ThreadKeyStore();
-testKeyStore.set(threadPk, threadSk);
-
-vi.mock('./useThreadKeyStore', () => ({
-  useThreadKeyStore: () => testKeyStore,
+vi.mock('./useBucketReader', () => ({
+  useBucketReader: () => ({ messages: [], handoffs: [], pendingHandoffs: [], isLoading: false, error: null, refresh: vi.fn(), debug: {} }),
 }));
+const keyStore = new ThreadKeyStore();
+keyStore.set(threadPk, threadSk);
+vi.mock('./useThreadKeyStore', () => ({ useThreadKeyStore: () => keyStore }));
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: (sel?: (s: { pubkey: string }) => unknown) => (sel ? sel({ pubkey: ME }) : { pubkey: ME }),
+}));
+vi.mock('@/config/environment', () => ({ config: { threadGranters: [] } }));
 
-// ---- Helpers ----
+const { useAllThreads } = await import('./useAllThreads');
 
-function makeThreadEvent(opts: {
-  id: string;
-  content: string;
-  groupId: string;
-  pubkey: string;
-  threadTag?: string;
-  isRoot?: boolean;
-  rootId?: string;
-  parentId?: string;
-}) {
-  const tags: string[][] = [['h', opts.groupId]];
-  if (opts.threadTag) tags.push(['thread', opts.threadTag]);
-  if (opts.isRoot) tags.push(['subject', 'Test thread']);
-  if (opts.rootId) {
-    tags.push(['E', opts.rootId, '', opts.pubkey]);
-    tags.push(['e', opts.parentId ?? opts.rootId, '', opts.pubkey]);
-  }
-
-  return {
-    id: opts.id,
-    pubkey: opts.pubkey,
-    content: opts.content,
-    created_at: Math.floor(Date.now() / 1000),
-    kind: THREAD_KIND,
-    tags,
-  };
+/** Deliver an event the way one relay connection does: to every open subscription. */
+function relay(event: unknown) {
+  act(() => {
+    for (const s of subs) if (!s.stopped) s.onEvent(event);
+  });
 }
 
-// ---- Tests ----
+const openFilters = () => subs.filter((s) => !s.stopped).flatMap((s) => s.filters);
 
-describe('useAllThreads NIP-44 decryption', () => {
-  beforeEach(() => {
-    capturedOnEvent = null;
-    capturedOnEose = null;
-    handlerList = [];
+let n = 0;
+function ev(over: { kind: number; pubkey?: string; tags: string[][]; content?: string; created_at?: number; id?: string }) {
+  n += 1;
+  return { id: over.id ?? `e${n}`.padEnd(64, '0'), pubkey: ME, content: '', created_at: 1_790_000_000 + n, ...over };
+}
+
+beforeEach(() => {
+  subs.length = 0;
+});
+
+describe('useAllThreads: public threads', () => {
+  it('asks for kind 11 roots as well as 1111, in the user’s groups and by the user anywhere', () => {
+    renderHook(() => useAllThreads());
+    expect(openFilters()).toContainEqual({ kinds: [11, 1111], '#h': ['devs'] });
+    expect(openFilters()).toContainEqual({ kinds: [11, 1111], authors: [ME] });
   });
 
-  it('decrypts sealed content when the thread key is held', async () => {
-    // Lazy import so mocks are in place
-    const { useAllThreads } = await import('./useAllThreads');
-
-    const plaintext = 'The staging deploy is broken.';
-    const ciphertext = encryptThreadContent(plaintext, threadSk, authorPk);
-
+  it('a kind 11 root in the user’s group appears, scoped to the group', async () => {
     const { result } = renderHook(() => useAllThreads());
-
-    // Feed the subscription handler a sealed event
-    expect(capturedOnEvent).not.toBeNull();
-    capturedOnEvent!(makeThreadEvent({
-      id: 'sealed-root',
-      content: ciphertext,
-      groupId: 'devs',
-      pubkey: authorPk,
-      threadTag: threadPk,
-      isRoot: true,
-    }));
-    capturedOnEose!();
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-
-    expect(result.current.threads).toHaveLength(1);
-    expect(result.current.threads[0].thread.root.content).toBe(plaintext);
+    relay(ev({ kind: 11, pubkey: OTHER, tags: [['h', 'devs'], ['title', 'Release plan']] }));
+    await waitFor(() => expect(result.current.publicThreads).toHaveLength(1));
+    expect(result.current.publicThreads[0]).toMatchObject({ groupId: 'devs', rootKind: 11 });
+    expect(result.current.publicThreads[0].thread.root.subject).toBe('Release plan');
   });
 
-  it('passes ciphertext through when no thread tag is present', async () => {
-    // Reset module registry so the lazy import picks up fresh state
-    vi.resetModules();
-    // Re-apply mocks after reset
-    vi.doMock('@/services/nostr', () => ({
-      useNdk: () => ({
-        subscribe: vi.fn(),
-        isConnected: true,
-        fetchEvents: vi.fn(),
-        service: null,
-        isConnecting: false,
-        relayStatuses: new Map(),
-        reconnect: vi.fn(),
-        publish: null,
-        createEvent: vi.fn(),
-        fetchFromOwnRelays: null,
-      }),
-      subscribeStream: vi.fn((_subscribe, _filters, handlers) => {
-        capture(handlers);
-        return { stop: vi.fn() };
-      }),
-    }));
-    vi.doMock('@/services/groups', () => ({
-      useGroups: () => ({
-        groups: [
-          {
-            group: { identifier: 'devs', name: 'Developers' },
-            role: 'member',
-            pubkey: '1'.repeat(64),
-          },
-        ],
-        isLoading: false,
-        error: null,
-        refresh: vi.fn(),
-      }),
-    }));
-    vi.doMock('./useThreadKeyStore', () => ({
-      useThreadKeyStore: () => testKeyStore,
-    }));
-
-    const { useAllThreads } = await import('./useAllThreads');
-
-    const ciphertext = encryptThreadContent('secret message', threadSk, authorPk);
-
+  it('asks for replies to the user’s thread outside any group, and shows them', async () => {
     const { result } = renderHook(() => useAllThreads());
+    const root = ev({ kind: 11, tags: [['title', 'Mine']] });
+    relay(root);
+    await waitFor(() => expect(openFilters()).toContainEqual({ kinds: [1111], '#E': [root.id] }));
 
-    // Feed an event with NO thread tag, so the key lookup has no pubkey to use
-    expect(capturedOnEvent).not.toBeNull();
-    capturedOnEvent!(makeThreadEvent({
-      id: 'no-thread-tag',
-      content: ciphertext,
-      groupId: 'devs',
-      pubkey: authorPk,
-      // no threadTag
-      isRoot: true,
-    }));
-    capturedOnEose!();
+    relay(ev({ kind: 1111, pubkey: OTHER, content: 'a reply', tags: [['E', root.id, '', ME], ['K', '11'], ['e', root.id, '', ME], ['k', '11']] }));
+    await waitFor(() => expect(result.current.publicThreads[0]?.thread.replyCount).toBe(1));
+    expect(result.current.publicThreads[0].groupId).toBeNull();
+  });
 
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
+  it('asks root authors, and only them, for status labels, and applies an archive', async () => {
+    const { result } = renderHook(() => useAllThreads());
+    const root = ev({ kind: 11, pubkey: OTHER, tags: [['h', 'devs'], ['title', 't']] });
+    relay(root);
+    await waitFor(() =>
+      expect(openFilters()).toContainEqual({ kinds: [STATUS_LABEL_KIND], '#L': [STATUS_NAMESPACE], '#e': [root.id], authors: [OTHER] }),
+    );
 
-    expect(result.current.threads).toHaveLength(1);
-    // Content should be the raw ciphertext since there's no thread tag
-    expect(result.current.threads[0].thread.root.content).toBe(ciphertext);
+    relay(ev({ kind: STATUS_LABEL_KIND, pubkey: OTHER, tags: [['L', STATUS_NAMESPACE], ['l', 'archived', STATUS_NAMESPACE], ['e', root.id]] }));
+    await waitFor(() => expect(result.current.publicThreads[0].thread.status).toBe('archived'));
+  });
+
+  it('the kit’s sealed message in the user’s group is a private thread, not a public post of ciphertext', async () => {
+    const { result } = renderHook(() => useAllThreads());
+    const env = JSON.stringify({ v: 'arbiter-fleet-msg-v1', body: 'deploy is broken', task: null, role: 'x', from: 'y', thread: 'ops' });
+    relay(ev({ kind: 1111, pubkey: ROLE, content: encryptThreadContent(env, threadSk, ROLE), tags: [['d', 'ops'], ['K', '1111'], ['thread', threadPk], ['h', 'devs']] }));
+
+    await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
+    expect(result.current.privateThreads[0]).toMatchObject({ title: 'ops', projectId: 'devs', sealed: true });
+    expect(result.current.publicThreads).toEqual([]);
+  });
+
+  it('is loading until the relays have answered, then not', async () => {
+    const { result } = renderHook(() => useAllThreads());
+    expect(result.current.isLoading).toBe(true);
+    act(() => subs[subs.length - 1].onEose?.());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 });

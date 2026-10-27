@@ -1,329 +1,429 @@
 /**
- * @fileoverview Tests for sealed thread indicators in ThreadsView.
+ * @fileoverview The one thread list and its two detail screens (threads.md 6).
  *
- * ThreadsView is the cross-group thread listing. These tests verify that
- * sealed threads show a lock emoji and hide ciphertext from the preview.
+ * Also the new home of what the Sealed tab guaranteed: key offers asked about
+ * before being taken, sealed senders shown as unverified keys, and a failed
+ * send that keeps the text and says why.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import type { PublicThreadItem, StandaloneThread } from '@/services/threads';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockNavigate = vi.fn();
+const ME = 'a'.repeat(64);
+const OTHER = 'b'.repeat(64);
+const THREAD_PK = 'c'.repeat(64);
 
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => mockNavigate,
-}));
-
-let allThreadFixtures: ReturnType<typeof makeThreadWithGroup>[] = [];
+let publicFixtures: PublicThreadItem[] = [];
+let privateFixtures: StandaloneThread[] = [];
 let groupFixtures: { id: string; name: string }[] = [];
-let standaloneFixtures: import('@/services/threads').StandaloneThread[] = [];
-const ownReaderCalls: unknown[][] = [];
-const sharedReader = {
-  messages: [{ plaintext: 'from the shared reader', authorHex: 'ab'.repeat(32), threadId: 'cd'.repeat(32), wrapId: 'ef'.repeat(32), createdAt: 1 }],
-  handoffs: [],
-  pendingHandoffs: [],
-  acceptHandoff: vi.fn(),
-  dismissHandoff: vi.fn(),
-  isLoading: false,
-  error: null,
-  refresh: vi.fn(),
-  debug: {},
-};
+let reader = makeReader();
 
-vi.mock('@/services/threads', () => ({
-  useAllThreads: () => ({
-    threads: allThreadFixtures,
-    groups: groupFixtures,
-    allAdminPubkeys: [],
-    standalone: standaloneFixtures,
-    sealedReader: sharedReader,
+const createPublicThread = vi.fn();
+const replyToPublicThread = vi.fn();
+const archivePublicThread = vi.fn();
+const sendMessage = vi.fn();
+const fakeSigner = { getPublicKey: async () => ME };
+const fakeRelay = {};
+
+function makeReader(over: Record<string, unknown> = {}) {
+  return {
+    messages: [],
+    handoffs: [],
+    pendingHandoffs: [] as { wrapId: string; granterPubkey: string }[],
+    acceptHandoff: vi.fn(),
+    dismissHandoff: vi.fn(),
     isLoading: false,
     error: null,
-  }),
-  useThreads: () => ({
-    threads: [],
-    isLoading: false,
-    error: null,
-    createThread: vi.fn(),
-    reply: vi.fn(),
     refresh: vi.fn(),
-  }),
-  useThreadKeyStore: () => new Map(),
-  useThreadKeyLoader: () => ({ loaded: true, keyCount: 0 }),
-  useBucketReader: (...args: unknown[]) => {
-    ownReaderCalls.push(args);
-    return {
-      messages: [],
-      handoffs: [],
-      pendingHandoffs: [],
-      acceptHandoff: vi.fn(),
-      dismissHandoff: vi.fn(),
+    debug: {},
+    ...over,
+  };
+}
+
+vi.mock('@/services/threads', async () => {
+  const list = await vi.importActual<typeof import('@/services/threads/publicThreadList')>(
+    '@/services/threads/publicThreadList',
+  );
+  return {
+    useAllThreads: () => ({
+      publicThreads: publicFixtures,
+      privateThreads: privateFixtures,
+      groups: groupFixtures,
+      allAdminPubkeys: [],
+      sealedReader: reader,
       isLoading: false,
       error: null,
-      refresh: vi.fn(),
-      debug: {},
-    };
-  },
-  useBucketWriter: () => ({ sendMessage: vi.fn(), canPublish: false }),
+    }),
+    matchesSearch: list.matchesSearch,
+    createPublicThread: (...a: unknown[]) => createPublicThread(...a),
+    replyToPublicThread: (...a: unknown[]) => replyToPublicThread(...a),
+    archivePublicThread: (...a: unknown[]) => archivePublicThread(...a),
+    useThreadKeyStore: () => ({ exportHex: (pk: string) => (pk === THREAD_PK ? 'd'.repeat(64) : undefined) }),
+    useBucketWriter: () => ({ sendMessage, canPublish: true }),
+  };
+});
+
+vi.mock('@/services/nostr', () => ({
+  useHeadlessAdapters: () => ({ signer: fakeSigner, relay: fakeRelay }),
 }));
+
+vi.mock('@/services/threads/pendingKeyOffers', () => ({
+  usePendingKeyWraps: () => pendingKeyWraps,
+  acceptKeyWrap: vi.fn(() => true),
+  dismissKeyWrap: vi.fn(),
+}));
+let pendingKeyWraps: { eventId: string; senderPubkey: string }[] = [];
 
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({ signer: null }),
 }));
 
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({ pubkey: 'aabbcc' }),
-}));
-
-vi.mock('@/services/groups/useGroupMembers', () => ({
-  useGroupMembers: () => ({ members: [], isLoading: false, error: null, unverifiable: false, refresh: vi.fn() }),
-}));
-
-vi.mock('@/services/profile', () => ({
-  useAuthorProfiles: () => new Map(),
-}));
-
-vi.mock('@/config/environment', () => ({
-  config: {
-    threadGranters: ['3331f3b0599a6381d65c9b90b85516161dc303d28a9111fafbb64c74d501fae4'],
-  },
+  useAuthStore: () => ({ pubkey: ME }),
 }));
 
 const { ThreadsView } = await import('./ThreadsView');
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Fixtures
 // ---------------------------------------------------------------------------
 
-const FAKE_CIPHERTEXT =
-  'AjVFteIntVbdTFXdTNjkF3rhMN6by0ncWMOLabcdefghijk';
-
-function makeThreadWithGroup(opts: {
+function pub(opts: {
   id: string;
-  content: string;
-  subject?: string;
-  sealed?: boolean;
-  groupId: string;
-  groupName: string;
-}) {
+  title: string;
+  at: number;
+  author?: string;
+  groupId?: string | null;
+  archived?: boolean;
+  hidden?: number;
+  replies?: { id: string; content: string; at: number }[];
+}): PublicThreadItem {
+  const groupId = opts.groupId ?? null;
+  const author = opts.author ?? OTHER;
+  const replies = (opts.replies ?? []).map((r) => ({
+    id: r.id,
+    pubkey: OTHER,
+    groupId: groupId ?? '',
+    content: r.content,
+    createdAt: r.at,
+    rootId: opts.id,
+    parentId: opts.id,
+    replies: [],
+    depth: 1,
+  }));
   return {
     thread: {
-      root: {
-        id: opts.id,
-        pubkey: 'b'.repeat(64),
-        groupId: opts.groupId,
-        content: opts.content,
-        createdAt: Math.floor(Date.now() / 1000),
-        subject: opts.subject,
-        sealed: opts.sealed,
-      },
-      replies: [],
-      replyCount: 0,
-      lastActivity: Math.floor(Date.now() / 1000),
+      root: { id: opts.id, pubkey: author, groupId: groupId ?? '', content: `body of ${opts.title}`, createdAt: opts.at, subject: opts.title },
+      replies,
+      replyCount: replies.length,
+      lastActivity: opts.at,
+      status: opts.archived ? 'archived' : 'open',
+      hiddenLaterReplies: opts.hidden ?? 0,
     },
-    groupId: opts.groupId,
-    groupName: opts.groupName,
+    groupId,
+    rootKind: 11,
+  } as PublicThreadItem;
+}
+
+function priv(opts: { title: string; at: number; text?: string; approx?: boolean; projectId?: string | null }): StandaloneThread {
+  const msg = {
+    id: `m-${opts.title}`,
+    pubkey: OTHER,
+    createdAt: opts.at,
+    approxTime: opts.approx,
+    threadKey: `sealed:${THREAD_PK}`,
+    title: opts.title,
+    text: opts.text ?? 'sealed hello',
+    from: 'cloistr-orchestrator',
+    sealed: true,
+    projectId: opts.projectId ?? null,
+  };
+  return {
+    threadKey: `sealed:${THREAD_PK}`,
+    title: opts.title,
+    sealed: true,
+    projectId: opts.projectId ?? null,
+    messages: [msg],
+    lastActivity: opts.at,
+    lastActivityApprox: opts.approx === true,
   };
 }
+
+const rowTitles = () =>
+  within(screen.getByRole('list', { name: 'Threads' }))
+    .getAllByRole('button')
+    .map((b) => b.textContent ?? '');
 
 beforeEach(() => {
-  allThreadFixtures = [];
+  publicFixtures = [];
+  privateFixtures = [];
   groupFixtures = [];
-  standaloneFixtures = [];
-  mockNavigate.mockReset();
+  pendingKeyWraps = [];
+  reader = makeReader();
+  createPublicThread.mockReset();
+  replyToPublicThread.mockReset();
+  archivePublicThread.mockReset();
+  sendMessage.mockReset();
 });
 
 // ---------------------------------------------------------------------------
-// Cross-group listing sealed indicators
+// The list
 // ---------------------------------------------------------------------------
 
-describe('ThreadsView sealed messages section', () => {
-  it('renders SealedMessages on the top-level Threads page without requiring a group', () => {
-    groupFixtures = [];
-    allThreadFixtures = [];
-
+describe('ThreadsView list', () => {
+  it('interleaves public and private threads by last activity, with a lock on private ones only', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Oldest public', at: 100 }), pub({ id: 'p2', title: 'Newest public', at: 300 })];
+    privateFixtures = [priv({ title: 'Middle private', at: 200 })];
     render(<ThreadsView />);
 
-    expect(screen.getByText('Sealed Messages')).toBeInTheDocument();
-  });
-});
-
-describe('ThreadsView sealed indicators', () => {
-  it('shows lock emoji on sealed threads', () => {
-    groupFixtures = [{ id: 'devs', name: 'Developers' }];
-    allThreadFixtures = [
-      makeThreadWithGroup({
-        id: 'sealed-xgroup',
-        content: 'Decrypted content',
-        subject: 'Private discussion',
-        sealed: true,
-        groupId: 'devs',
-        groupName: 'Developers',
-      }),
-    ];
-
-    render(<ThreadsView />);
-
-    expect(screen.getByTitle('Encrypted thread')).toBeInTheDocument();
-    expect(screen.getByText('Private discussion')).toBeInTheDocument();
+    const rows = rowTitles();
+    expect(rows[0]).toContain('Newest public');
+    expect(rows[1]).toContain('Middle private');
+    expect(rows[2]).toContain('Oldest public');
+    expect(screen.getAllByLabelText('Private thread')).toHaveLength(1);
+    expect(rows[1]).toContain('🔒');
+    expect(rows[0]).not.toContain('🔒');
   });
 
-  it('shows "Encrypted thread" when sealed and content is ciphertext with no subject', () => {
-    groupFixtures = [{ id: 'devs', name: 'Developers' }];
-    allThreadFixtures = [
-      makeThreadWithGroup({
-        id: 'sealed-no-subject',
-        content: FAKE_CIPHERTEXT,
-        sealed: true,
-        groupId: 'devs',
-        groupName: 'Developers',
-      }),
-    ];
-
+  it('keeps archived threads out of the active list, under Archived, and in search', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Live topic', at: 100 }), pub({ id: 'p2', title: 'Old decision', at: 200, archived: true })];
     render(<ThreadsView />);
 
-    expect(screen.getByText('Encrypted thread')).toBeInTheDocument();
-    expect(screen.queryByText(FAKE_CIPHERTEXT)).not.toBeInTheDocument();
+    expect(rowTitles().join()).not.toContain('Old decision');
+    fireEvent.click(screen.getByRole('button', { name: 'Archived (1)' }));
+    expect(rowTitles()).toHaveLength(1);
+    expect(rowTitles()[0]).toContain('Old decision');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    fireEvent.change(screen.getByLabelText('Search threads'), { target: { value: 'decision' } });
+    expect(rowTitles()[0]).toContain('Old decision');
   });
 
-  it('shows subject when sealed with ciphertext body but subject exists', () => {
-    groupFixtures = [{ id: 'devs', name: 'Developers' }];
-    allThreadFixtures = [
-      makeThreadWithGroup({
-        id: 'sealed-with-subject',
-        content: FAKE_CIPHERTEXT,
-        subject: 'Sprint retro',
-        sealed: true,
-        groupId: 'devs',
-        groupName: 'Developers',
-      }),
-    ];
-
+  it('searches the text of private messages as well as public posts', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Unrelated', at: 100 })];
+    privateFixtures = [priv({ title: 'Fleet', at: 200, text: 'the relay migration is done' })];
     render(<ThreadsView />);
 
-    expect(screen.getByText('Sprint retro')).toBeInTheDocument();
-    expect(screen.queryByText(FAKE_CIPHERTEXT)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search threads'), { target: { value: 'migration' } });
+    expect(rowTitles()).toHaveLength(1);
+    expect(rowTitles()[0]).toContain('Fleet');
   });
 
-  it('shows normal preview for unsealed threads', () => {
-    groupFixtures = [{ id: 'devs', name: 'Developers' }];
-    allThreadFixtures = [
-      makeThreadWithGroup({
-        id: 'plain-xgroup',
-        content: 'Lunch plans for Friday',
-        groupId: 'devs',
-        groupName: 'Developers',
-      }),
-    ];
+  it('says which empty it is when a search finds nothing', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Something', at: 100 })];
+    render(<ThreadsView />);
+    fireEvent.change(screen.getByLabelText('Search threads'), { target: { value: 'zzz' } });
+    expect(screen.getByText('No threads match “zzz”.')).toBeInTheDocument();
+  });
 
+  it('says there are no threads yet, rather than showing a blank panel', () => {
+    render(<ThreadsView />);
+    expect(screen.getByText('No threads yet. Start one in a project, or on its own.')).toBeInTheDocument();
+  });
+
+  it('the project is a filter chip, and filters both kinds of thread', () => {
+    groupFixtures = [{ id: 'g1', name: 'Garden' }];
+    publicFixtures = [pub({ id: 'p1', title: 'In the garden', at: 100, groupId: 'g1' })];
+    privateFixtures = [priv({ title: 'Fleet', at: 200 })];
     render(<ThreadsView />);
 
-    expect(screen.getByText(/Lunch plans for Friday/)).toBeInTheDocument();
-    expect(screen.queryByTitle('Encrypted thread')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Garden' }));
+    expect(rowTitles()).toHaveLength(1);
+    expect(rowTitles()[0]).toContain('In the garden');
+    fireEvent.click(screen.getByRole('button', { name: 'No project' }));
+    expect(rowTitles()[0]).toContain('Fleet');
+  });
+
+  it("as a project's tab, shows only that project's threads and no project chips", () => {
+    groupFixtures = [{ id: 'g1', name: 'Garden' }, { id: 'g2', name: 'Kitchen' }];
+    publicFixtures = [
+      pub({ id: 'p1', title: 'In the garden', at: 100, groupId: 'g1' }),
+      pub({ id: 'p2', title: 'In the kitchen', at: 200, groupId: 'g2' }),
+    ];
+    render(<ThreadsView groupId="g1" />);
+
+    expect(rowTitles()).toHaveLength(1);
+    expect(rowTitles()[0]).toContain('In the garden');
+    expect(screen.queryByRole('group', { name: 'Filter by project' })).not.toBeInTheDocument();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Standalone threads: no project, or a project the user is not in
+// New thread
 // ---------------------------------------------------------------------------
 
-function standaloneThread(over: Partial<import('@/services/threads').StandaloneThread> = {}) {
-  const base = {
-    threadKey: 'sealed:' + 'f'.repeat(64),
-    title: 'cloistr-group-wrap',
-    sealed: true,
-    projectId: null,
-    lastActivity: 1_790_000_200,
-    lastActivityApprox: false,
-    messages: [
-      { id: 'm1', pubkey: 'a'.repeat(64), createdAt: 1_790_000_100, threadKey: 'sealed:' + 'f'.repeat(64), title: 'cloistr-group-wrap', text: 'staging deploy is broken', from: 'cloistr-orchestrator', sealed: true, projectId: null },
-      { id: 'm2', pubkey: 'b'.repeat(64), createdAt: 1_790_000_200, threadKey: 'sealed:' + 'f'.repeat(64), title: 'cloistr-group-wrap', text: 'fixed in !229', from: 'cloistr-space', sealed: true, projectId: null },
-    ],
-  };
-  return { ...base, ...over };
-}
-
-describe('ThreadsView standalone threads', () => {
-  it('lists a fleet thread with no project, and opens it in place', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    standaloneFixtures = [standaloneThread()];
+describe('ThreadsView new thread', () => {
+  it('will not post until a project (or no project) is chosen, then says it is public', async () => {
+    groupFixtures = [{ id: 'g1', name: 'Garden' }, { id: 'g2', name: 'Kitchen' }];
+    createPublicThread.mockResolvedValue({ accepted: 1 });
     render(<ThreadsView />);
 
-    const row = screen.getByRole('button', { name: /cloistr-group-wrap/ });
-    expect(row).toHaveTextContent('No project');
-    expect(row).toHaveTextContent('2 messages');
-    expect(screen.queryByText('staging deploy is broken')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Seeds' } });
+    expect(screen.getByRole('button', { name: 'Post thread' })).toBeDisabled();
 
-    await userEvent.click(row);
-    expect(screen.getByText('staging deploy is broken')).toBeInTheDocument();
-    expect(screen.getByText('fixed in !229')).toBeInTheDocument();
-    expect(mockNavigate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__none__' } });
+    expect(screen.getByText(/Public: anyone can read it/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Post thread' }));
+
+    await waitFor(() => expect(createPublicThread).toHaveBeenCalledTimes(1));
+    expect(createPublicThread.mock.calls[0][2]).toEqual({ title: 'Seeds', body: '', groupId: undefined });
   });
 
-  it('shows only the day for a message whose exact time is unknown, never a precise-looking clock time', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    const at = 1_790_000_100;
-    const base = standaloneThread();
-    standaloneFixtures = [standaloneThread({
-      lastActivity: at,
-      lastActivityApprox: true,
-      messages: [{ ...base.messages[0], createdAt: at, approxTime: true }],
-    })];
-    render(<ThreadsView />);
+  it("in a project's tab, posts into that project without asking", async () => {
+    groupFixtures = [{ id: 'g1', name: 'Garden' }, { id: 'g2', name: 'Kitchen' }];
+    createPublicThread.mockResolvedValue({ accepted: 1 });
+    render(<ThreadsView groupId="g1" />);
 
-    const row = screen.getByRole('button', { name: /cloistr-group-wrap/ });
-    const day = new Date(at * 1000).toLocaleDateString();
-    const precise = new Date(at * 1000).toLocaleString();
-    expect(row).toHaveTextContent(`~${day}`);
-    expect(row).not.toHaveTextContent(precise);
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Seeds' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post thread' }));
 
-    await userEvent.click(row);
-    const item = screen.getByText('staging deploy is broken').closest('li')!;
-    expect(item).toHaveTextContent(`~${day}`);
-    expect(item).not.toHaveTextContent(precise);
-  });
-
-  it('does not say "not in any projects" when standalone threads exist', () => {
-    standaloneFixtures = [standaloneThread()];
-    render(<ThreadsView />);
-    expect(screen.queryByText(/not in any projects/)).not.toBeInTheDocument();
-    expect(screen.getByText('cloistr-group-wrap')).toBeInTheDocument();
-  });
-
-  it('the project is a filter chip, and filters both kinds of thread', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    groupFixtures = [{ id: 'devs', name: 'Developers' }];
-    allThreadFixtures = [makeThreadWithGroup({ id: 'p1', groupId: 'devs', groupName: 'Developers', content: 'Release checklist' })];
-    standaloneFixtures = [standaloneThread(), standaloneThread({ threadKey: 'sealed:' + 'e'.repeat(64), title: 'conscience thread', projectId: 'conscience-g' })];
-    render(<ThreadsView />);
-
-    const chips = screen.getByRole('group', { name: 'Filter by project' });
-    expect(chips).toHaveTextContent('All');
-    expect(chips).toHaveTextContent('Developers');
-    expect(chips).toHaveTextContent('conscience-g');
-    expect(chips).toHaveTextContent('No project');
-
-    await userEvent.click(screen.getByRole('button', { name: 'No project' }));
-    expect(screen.getByText('cloistr-group-wrap')).toBeInTheDocument();
-    expect(screen.queryByText('conscience thread')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Release checklist/)).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Developers' }));
-    expect(screen.getByText(/Release checklist/)).toBeInTheDocument();
-    expect(screen.queryByText('cloistr-group-wrap')).not.toBeInTheDocument();
+    await waitFor(() => expect(createPublicThread).toHaveBeenCalledTimes(1));
+    expect(createPublicThread.mock.calls[0][2]).toMatchObject({ groupId: 'g1' });
   });
 });
 
+// ---------------------------------------------------------------------------
+// Public thread detail
+// ---------------------------------------------------------------------------
 
-describe('ThreadsView sealed box', () => {
-  it('reads from the list’s reader, opening no bucket subscription of its own', () => {
-    ownReaderCalls.length = 0;
+describe('ThreadsView public thread', () => {
+  it('replies with the root kind and project, and keeps the text when the relay refuses', async () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Topic', at: 100, groupId: 'g1' })];
+    replyToPublicThread.mockRejectedValue(new Error('No relay accepted the event'));
     render(<ThreadsView />);
-    expect(screen.getByText('from the shared reader')).toBeInTheDocument();
-    expect(ownReaderCalls).toHaveLength(0);
+
+    fireEvent.click(screen.getByText('Topic'));
+    fireEvent.change(screen.getByLabelText('Reply…'), { target: { value: 'my answer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('No relay accepted the event')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reply…')).toHaveValue('my answer');
+    expect(replyToPublicThread.mock.calls[0][2]).toMatchObject({
+      rootId: 'p1',
+      rootKind: 11,
+      parentId: 'p1',
+      groupId: 'g1',
+    });
+  });
+
+  it('offers archive to the owner only after saying it is read-only, searchable and permanent', async () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Mine', at: 100, author: ME })];
+    archivePublicThread.mockResolvedValue({ accepted: 1 });
+    render(<ThreadsView />);
+
+    fireEvent.click(screen.getByText('Mine'));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive thread' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent('read-only');
+    expect(dialog).toHaveTextContent('searchable');
+    expect(dialog).toHaveTextContent('cannot be deleted');
+    expect(archivePublicThread).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(archivePublicThread).toHaveBeenCalledTimes(1));
+    expect(archivePublicThread.mock.calls[0][2]).toMatchObject({ id: 'p1', pubkey: ME });
+  });
+
+  it('offers no archive on a thread someone else started', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Theirs', at: 100 })];
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Theirs'));
+    expect(screen.queryByRole('button', { name: 'Archive thread' })).not.toBeInTheDocument();
+  });
+
+  it('an archived thread is read-only and says how many later replies it hides', () => {
+    publicFixtures = [
+      pub({ id: 'p1', title: 'Closed', at: 100, archived: true, hidden: 2, replies: [{ id: 'r1', content: 'before the archive', at: 90 }] }),
+    ];
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByRole('button', { name: /Archived/ }));
+    fireEvent.click(screen.getByText('Closed'));
+
+    expect(screen.getByText('before the archive')).toBeInTheDocument();
+    expect(screen.getByText(/2 later replies hidden/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Reply…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reply' })).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Private thread detail: what the Sealed tab used to guarantee
+// ---------------------------------------------------------------------------
+
+describe('ThreadsView private thread', () => {
+  it('shows the sender as an unverified key, never the name the message claims', () => {
+    privateFixtures = [priv({ title: 'Fleet', at: 200, text: 'status green' })];
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Fleet'));
+
+    expect(screen.getByText('status green')).toBeInTheDocument();
+    expect(screen.getByText('unverified')).toBeInTheDocument();
+    expect(screen.queryByText(/cloistr-orchestrator/)).not.toBeInTheDocument();
+  });
+
+  it('shows only the day for a message whose exact time is unknown', () => {
+    privateFixtures = [priv({ title: 'Fleet', at: 1_700_000_000, approx: true })];
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Fleet'));
+
+    const approx = screen.getAllByTitle('Exact time not recorded by the sender');
+    expect(approx.length).toBeGreaterThan(0);
+    expect(approx[0].textContent).toBe(`~${new Date(1_700_000_000 * 1000).toLocaleDateString()}`);
+  });
+
+  it("replies sealed to that thread's own key", async () => {
+    privateFixtures = [priv({ title: 'Fleet', at: 200 })];
+    sendMessage.mockResolvedValue(undefined);
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Fleet'));
+
+    fireEvent.change(screen.getByLabelText('Sealed reply…'), { target: { value: 'ack' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith('ack', ME, 'd'.repeat(64)));
+  });
+
+  it('shows the relay’s reason when a send fails, and keeps the text', async () => {
+    privateFixtures = [priv({ title: 'Fleet', at: 200 })];
+    sendMessage.mockRejectedValue(new Error('rate-limited: slow down'));
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Fleet'));
+
+    fireEvent.change(screen.getByLabelText('Sealed reply…'), { target: { value: 'ack' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('rate-limited: slow down')).toBeInTheDocument();
+    expect(screen.getByLabelText('Sealed reply…')).toHaveValue('ack');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Key offers
+// ---------------------------------------------------------------------------
+
+describe('ThreadsView key offers', () => {
+  it('asks before taking a handed-off key, and says the sender cannot be verified', () => {
+    reader = makeReader({ pendingHandoffs: [{ wrapId: 'w1', granterPubkey: OTHER }] });
+    render(<ThreadsView />);
+
+    const offer = screen.getByRole('alert');
+    expect(offer).toHaveTextContent('Unverified invitation');
+    expect(offer).toHaveTextContent('claimed, unverified');
+    expect(offer).toHaveTextContent('Space cannot check it');
+    expect(reader.acceptHandoff).not.toHaveBeenCalled();
+    fireEvent.click(within(offer).getByRole('button', { name: 'Accept key' }));
+    expect(reader.acceptHandoff).toHaveBeenCalledWith('w1');
+  });
+
+  it("shows a stranger's key-wrap as an offer from a sender Space does not trust", () => {
+    pendingKeyWraps = [{ eventId: 'e1', senderPubkey: OTHER }];
+    render(<ThreadsView />);
+    expect(screen.getByRole('alert')).toHaveTextContent('not a sender Space knows to trust');
   });
 });

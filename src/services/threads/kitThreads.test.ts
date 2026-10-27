@@ -40,7 +40,7 @@ describe('kit fixtures: who signs', () => {
 
 describe('the role-key kind:1111', () => {
   it('opens and is shown when the thread key is held', () => {
-    const msg = acceptStandalone(kit.legacy1111, { keyStore: heldStore(), me: null, memberProjects: new Set() });
+    const msg = acceptStandalone(kit.legacy1111, { keyStore: heldStore() });
     expect(msg).toMatchObject({
       threadKey: `sealed:${threadPk}`,
       title: 'cloistr-group-wrap',
@@ -81,7 +81,7 @@ describe('the wrap-mode kind:1059', () => {
 
   it('joins the same conversation as the kind:1111 of that thread', () => {
     const store = heldStore();
-    const a = acceptStandalone(kit.legacy1111, { keyStore: store, me: null, memberProjects: new Set() })!;
+    const a = acceptStandalone(kit.legacy1111, { keyStore: store })!;
     const b = acceptWrapped(tryUnwrapMessage(kit.wrap, store)!, { keyStore: store, threadIds: new Map() })!;
     const threads = groupStandalone([a, b]);
     expect(threads).toHaveLength(1);
