@@ -226,6 +226,13 @@ describe('ThreadsView list', () => {
     expect(screen.getByText('No threads yet. Start one in a project, or on its own.')).toBeInTheDocument();
   });
 
+  it('does not say "no threads yet" when it could not look for private threads', () => {
+    reader = makeReader({ handoffLookupUnavailable: true });
+    render(<ThreadsView />);
+    expect(screen.queryByText('No threads yet. Start one in a project, or on its own.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('could not look for private threads');
+  });
+
   it('the project is a filter chip, and filters both kinds of thread', () => {
     groupFixtures = [{ id: 'g1', name: 'Garden' }];
     publicFixtures = [pub({ id: 'p1', title: 'In the garden', at: 100, groupId: 'g1' })];

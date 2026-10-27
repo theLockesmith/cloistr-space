@@ -141,6 +141,15 @@ export function ThreadsView({ groupId }: { groupId?: string } = {}) {
 
       <KeyOffers reader={sealedReader} />
 
+      {/* Without this, a reader that never looked renders exactly like a user
+          nobody has shared a thread with. */}
+      {sealedReader.handoffLookupUnavailable && (
+        <div role="alert" className="rounded-lg border border-cloistr-error/30 bg-cloistr-error/5 p-3 text-sm text-cloistr-light/80">
+          Space could not look for private threads shared with you: your signer session cannot locate thread
+          keys. Private threads you have opened here before still show; new ones will not until this is fixed.
+        </div>
+      )}
+
       {composing && (
         <NewThreadForm
           fixedGroup={groupId}
@@ -219,7 +228,9 @@ export function ThreadsView({ groupId }: { groupId?: string } = {}) {
                 ? 'No active threads. Archived ones are under Archived.'
                 : groupId
                   ? 'Nothing has been discussed in this project yet.'
-                  : 'No threads yet. Start one in a project, or on its own.'}
+                  : sealedReader.handoffLookupUnavailable
+                    ? 'No threads found, but private ones may be missing (see above).'
+                    : 'No threads yet. Start one in a project, or on its own.'}
         </p>
       )}
 
