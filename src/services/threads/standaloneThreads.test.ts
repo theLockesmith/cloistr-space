@@ -197,7 +197,7 @@ describe('wrap-mode messages keep the order they were sent in', () => {
 
   it('a message whose time is only approximate stays marked so', () => {
     const msg = acceptWrapped(
-      { plaintext: envelope('old kit'), authorHex: fleetPk, threadId: threadPk, wrapId: 'w1', createdAt: day + 5, approxTime: true },
+      { plaintext: envelope('old kit'), authorHex: fleetPk, threadId: threadPk, wrapId: 'w1', createdAt: day + 5, approxTime: true, verified: false },
       wrapCtx,
     )!;
     expect(msg.approxTime).toBe(true);
