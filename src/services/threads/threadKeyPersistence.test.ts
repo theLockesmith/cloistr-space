@@ -154,4 +154,34 @@ describe('threadKeyPersistence', () => {
     const keys = await loadThreadKeys(otherPk, otherDecrypt, storageAdapter);
     expect(keys).toEqual([]);
   });
+
+  it('keeps a thread name with its key, encrypted, and returns it on load', async () => {
+    const { saveThreadKey, loadThreadKeys } = await import('./threadKeyPersistence');
+    const adapter = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v); }, removeItem: (k: string) => { storage.delete(k); } };
+    const threadSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    await saveThreadKey(threadPk, bytesToHex(threadSk), enc.pubkey, async (_pk, pt) => enc.encrypt(pt), adapter, 'cloistr-group-wrap');
+
+    expect(storage.get(STORAGE_PREFIX + enc.pubkey)).not.toContain('cloistr-group-wrap');
+    const loaded = await loadThreadKeys(enc.pubkey, async (_pk, ct) => enc.decrypt(ct), adapter);
+    expect(loaded).toEqual([{ threadPubkey: threadPk, secretHex: bytesToHex(threadSk), threadId: 'cloistr-group-wrap' }]);
+  });
+
+  it('still loads a key saved before names were kept, with no name', async () => {
+    const { saveThreadKey, loadThreadKeys } = await import('./threadKeyPersistence');
+    const adapter = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v); }, removeItem: (k: string) => { storage.delete(k); } };
+    const threadSk = generateSecretKey();
+    const threadPk = getPublicKey(threadSk);
+    await saveThreadKey(threadPk, bytesToHex(threadSk), enc.pubkey, async (_pk, pt) => enc.encrypt(pt), adapter);
+
+    const loaded = await loadThreadKeys(enc.pubkey, async (_pk, ct) => enc.decrypt(ct), adapter);
+    expect(loaded).toEqual([{ threadPubkey: threadPk, secretHex: bytesToHex(threadSk) }]);
+  });
+
+  it('drops a named entry whose key is malformed', async () => {
+    const { loadThreadKeys } = await import('./threadKeyPersistence');
+    const adapter = { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v); }, removeItem: (k: string) => { storage.delete(k); } };
+    storage.set(STORAGE_PREFIX + enc.pubkey, JSON.stringify({ ['ab'.repeat(32)]: enc.encrypt(JSON.stringify({ k: 'nothex', t: 'x' })) }));
+    expect(await loadThreadKeys(enc.pubkey, async (_pk, ct) => enc.decrypt(ct), adapter)).toEqual([]);
+  });
 });

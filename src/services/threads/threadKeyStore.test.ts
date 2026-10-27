@@ -53,6 +53,44 @@ describe('ThreadKeyStore', () => {
     store.importHex(pk, hex);
     expect(store.exportHex(pk)).toBe(hex);
   });
+
+  it('names: a held thread’s name is returned, an unheld one is not', () => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const unheld = getPublicKey(generateSecretKey());
+    store.set(pk, sk);
+    store.setName(pk, 'cloistr-group-wrap');
+    store.setName(unheld, 'not-mine');
+    expect(store.names()).toEqual(new Map([[pk, 'cloistr-group-wrap']]));
+  });
+
+  it('names: a change notifies, the same name again does not, and the snapshot is stable between changes', () => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    store.set(pk, sk);
+    let calls = 0;
+    const off = store.onNamesChanged(() => calls++);
+    const before = store.names();
+    expect(store.setName(pk, 'a')).toBe(true);
+    expect(store.setName(pk, 'a')).toBe(false);
+    expect(calls).toBe(1);
+    const after = store.names();
+    expect(after).not.toBe(before);
+    expect(store.names()).toBe(after);
+    off();
+    store.setName(pk, 'b');
+    expect(calls).toBe(1);
+  });
+
+  it('clear() removes names too', () => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    store.set(pk, sk);
+    store.setName(pk, 'a');
+    store.clear();
+    store.set(pk, sk);
+    expect(store.names().size).toBe(0);
+  });
 });
 
 describe('thread encryption round-trip', () => {

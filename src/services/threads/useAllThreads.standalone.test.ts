@@ -157,4 +157,36 @@ describe('useAllThreads standalone threads', () => {
     expect(result.current.standalone).toEqual([]);
     currentMe = ME;
   });
+
+  it('a thread whose hand-off has expired from the relays is still asked for by its saved name', () => {
+    subs.length = 0;
+    const savedHandoffs = reader.handoffs;
+    reader.handoffs = [];
+    keyStore.setName(threadPk, 'cloistr-group-wrap');
+    try {
+      renderHook(() => useAllThreads());
+      const filters = subs.flatMap((s) => s.filters);
+      expect(filters).toContainEqual({ kinds: [1111], '#d': ['cloistr-group-wrap'] });
+    } finally {
+      reader.handoffs = savedHandoffs;
+      keyStore.clear();
+      keyStore.set(threadPk, threadSk);
+    }
+  });
+
+  it('a saved name is not asked for once its key is gone', () => {
+    subs.length = 0;
+    const savedHandoffs = reader.handoffs;
+    reader.handoffs = [];
+    keyStore.setName(unheldPk, 'not-mine');
+    try {
+      renderHook(() => useAllThreads());
+      const asked = subs.flatMap((s) => s.filters).flatMap((f) => (f['#d'] as string[] | undefined) ?? []);
+      expect(asked).not.toContain('not-mine');
+    } finally {
+      reader.handoffs = savedHandoffs;
+      keyStore.clear();
+      keyStore.set(threadPk, threadSk);
+    }
+  });
 });

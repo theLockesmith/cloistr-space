@@ -23,6 +23,8 @@ export type DecryptFn = (senderPubkey: string, ciphertext: string) => Promise<st
 export interface PersistedKey {
   threadPubkey: string;
   secretHex: string;
+  /** The thread's id, when it was known at save time. Keys saved before 2026-10-24 have none. */
+  threadId?: string;
 }
 
 function storageKey(ownerPubkey: string): string {
@@ -53,8 +55,12 @@ export async function saveThreadKey(
   ownerPubkey: string,
   encrypt: EncryptFn,
   storage: StorageAdapter,
+  threadId?: string,
 ): Promise<void> {
-  const encrypted = await encrypt(ownerPubkey, secretHex);
+  // The name goes inside the same ciphertext as the key: one signer round
+  // trip, and nothing about which threads the user reads sits in the clear.
+  const payload = threadId ? JSON.stringify({ k: secretHex, t: threadId }) : secretHex;
+  const encrypted = await encrypt(ownerPubkey, payload);
   const store = readStore(ownerPubkey, storage);
   store[threadPubkey] = encrypted;
   writeStore(ownerPubkey, store, storage);
@@ -72,9 +78,16 @@ export async function loadThreadKeys(
   const results: PersistedKey[] = [];
   for (const [threadPubkey, encrypted] of entries) {
     try {
-      const secretHex = await decrypt(ownerPubkey, encrypted);
+      const plaintext = await decrypt(ownerPubkey, encrypted);
+      let secretHex = plaintext;
+      let threadId: string | undefined;
+      if (plaintext?.startsWith('{')) {
+        const parsed = JSON.parse(plaintext) as { k?: unknown; t?: unknown };
+        secretHex = typeof parsed.k === 'string' ? parsed.k : '';
+        threadId = typeof parsed.t === 'string' && parsed.t ? parsed.t : undefined;
+      }
       if (secretHex && /^[0-9a-f]{64}$/i.test(secretHex)) {
-        results.push({ threadPubkey, secretHex });
+        results.push(threadId ? { threadPubkey, secretHex, threadId } : { threadPubkey, secretHex });
       }
     } catch {
       // Corrupted or wrong key — skip

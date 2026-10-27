@@ -97,6 +97,34 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
   });
 
+  /** What the user's saved entry for this thread decrypts to, or null. */
+  function savedEntry(): string | null {
+    const raw = localStorage.getItem('cloistr:thread-keys:' + getPublicKey(userSk));
+    const blob = raw ? (JSON.parse(raw) as Record<string, string>)[getPublicKey(threadSk)] : undefined;
+    if (!blob) return null;
+    return nip44.v2.decrypt(blob, nip44.v2.utils.getConversationKey(userSk, getPublicKey(userSk)));
+  }
+
+  it('accepting a hand-off saves the thread name with the key, so the thread outlives the hand-off', async () => {
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    act(() => result.current.acceptHandoff(result.current.pendingHandoffs[0].wrapId));
+    expect(store.current.names().get(getPublicKey(threadSk))).toBe('cloistr-coord-wrap');
+    await waitFor(() => expect(savedEntry()).not.toBeNull());
+    expect(JSON.parse(savedEntry()!)).toEqual({ k: bytesToHex(threadSk), t: 'cloistr-coord-wrap' });
+  });
+
+  it('a key saved before names were kept is saved again with its name when its hand-off is next seen', async () => {
+    store.current.importHex(getPublicKey(threadSk), bytesToHex(threadSk));
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(result.current.handoffs).toHaveLength(1), { timeout: 3000 });
+    expect(store.current.names().get(getPublicKey(threadSk))).toBe('cloistr-coord-wrap');
+    await waitFor(() => expect(savedEntry()).not.toBeNull());
+    expect(JSON.parse(savedEntry()!)).toEqual({ k: bytesToHex(threadSk), t: 'cloistr-coord-wrap' });
+  });
+
   it('refuses a hand-off from a granter it was not told to expect', async () => {
     auth.signer = remoteSigner(userSk);
     const stranger = getPublicKey(generateSecretKey());
