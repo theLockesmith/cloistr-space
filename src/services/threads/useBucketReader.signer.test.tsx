@@ -12,6 +12,8 @@ import { bytesToHex } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
 import { computeHandoffBucket, ecdhHex } from './bucketCrypto';
 import { wrapKeyHandoff, wrapThreadMessage } from './giftWrap';
+import { wrapSignerWithReauth } from '@cloistr/ui';
+import type { SignerInterface } from '@/services/headless';
 
 type Wrap = { id: string; pubkey: string; content: string; tags: string[][] };
 const relay: { events: Wrap[] } = { events: [] };
@@ -172,6 +174,32 @@ describe('useBucketReader when the signer cannot locate hand-offs', () => {
 
   it('does not claim that when the signer can locate them', async () => {
     auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [getPublicKey(granterSk)]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    expect(result.current.handoffLookupUnavailable).toBe(false);
+  });
+});
+
+describe('useBucketReader through the real shared sign-in wrapper', () => {
+  const userSk = generateSecretKey();
+  const granterSk = generateSecretKey();
+  const threadSk = generateSecretKey();
+
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    try { localStorage.clear(); } catch { /* none */ }
+    relay.events = [
+      wrapKeyHandoff('cloistr-coord-wrap', bytesToHex(threadSk), granterSk, getPublicKey(userSk), Math.floor(Date.now() / 1000)) as unknown as Wrap,
+    ];
+  });
+
+  it('still finds the hand-off once @cloistr/ui has wrapped the signer (needs @cloistr/ui >= 0.50.8)', async () => {
+    const inner = remoteSigner(userSk) as unknown as SignerInterface;
+    auth.signer = wrapSignerWithReauth(inner, {
+      probe: async () => 'healthy',
+      remint: async () => inner,
+      requestReauth: async () => {},
+    });
     const { result } = renderHook(() => useBucketReader(null, [getPublicKey(granterSk)]));
     await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
     expect(result.current.handoffLookupUnavailable).toBe(false);
