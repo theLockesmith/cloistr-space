@@ -71,6 +71,12 @@ export interface BucketReaderReturn {
   acceptHandoff: (wrapId: string) => void;
   /** Refuse the offered key; it is not offered again on this device. */
   dismissHandoff: (wrapId: string) => void;
+  /**
+   * True when this reader could not look for hand-offs at all: a signer user
+   * whose signer cannot work out the hand-off buckets. Then "no offers" means
+   * "never looked", and the screen has to say so rather than "no threads".
+   */
+  handoffLookupUnavailable: boolean;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
@@ -144,6 +150,7 @@ export function useBucketReader(
   });
 
   const [pendingHandoffs, setPendingHandoffs] = useState<PendingHandoff[]>([]);
+  const [handoffLookupUnavailable, setHandoffLookupUnavailable] = useState(false);
 
   const messagesRef = useRef(new Map<string, UnwrappedMessage>());
   const handoffsRef = useRef(new Map<string, UnwrappedHandoff>());
@@ -300,6 +307,7 @@ export function useBucketReader(
         signerHandoffBuckets(signer, granterPubkeys, prevWindow),
       ]).then(([currHB, prevHB]) => {
         const allHB = [...currHB, ...prevHB];
+        setHandoffLookupUnavailable(allHB.length === 0);
         for (const b of allHB) handoffBuckets.add(b);
         const allReal = Array.from(new Set([...localReal, ...allHB]));
         setDebug(prev => ({
@@ -310,6 +318,7 @@ export function useBucketReader(
         }));
         doSubscribe(allReal);
       }).catch((e) => {
+        setHandoffLookupUnavailable(true);
         setDebug(prev => ({
           ...prev,
           signerError: e instanceof Error ? e.message : String(e),
@@ -319,6 +328,7 @@ export function useBucketReader(
       return;
     }
 
+    setHandoffLookupUnavailable(false);
     setDebug(prev => ({
       ...prev,
       hasSigner: !!signer,
@@ -385,6 +395,7 @@ export function useBucketReader(
     pendingHandoffs,
     acceptHandoff: acceptPending,
     dismissHandoff: dismissPending,
+    handoffLookupUnavailable,
     isLoading: canSubscribe && isFetching,
     error,
     refresh,
