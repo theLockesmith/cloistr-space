@@ -17,6 +17,7 @@ import {
   EMOJI_SET_KIND,
   FALLBACK_EMOJI,
   mergeEmoji,
+  parseDirectEmoji,
   parseEmojiTags,
   parseSetCoordinates,
   type EmojiEntry,
@@ -40,6 +41,17 @@ interface UseEmojiSetsReturn {
   isLoading: boolean;
   /** True when the user actually has emoji of their own, beyond the fallback. */
   hasList: boolean;
+  /**
+   * Re-run both hops against the relays.
+   *
+   * The kind:10030 subscription is subscribeOnce -- it closes on EOSE, by
+   * design, because the whole payload is a one-time historical burst (see
+   * subscribeOnce.ts). That means a publish made through the emoji list
+   * editor AFTER this hook's subscription already closed is invisible until
+   * something asks again. This is that "ask again": the editor calls it once
+   * its publish lands, so the picker shows the new list without a reload.
+   */
+  refresh: () => void;
 }
 
 export function useEmojiSets(): UseEmojiSetsReturn {
@@ -61,6 +73,12 @@ export function useEmojiSets(): UseEmojiSetsReturn {
   // kind:10030 is replaceable, so relays legitimately return different
   // versions. Keep the newest rather than whichever arrived last.
   const newestRef = useRef<number>(0);
+
+  // Bumped by refresh() to force the fetch effect below to re-run against a
+  // pubkey/isConnected pair it has already seen. React does not re-run an
+  // effect because the CALLER wants fresher data; it re-runs when a
+  // dependency changes, so this nonce exists to BE that dependency.
+  const [nonce, setNonce] = useState(0);
 
   const fetchSets = useCallback(
     (coords: SetCoordinate[], owner: string) => {
@@ -144,7 +162,10 @@ export function useEmojiSets(): UseEmojiSetsReturn {
           if (event.created_at !== undefined && event.created_at < newestRef.current) return;
           newestRef.current = event.created_at ?? 0;
 
-          const direct = parseEmojiTags(event.tags);
+          // parseDirectEmoji, not parseEmojiTags: it also reads this user's
+          // own emoji_native tags (unicode favourites), and it keeps them in
+          // tag order so a reorder made in the editor is visible here too.
+          const direct = parseDirectEmoji(event.tags);
           setResolved((prev) => ({
             owner,
             direct,
@@ -176,7 +197,12 @@ export function useEmojiSets(): UseEmojiSetsReturn {
     subsRef.current.push(sub);
     // No cleanup here on purpose -- see useAuthorProfiles. Stopping on a
     // dependency change kills the subscription before its burst arrives.
-  }, [subscribe, isConnected, pubkey, fetchSets]);
+    //
+    // nonce IS a dependency, deliberately: it is the only thing that changes
+    // when refresh() is called with subscribe/isConnected/pubkey all the
+    // same, and the whole point of refresh() is to force this block to run
+    // again rather than being skipped as "nothing changed".
+  }, [subscribe, isConnected, pubkey, fetchSets, nonce]);
 
   useEffect(() => {
     return () => {
@@ -184,7 +210,16 @@ export function useEmojiSets(): UseEmojiSetsReturn {
       subsRef.current = [];
       newestRef.current = 0;
     };
-  }, [subscribe, isConnected, pubkey]);
+  }, [subscribe, isConnected, pubkey, nonce]);
+
+  const refresh = useCallback(() => {
+    // Drop whatever we resolved before: a refresh after an edit must not show
+    // stale direct entries (deleted/reordered ones) merged with the fresh
+    // read merely because `current.owner === pubkey` still held.
+    setResolved(null);
+    newestRef.current = 0;
+    setNonce((n) => n + 1);
+  }, []);
 
   // Only entries resolved for the CURRENT account count.
   const current = resolved && resolved.owner === pubkey ? resolved : null;
@@ -196,5 +231,6 @@ export function useEmojiSets(): UseEmojiSetsReturn {
     emoji,
     isLoading: Boolean(subscribe && isConnected && pubkey) && !current?.settled,
     hasList: (current?.direct.length ?? 0) > 0 || (current?.fromSets.length ?? 0) > 0,
+    refresh,
   };
 }

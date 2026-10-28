@@ -19,7 +19,7 @@ export interface HeadlessAdapters {
 }
 
 export function useHeadlessAdapters(): HeadlessAdapters {
-  const { createEvent, publish, fetchFromOwnRelays } = useNdk();
+  const { createEvent, publish, fetchFromOwnRelays, readFromOwnRelays } = useNdk();
   const { pubkey } = useAuthStore();
 
   const signer = useMemo<SignerInterface | null>(() => {
@@ -29,8 +29,8 @@ export function useHeadlessAdapters(): HeadlessAdapters {
 
   const relay = useMemo<RelayClient | null>(() => {
     if (!publish) return null;
-    return makeNdkRelay({ createEvent, publish, fetchFromOwnRelays });
-  }, [createEvent, publish, fetchFromOwnRelays]);
+    return makeNdkRelay({ createEvent, publish, fetchFromOwnRelays, readFromOwnRelays });
+  }, [createEvent, publish, fetchFromOwnRelays, readFromOwnRelays]);
 
   return { signer, relay };
 }

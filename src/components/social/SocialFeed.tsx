@@ -12,6 +12,7 @@ import { reactionPayload, isRenderable, type EmojiEntry } from '@/services/socia
 import { useMirrorSign, type MirrorMap } from '@/services/cloistr/useMirrorSign';
 import { useContextMenuTrigger } from '@cloistr/ui';
 import { ReactionPicker } from './ReactionPicker';
+import { EmojiListEditor } from './EmojiListEditor';
 import { ShareMenu } from './ShareMenu';
 import { RepostMenu } from './RepostMenu';
 import { ownRelayHints } from './ShareMenu';
@@ -48,8 +49,11 @@ export function SocialFeed() {
   } = useFeed();
   const { post, isPosting, error: composeError, canPost } = useCompose();
   const { react, repost, undo, canAct, blockedReason } = useNoteActions();
-  const { emoji, isLoading: emojiLoading } = useEmojiSets();
+  const { emoji, isLoading: emojiLoading, refresh: refreshEmoji } = useEmojiSets();
   const { sign, mirrorMap, isSigning } = useMirrorSign();
+  // The reaction picker's "Customize" entry opens this once, at feed level --
+  // not once per NoteCard, which would mount one modal per visible note.
+  const [emojiEditorOpen, setEmojiEditorOpen] = useState(false);
 
   // As soon as custom emoji resolve, pre-sign their image URLs so images are
   // ready before the picker opens. Skips URLs already resolved or refused.
@@ -433,6 +437,7 @@ export function SocialFeed() {
             mirrorMap={mirrorMap}
             isMirroring={isSigning}
             onRepost={() => handleRepost(note)}
+            onManageEmoji={() => setEmojiEditorOpen(true)}
           />
         ))}
       </div>
@@ -452,6 +457,18 @@ export function SocialFeed() {
           )}
         </div>
       )}
+
+      {/* Rendered once at feed level, not per NoteCard. refreshEmoji() on
+          close is what makes a save visible without a page reload --
+          useEmojiSets' subscription is one-shot and does not see a later
+          publish on its own. */}
+      <EmojiListEditor
+        isOpen={emojiEditorOpen}
+        onClose={() => {
+          setEmojiEditorOpen(false);
+          refreshEmoji();
+        }}
+      />
     </div>
   );
 }
@@ -470,6 +487,7 @@ function NoteCard({
   mirrorMap,
   isMirroring,
   onRepost,
+  onManageEmoji,
 }: {
   note: Note;
   profile?: AuthorProfile;
@@ -486,6 +504,8 @@ function NoteCard({
   mirrorMap: MirrorMap;
   isMirroring: boolean;
   onRepost: () => void;
+  /** Opens the shared EmojiListEditor modal, owned by SocialFeed. */
+  onManageEmoji: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [quoting, setQuoting] = useState(false);
@@ -752,6 +772,7 @@ function NoteCard({
                 onPickReaction(entry);
               }}
               onClose={() => setPickerOpen(false)}
+              onManage={onManageEmoji}
             />
           )}
         </div>

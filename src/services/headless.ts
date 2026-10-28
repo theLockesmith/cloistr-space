@@ -17,6 +17,14 @@ export type { SignerInterface };
 export interface RelayClient {
   publish(event: Event): Promise<number>;
   fetch(filter: Record<string, unknown>): Promise<Event[]>;
+  /**
+   * A read that says how many relays answered. fetch resolves empty both when
+   * relays answered with nothing and when none answered, so a caller about to
+   * REPLACE a list must use this instead: answeredBy 0 is a failed read.
+   * Rejects when nothing settles in time. Optional: a client without it
+   * cannot back a replace-the-whole-list edit.
+   */
+  read?(filter: Record<string, unknown>): Promise<{ events: Event[]; answeredBy: number }>;
 }
 
 /**

@@ -28,6 +28,36 @@
  *
  * The upgrade path, when we want images, is to proxy them through our own
  * Blossom at files.cloistr.xyz, which we already run. That is separate work.
+ *
+ * OPERATOR'S OWN UNICODE FAVOURITES (emoji_native)
+ *
+ * NIP-51 only defines an `emoji` tag for CUSTOM (NIP-30) emoji -- shortcode
+ * plus an image URL. There is no standard tag for "I like this unicode glyph,
+ * put it near the top of my picker," so a kind:10030 editor that wants to let
+ * the operator curate unicode favourites has to invent something.
+ *
+ * Reusing `emoji` for a unicode entry was considered and rejected. Every other
+ * piece of this module keys the custom/unicode distinction off whether an
+ * entry HAS a url (isRenderable, reactionPayload, the mirror-sign pipeline in
+ * useMirrorSign) -- not off which tag name produced it. Writing
+ * `['emoji', 'heart', '❤️']` would mean one of: teach every one of
+ * those call sites to detect "this url is actually a glyph" (fragile, and the
+ * detection would have to run forever, on every future caller), or accept that
+ * such an entry gets silently handed to the mirror-sign flow, which expects an
+ * http(s) image URL and would try to "resolve" a glyph as one.
+ *
+ * So this is a second, Cloistr-specific tag instead:
+ *
+ *   ['emoji_native', <shortcode>, <character>]
+ *
+ * on the user's OWN kind:10030 only -- never on a shared kind:30030 set, which
+ * stays exactly what NIP-30 says it is. The format stays compatible with other
+ * clients in the sense that matters: NIP-51 clients already have to skip tags
+ * they don't recognise to parse a list written by a client ahead of them, so
+ * an unrecognised `emoji_native` tag changes nothing about how another client
+ * reads our `emoji` tags or our `a` pointers. It simply means other clients
+ * don't (yet) show the unicode half of what we publish -- the same way we
+ * don't show whatever private extension THEY might be writing today.
  */
 
 export const EMOJI_LIST_KIND = 10030;
@@ -88,6 +118,64 @@ export function parseEmojiTags(tags: string[][]): EmojiEntry[] {
     if (typeof shortcode !== 'string' || shortcode.length === 0) continue;
     if (typeof url !== 'string' || url.length === 0) continue;
     out.push({ shortcode, url });
+  }
+
+  return out;
+}
+
+/** The tag name for the operator's own unicode favourites. See the docblock above. */
+export const EMOJI_NATIVE_TAG = 'emoji_native';
+
+/** True for a well-formed `['emoji', shortcode, url]` tag. */
+function isCustomEmojiTag(tag: string[]): boolean {
+  return (
+    tag[0] === 'emoji' &&
+    typeof tag[1] === 'string' &&
+    tag[1].length > 0 &&
+    typeof tag[2] === 'string' &&
+    tag[2].length > 0
+  );
+}
+
+/** True for a well-formed `['emoji_native', shortcode, character]` tag. */
+function isNativeEmojiTag(tag: string[]): boolean {
+  return (
+    tag[0] === EMOJI_NATIVE_TAG &&
+    typeof tag[1] === 'string' &&
+    tag[1].length > 0 &&
+    typeof tag[2] === 'string' &&
+    tag[2].length > 0
+  );
+}
+
+/**
+ * True for any direct-entry tag the emoji list editor manages.
+ *
+ * Exported so emojiListService can preserve everything ELSE (malformed
+ * `emoji` tags, `a` pointers, and anything neither of us recognises) byte for
+ * byte rather than re-deriving this module's idea of "well-formed" a second
+ * time in a different file.
+ */
+export function isManagedEmojiTag(tag: string[]): boolean {
+  return isCustomEmojiTag(tag) || isNativeEmojiTag(tag);
+}
+
+/**
+ * Read a user's own direct entries -- both custom (`emoji`) and unicode
+ * (`emoji_native`) -- in the order they appear on the event.
+ *
+ * This is NOT the same as `mergeEmoji(parseUnicode(tags), parseEmojiTags(tags))`:
+ * that would group all unicode before all custom (or vice versa) regardless of
+ * how the user ordered their list. The editor's reorder feature is only
+ * visible to the picker if entries come back in tag order, so this walks the
+ * tag array once and keeps whichever order is actually on the event.
+ */
+export function parseDirectEmoji(tags: string[][]): EmojiEntry[] {
+  const out: EmojiEntry[] = [];
+
+  for (const tag of tags) {
+    if (isCustomEmojiTag(tag)) out.push({ shortcode: tag[1], url: tag[2] });
+    else if (isNativeEmojiTag(tag)) out.push({ shortcode: tag[1], native: tag[2] });
   }
 
   return out;
