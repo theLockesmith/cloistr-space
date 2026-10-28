@@ -79,3 +79,45 @@ describe('signerHandoffBuckets', () => {
     expect(result).toEqual([]);
   });
 });
+
+describe('hand-off bucket tags are remembered per user, granter and day', () => {
+  it('asks the signer once, then answers a reload from storage', async () => {
+    // Live baseline 2026-10-28: the Threads page made 22 signer round trips on
+    // every load for an account with no threads. A tag for a given user,
+    // granter and day never changes, and the bucket it names is already on
+    // the wire in the relay request.
+    localStorage.clear();
+    const signer = mockNip46Signer({
+      'cloistr_ecdh_tag:g1,20000': 'ab',
+      'cloistr_ecdh_tag:g2,20000': 'cd',
+    });
+    signer.getPublicKey.mockResolvedValue('a'.repeat(64));
+    expect(await signerHandoffBuckets(signer, ['g1', 'g2'], 20000)).toEqual(['ab', 'cd']);
+    expect(await signerHandoffBuckets(signer, ['g1', 'g2'], 20000)).toEqual(['ab', 'cd']);
+    expect(signer.sendRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not answer another user from the first user\'s tags', async () => {
+    localStorage.clear();
+    const first = mockNip46Signer({ 'cloistr_ecdh_tag:g1,20000': 'ab' });
+    first.getPublicKey.mockResolvedValue('a'.repeat(64));
+    await signerHandoffBuckets(first, ['g1'], 20000);
+    const second = mockNip46Signer({ 'cloistr_ecdh_tag:g1,20000': 'ef' });
+    second.getPublicKey.mockResolvedValue('b'.repeat(64));
+    expect(await signerHandoffBuckets(second, ['g1'], 20000)).toEqual(['ef']);
+  });
+});
+
+describe('looking up two windows at once', () => {
+  it('keeps both windows\' tags, so neither is asked for again', async () => {
+    localStorage.clear();
+    const signer = mockNip46Signer({
+      'cloistr_ecdh_tag:g1,20000': 'ab',
+      'cloistr_ecdh_tag:g1,19999': 'cd',
+    });
+    signer.getPublicKey.mockResolvedValue('a'.repeat(64));
+    await Promise.all([signerHandoffBuckets(signer, ['g1'], 20000), signerHandoffBuckets(signer, ['g1'], 19999)]);
+    await Promise.all([signerHandoffBuckets(signer, ['g1'], 20000), signerHandoffBuckets(signer, ['g1'], 19999)]);
+    expect(signer.sendRequest).toHaveBeenCalledTimes(2);
+  });
+});
