@@ -25,6 +25,11 @@ import {
 export interface UseProfileReturn {
   profile: ProfileFields;
   relays: RelayListEntry[];
+  /**
+   * How the relay-list read went. Gates saveRelays the way `existing` gates
+   * saveProfile; null means it has not settled yet.
+   */
+  relayListRead: RelayListRead | null;
   /** How the existing profile read went. Gates whether saving is safe. */
   existing: ExistingProfile | null;
   isLoading: boolean;
@@ -35,6 +40,9 @@ export interface UseProfileReturn {
   saveProfile: (updates: ProfileFields) => Promise<void>;
   saveRelays: (entries: RelayListEntry[]) => Promise<void>;
 }
+
+/** `found` and `absent` are safe to save over; `unreadable` is not. */
+export type RelayListRead = 'found' | 'absent' | 'unreadable';
 
 /**
  * Newest wins when relays disagree.
@@ -139,6 +147,7 @@ export function useProfile(): UseProfileReturn {
 
   const [profile, setProfile] = useState<ProfileFields>({});
   const [relays, setRelays] = useState<RelayListEntry[]>([]);
+  const [relayListRead, setRelayListRead] = useState<RelayListRead | null>(null);
   const [existing, setExisting] = useState<ExistingProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -159,13 +168,21 @@ export function useProfile(): UseProfileReturn {
     if (!isConnected) {
       return Promise.resolve().then(() => {
         setExisting({ status: 'unreadable' });
+        setRelayListRead('unreadable');
       });
     }
+
+    // Set once the relay list itself has been read, so a later failure reading
+    // the profile from those relays does not condemn a list we did get.
+    let relayListSettled = false;
 
     return Promise.resolve()
       .then(() => {
         setIsLoading(true);
         setError(null);
+        // A new read, possibly for a different account: the last answer no
+        // longer says what this save would replace.
+        setRelayListRead(null);
       })
       .then(() =>
         Promise.all([
@@ -177,6 +194,8 @@ export function useProfile(): UseProfileReturn {
         const newestRelayList = newestOf(relayEvents);
         const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
         setRelays(relayList);
+        setRelayListRead(newestRelayList ? 'found' : 'absent');
+        relayListSettled = true;
 
         // kind:0 is replaceable, so a save publishes the whole profile, built
         // on the newest one seen. With a relay list, every write relay is
@@ -217,6 +236,7 @@ export function useProfile(): UseProfileReturn {
       .catch((err) => {
         // We reached for it and failed. Explicitly NOT `absent`.
         setExisting({ status: 'unreadable' });
+        if (!relayListSettled) setRelayListRead('unreadable');
         setError(err instanceof Error ? err.message : 'Could not read your profile');
       })
       .finally(() => setIsLoading(false));
@@ -289,6 +309,20 @@ export function useProfile(): UseProfileReturn {
         throw new Error('Not signed in');
       }
 
+      // Same guard as saveProfile, for the same reason: kind:10002 replaces
+      // the user's relay list in every Nostr app, and the page's draft starts
+      // empty. Saved before the read settled, or after it failed, the list
+      // published is only what was typed here, and every other relay is gone.
+      // Same residual risk as saveProfile too: an empty answer from Space's
+      // pool reads as `absent` even if the list lives only on a relay that is
+      // down.
+      if (relayListRead !== 'found' && relayListRead !== 'absent') {
+        throw new Error(
+          'Could not read your current relay list, so saving was cancelled to avoid ' +
+            'replacing it. Check your relay connection and try again.'
+        );
+      }
+
       setIsSaving(true);
       setError(null);
 
@@ -322,6 +356,7 @@ export function useProfile(): UseProfileReturn {
         await publish(event);
 
         setRelays(entries);
+        setRelayListRead('found');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save your relay list');
         throw err;
@@ -329,12 +364,13 @@ export function useProfile(): UseProfileReturn {
         setIsSaving(false);
       }
     },
-    [createEvent, publish, pubkey, service]
+    [createEvent, publish, pubkey, service, relayListRead]
   );
 
   return {
     profile,
     relays,
+    relayListRead,
     existing,
     isLoading,
     isSaving,
