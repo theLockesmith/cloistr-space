@@ -20,7 +20,14 @@ import { type ThreadKeyStore } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
 import { saveThreadKey, type StorageAdapter } from './threadKeyPersistence';
 import { signerHandoffBuckets } from './signerEcdh';
-import { hasTriedWrap, recordTriedWrap, isNotAddressedToUs, wrapExpiry, forgetOtherUsers } from './triedWraps';
+import {
+  openTriedWraps,
+  isNotAddressedToUs,
+  wrapVerifies,
+  wrapExpiry,
+  forgetOtherUsers,
+  type TriedWraps,
+} from './triedWraps';
 import { loadDismissed, saveDismissed } from './pendingKeyOffers';
 import {
   getWindowId,
@@ -211,6 +218,9 @@ export function useBucketReader(
     // only open a wrap through a signer round trip, so we try that only for
     // wraps in these buckets, never for every message-bucket wrap.
     const handoffBuckets = new Set<string>();
+    // Opened on the first hand-off a signer user has to ask about: one signer
+    // decrypt per load, instead of one per wrap already ruled out.
+    let triedList: Promise<TriedWraps> | null = null;
     if (recipientSecret) {
       for (const w of [currWindow, prevWindow]) {
         for (const g of granterPubkeys) handoffBuckets.add(computeHandoffBucket(ecdhHex(recipientSecret, g), w));
@@ -313,14 +323,27 @@ export function useBucketReader(
                     const ownerPk = await signer.getPublicKey();
                     // The bucket is shared, so most wraps here are other
                     // people's; one the signer already ruled out costs nothing.
-                    if (hasTriedWrap(ownerPk, event.id)) return;
+                    triedList ??= openTriedWraps(ownerPk, { encrypt, decrypt });
+                    const tried = await triedList;
+                    if (tried.has(event.id)) return;
                     let plaintext: string;
                     try {
                       plaintext = await decrypt(event.pubkey, event.content);
                     } catch (e) {
-                      // Remember only a definite "not yours"; a timeout or a
-                      // refusal is asked again, or a real hand-off would be lost.
-                      if (isNotAddressedToUs(e)) recordTriedWrap(ownerPk, event.id, wrapExpiry(event));
+                      // Remember only a definite "not yours" on a wrap that is
+                      // exactly as signed. A timeout or refusal is asked again,
+                      // and a damaged copy of our own hand-off must not hide
+                      // the real one, which shares its id.
+                      const raw = {
+                        id: event.id,
+                        pubkey: event.pubkey,
+                        created_at: event.created_at ?? 0,
+                        kind: event.kind ?? 0,
+                        tags: event.tags,
+                        content: event.content,
+                        sig: event.sig ?? '',
+                      };
+                      if (isNotAddressedToUs(e) && wrapVerifies(raw)) tried.record(event.id, wrapExpiry(raw));
                       return;
                     }
                     const handoff = parseHandoffPayload(plaintext, event.id, granterPubkeys);

@@ -7,11 +7,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
+import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
 import { computeHandoffBucket, computeThreadBucket, ecdhHex, getWindowId } from './bucketCrypto';
-import { wrapKeyHandoff, wrapThreadMessage } from './giftWrap';
+import { wrapKeyHandoff, wrapKeyHandoffWithKey, wrapThreadMessage } from './giftWrap';
 import { wrapSignerWithReauth } from '@cloistr/ui';
 import type { SignerInterface } from '@/services/headless';
 
@@ -327,9 +327,11 @@ describe('hand-offs the signer already said are not ours', () => {
 
   /** Another member's hand-off, filed in OUR hand-off bucket as a collision would be. */
   function foreignWrapInOurBucket(now: number): Wrap {
-    const w = wrapKeyHandoff('someone-elses', bytesToHex(generateSecretKey()), granterSk, getPublicKey(generateSecretKey()), now) as unknown as Wrap;
+    const { event, oneTimeSk } = wrapKeyHandoffWithKey('someone-elses', bytesToHex(generateSecretKey()), granterSk, getPublicKey(generateSecretKey()), now);
     const ours = computeHandoffBucket(ecdhHex(userSk, granterPk), getWindowId(now));
-    return { ...w, tags: w.tags.map((t) => (t[0] === 't' ? ['t', ours] : t)) };
+    // Re-signed with the new tag, as the wrap's sender would have published it.
+    const tags = event.tags.map((t) => (t[0] === 't' ? ['t', ours] : t));
+    return finalizeEvent({ kind: event.kind, content: event.content, tags, created_at: event.created_at }, oneTimeSk) as unknown as Wrap;
   }
 
   /** The real signer's wording: cloistr-signer wraps go-nostr's error, @cloistr/auth wraps that. */
@@ -364,7 +366,8 @@ describe('hand-offs the signer already said are not ours', () => {
     auth.signer = signer;
     const { result, unmount } = renderHook(() => useBucketReader(null, [granterPk]));
     await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 3000 });
-    await new Promise((r) => setTimeout(r, 50));
+    // Past the tried list's write delay, so the next load reads what this one learned.
+    await new Promise((r) => setTimeout(r, 400));
     unmount();
     return result;
   }
@@ -394,6 +397,24 @@ describe('hand-offs the signer already said are not ours', () => {
     relay.events = [foreign, wrapKeyHandoff('ours', bytesToHex(threadSk), granterSk, userPk, now) as unknown as Wrap];
     const first = await load(signerWithRealErrors());
     expect(first.current.pendingHandoffs).toHaveLength(1);
+    const second = await load(signerWithRealErrors());
+    expect(second.current.pendingHandoffs).toHaveLength(1);
+  });
+
+  it('a damaged copy of our own hand-off, under its id, does not hide the real one', async () => {
+    // cloistr-audit on !262: a relay can send our hand-off with its content
+    // altered and the id and signature kept. It fails the MAC like a stranger's
+    // wrap, and if remembered the real one is skipped until it expires.
+    const now = Math.floor(Date.now() / 1000);
+    const real = wrapKeyHandoff('ours', bytesToHex(threadSk), granterSk, userPk, now) as unknown as Wrap;
+    const c = real.content;
+    const damaged = { ...real, content: c.slice(0, 10) + (c[10] === 'A' ? 'B' : 'A') + c.slice(11) };
+
+    relay.events = [damaged];
+    const first = await load(signerWithRealErrors());
+    expect(first.current.pendingHandoffs).toHaveLength(0);
+
+    relay.events = [real];
     const second = await load(signerWithRealErrors());
     expect(second.current.pendingHandoffs).toHaveLength(1);
   });
