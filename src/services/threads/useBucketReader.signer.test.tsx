@@ -10,13 +10,13 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
-import { computeHandoffBucket, ecdhHex } from './bucketCrypto';
+import { computeHandoffBucket, computeThreadBucket, ecdhHex, getWindowId } from './bucketCrypto';
 import { wrapKeyHandoff, wrapThreadMessage } from './giftWrap';
 import { wrapSignerWithReauth } from '@cloistr/ui';
 import type { SignerInterface } from '@/services/headless';
 
 type Wrap = { id: string; pubkey: string; content: string; tags: string[][] };
-const relay: { events: Wrap[] } = { events: [] };
+const relay: { events: Wrap[]; holdEose?: boolean } = { events: [] };
 const store = { current: new ThreadKeyStore() };
 const auth: { signer: unknown } = { signer: null };
 
@@ -34,7 +34,7 @@ vi.mock('@/services/nostr', () => ({
         const b = e.tags.find((t) => t[0] === 't')?.[1];
         if (b && wanted.has(b)) handlers.onEvent(e);
       }
-      handlers.onEose?.();
+      if (!relay.holdEose) handlers.onEose?.();
     });
     return { stop: () => { stopped = true; } };
   },
@@ -97,6 +97,19 @@ describe('useBucketReader for a signer (NIP-46) user', () => {
     await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
     act(() => store.current.importHex(getPublicKey(threadSk), bytesToHex(threadSk)));
     await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
+  });
+
+  it('an offer for a key restored from storage after the reader started is withdrawn (accepted keys stay accepted across a reload)', async () => {
+    // Operator report, 2026-10-28: after a reload every accepted offer was back.
+    // The hand-off is seen before the saved key finishes its signer round
+    // trip, so it is offered; the key then arrives and the offer must go.
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(1), { timeout: 3000 });
+    act(() => store.current.importHex(getPublicKey(threadSk), bytesToHex(threadSk)));
+    await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
+    await waitFor(() => expect(result.current.pendingHandoffs).toHaveLength(0), { timeout: 3000 });
+    expect(result.current.handoffs).toHaveLength(1);
   });
 
   /** What the user's saved entry for this thread decrypts to, or null. */
@@ -239,3 +252,62 @@ describe('accepting a key offered more than once', () => {
   });
 });
 
+
+describe('the loading state', () => {
+  const heldSk = generateSecretKey();
+  const strangerSk = generateSecretKey();
+
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    store.current.set(getPublicKey(heldSk), heldSk);
+    auth.signer = null;
+    // A wrap in the reader's own bucket that none of its keys open: a decoy,
+    // or another thread's message sharing the bucket.
+    const now = Math.floor(Date.now() / 1000);
+    const wrap = wrapThreadMessage('not for you', getPublicKey(strangerSk), bytesToHex(strangerSk), now) as unknown as Wrap;
+    wrap.tags = [['t', computeThreadBucket(bytesToHex(heldSk), getWindowId(now))]];
+    relay.events = [wrap];
+  });
+
+  it('stays loading when an unopenable wrap arrives before the relay has finished', async () => {
+    // Operator report, 2026-10-28: 'No threads yet' showed while threads were
+    // still arriving, because the first event of ANY kind ended loading.
+    relay.holdEose = true;
+    try {
+      const { result } = renderHook(() => useBucketReader(null, []));
+      await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+      expect(result.current.messages).toHaveLength(0);
+      expect(result.current.isLoading).toBe(true);
+    } finally {
+      relay.holdEose = false;
+    }
+  });
+
+  it('stops loading once the relay has sent everything it holds', async () => {
+    const { result } = renderHook(() => useBucketReader(null, []));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages).toHaveLength(0);
+  });
+});
+
+describe('which keys a wrap is tried against', () => {
+  it('tries only the keys whose bucket the wrap is tagged with, not every held key', async () => {
+    // Trying every key on every wrap (decoys included) froze the Threads page
+    // for a user holding fifteen keys. A wrap is placed in its thread's bucket,
+    // so only that bucket's keys can open it.
+    const aSk = generateSecretKey();
+    const bSk = generateSecretKey();
+    store.current = new ThreadKeyStore();
+    store.current.set(getPublicKey(aSk), aSk);
+    store.current.set(getPublicKey(bSk), bSk);
+    auth.signer = null;
+    const now = Math.floor(Date.now() / 1000);
+    const misfiled = wrapThreadMessage('opens with A, filed under B', getPublicKey(aSk), bytesToHex(aSk), now) as unknown as Wrap;
+    misfiled.tags = [['t', computeThreadBucket(bytesToHex(bSk), getWindowId(now))]];
+    const filed = wrapThreadMessage('filed under B', getPublicKey(bSk), bytesToHex(bSk), now) as unknown as Wrap;
+    relay.events = [misfiled, filed];
+    const { result } = renderHook(() => useBucketReader(null, []));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.messages.map((m) => m.plaintext)).toEqual(['filed under B']);
+  });
+});
