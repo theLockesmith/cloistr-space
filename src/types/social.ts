@@ -41,6 +41,9 @@ export interface AuthorProfile {
   displayName?: string;
   picture?: string;
   nip05?: string;
+  /** Lightning address, for zaps. Mirrors services/profile/useAuthorProfiles' richer AuthorProfile, which is what actually gets populated; these two fields exist here mainly so this type stays structurally compatible with zapService's LightningAddress. */
+  lud16?: string;
+  lud06?: string;
   about?: string;
 }
 

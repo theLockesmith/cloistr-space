@@ -21,12 +21,41 @@ import { METADATA_KIND, parseProfileContent } from './profileEvents';
 import { loadTiming } from '@/services/performance';
 import { saveProfiles, loadProfilesFor } from '@/services/cache';
 
+/**
+ * Read `lud06` straight off a kind:0's raw JSON, bypassing
+ * parseProfileContent (profileEvents.ts), which deliberately omits it from
+ * the editable-fields contract. Permissive like that parser: unparsable or
+ * non-string content means "absent," not an error, since this is someone
+ * else's client's data.
+ */
+function readLud06(content: string): string | undefined {
+  if (!content) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const value = (parsed as Record<string, unknown>).lud06;
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  } catch {
+    // Fall through to undefined.
+  }
+  return undefined;
+}
+
 export interface AuthorProfile {
   name?: string;
   displayName?: string;
   picture?: string;
   nip05?: string;
   lud16?: string;
+  /**
+   * NOT read via parseProfileContent/ProfileFields -- profileEvents.ts
+   * deliberately excludes lud06 from the fields this app EDITS (see its
+   * tests), because this client only ever writes lud16. Read-only, straight
+   * off the raw kind:0 JSON, so the zap flow can still fall back to another
+   * client's legacy lud06 without touching the edit/merge contract.
+   */
+  lud06?: string;
   about?: string;
   /** created_at of the kind:0 this came from; absent in entries cached before it was kept. */
   createdAt?: number;
@@ -128,6 +157,7 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           picture: fields.picture,
           nip05: fields.nip05,
           lud16: fields.lud16,
+          lud06: readLud06(event.content ?? ''),
           about: fields.about,
           createdAt,
         };
@@ -141,7 +171,8 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           existing.displayName === next.displayName &&
           existing.picture === next.picture &&
           existing.nip05 === next.nip05 &&
-          existing.lud16 === next.lud16
+          existing.lud16 === next.lud16 &&
+          existing.lud06 === next.lud06
         ) {
           // Same content from a newer event: remember the newer timestamp so
           // an older copy arriving later still loses.

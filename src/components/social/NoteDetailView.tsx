@@ -31,6 +31,8 @@ import { ReactionPicker } from './ReactionPicker';
 import { RepostMenu } from './RepostMenu';
 import { QuoteComposer } from './QuoteComposer';
 import { ShareMenu, ownRelayHints } from './ShareMenu';
+import { ZapButton } from './ZapButton';
+import type { AuthorProfile } from '@/services/profile/useAuthorProfiles';
 import type { ThreadNode } from '@/services/social/replyEvents';
 import type { Note } from '@/types/social';
 import { REACTION_KIND, REPOST_KIND } from '@/types/social';
@@ -164,7 +166,7 @@ function NoteBody({
   featured = false,
 }: {
   note: Note;
-  profile?: { name?: string; displayName?: string; picture?: string };
+  profile?: AuthorProfile;
   featured?: boolean;
 }) {
   const name = profile?.displayName || profile?.name || abbreviate(encodeProfile(note.pubkey));
@@ -192,7 +194,7 @@ function NoteBody({
       {/* The featured (root) note gets interactive action buttons. Reply
           cards navigate to their own thread when clicked, where they become
           the featured note and get their own action row. */}
-      {featured && <NoteActions note={note} />}
+      {featured && <NoteActions note={note} authorProfile={profile} />}
     </article>
   );
 }
@@ -269,7 +271,7 @@ function useNoteOwnEngagement(noteId: string) {
  * NOT shown on reply cards: clicking a reply navigates to its own thread,
  * where it becomes the featured note and gets this row.
  */
-function NoteActions({ note }: { note: Note }) {
+function NoteActions({ note, authorProfile }: { note: Note; authorProfile?: AuthorProfile }) {
   const { react, repost, undo, canAct } = useNoteActions();
   const { relayStatuses } = useNdk();
   const quoteHints = useMemo(() => ownRelayHints(relayStatuses), [relayStatuses]);
@@ -460,6 +462,15 @@ function NoteActions({ note }: { note: Note }) {
             />
           )}
         </div>
+
+        <ZapButton
+          eventId={note.id}
+          eventPubkey={note.pubkey}
+          address={authorProfile}
+          canAct={canAct}
+          zapAmountSats={note.engagement.zapAmount}
+          relays={quoteHints}
+        />
 
         <ShareMenu noteId={note.id} authorPubkey={note.pubkey} />
       </div>
