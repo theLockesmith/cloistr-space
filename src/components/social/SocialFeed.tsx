@@ -14,6 +14,7 @@ import { useContextMenuTrigger } from '@cloistr/ui';
 import { ReactionPicker } from './ReactionPicker';
 import { ShareMenu } from './ShareMenu';
 import { RepostMenu } from './RepostMenu';
+import { ZapButton } from './ZapButton';
 import { ownRelayHints } from './ShareMenu';
 import { useNdk } from '@/services/nostr';
 import { useAuthStore } from '@/stores/authStore';
@@ -755,23 +756,14 @@ function NoteCard({
             />
           )}
         </div>
-        {/* Zaps are NOT implemented (NIP-57), so there is no button.
-            A permanently disabled control is worse than an absent one: it
-            advertises a capability that does not exist, and the operator has
-            twice now reported an inert control as a broken feature. The COUNT
-            still shows when a note has zaps, because that is information about
-            the note rather than an action we cannot perform. */}
-        {note.engagement.zapAmount > 0 && (
-          <span
-            className="flex items-center gap-2 text-sm text-cloistr-light/40"
-            title="Zaps received. Sending zaps is not available yet."
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            {formatSats(note.engagement.zapAmount)}
-          </span>
-        )}
+        <ZapButton
+          eventId={note.id}
+          eventPubkey={note.pubkey}
+          address={author}
+          canAct={canAct}
+          zapAmountSats={note.engagement.zapAmount}
+          relays={quoteHints}
+        />
         <ShareMenu noteId={note.id} authorPubkey={note.pubkey} />
         {/* Only on your own posts. NIP-09 retracts only events you signed, so
             offering this on someone else's note would be an inert control. */}
@@ -829,14 +821,4 @@ function formatTime(timestamp: number): string {
 
   const date = new Date(timestamp * 1000);
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-function formatSats(sats: number): string {
-  if (sats >= 1000000) {
-    return `${(sats / 1000000).toFixed(1)}M`;
-  }
-  if (sats >= 1000) {
-    return `${(sats / 1000).toFixed(1)}k`;
-  }
-  return sats.toString();
 }
