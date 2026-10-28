@@ -83,6 +83,9 @@ export interface BucketReaderReturn {
   debug: BucketReaderDebug;
 }
 
+/** How long to wait for the relays to finish before showing what has arrived. */
+export const EOSE_FALLBACK_MS = 10_000;
+
 /**
  * Compute the real buckets a reader needs for a given window.
  * Returns hex string bucket values.
@@ -183,6 +186,16 @@ export function useBucketReader(
       setPendingHandoffs([]);
     }
     pendingForRef.current = { recipientSecret, signer };
+    // An offer made before the saved key finished restoring (a reload restores
+    // keys through a signer round trip) is for a key now held: withdraw it.
+    let withdrew = false;
+    for (const [wrapId, p] of pendingRef.current) {
+      if (keyStore.get(p.handoff.threadPubkey)) {
+        pendingRef.current.delete(wrapId);
+        withdrew = true;
+      }
+    }
+    if (withdrew) setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     setMessages([]);
     setHandoffs([]);
     setIsFetching(true);
@@ -235,6 +248,20 @@ export function useBucketReader(
       setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     };
 
+    // Which held keys own each subscribed bucket. A wrap sits in its thread's
+    // bucket, so only those keys can open it; a decoy matches none and costs
+    // nothing. Trying every key on every wrap froze the page for a user with
+    // fifteen threads.
+    const keysByBucket = new Map<string, Array<[string, Uint8Array]>>();
+    for (const [threadPubkey, threadSk] of keyStore.entries()) {
+      for (const w of [currWindow, prevWindow]) {
+        const b = computeThreadBucket(bytesToHex(threadSk), w);
+        const list = keysByBucket.get(b) ?? [];
+        if (!list.some(([pk]) => pk === threadPubkey)) list.push([threadPubkey, threadSk]);
+        keysByBucket.set(b, list);
+      }
+    }
+
     const realCurr = computeRealBuckets(keyStore, currWindow, recipientSecret, granterPubkeys);
     const realPrev = computeRealBuckets(keyStore, prevWindow, recipientSecret, granterPubkeys);
 
@@ -250,14 +277,15 @@ export function useBucketReader(
           onEvent: (event: NDKEvent) => {
             if (messagesRef.current.has(event.id) || handoffsRef.current.has(event.id)) return;
 
-            const msg = tryUnwrapMessage(
+            const bucket = event.tags.find((t) => t[0] === 't')?.[1];
+            const candidates = (bucket && keysByBucket.get(bucket)) || [];
+            const msg = candidates.length === 0 ? null : tryUnwrapMessage(
               { id: event.id, pubkey: event.pubkey, content: event.content, tags: event.tags, created_at: event.created_at },
-              keyStore,
+              { entries: () => candidates.values() },
             );
             if (msg) {
               messagesRef.current.set(msg.wrapId, msg);
               setMessages(Array.from(messagesRef.current.values()));
-              setIsFetching(false);
               return;
             }
 
@@ -276,7 +304,6 @@ export function useBucketReader(
               // Signer (NIP-46) users hold no raw key: open the hand-off through
               // the signer. Until 2026-09-28 this branch did not exist, so every
               // signer user's hand-off was found and silently dropped.
-              const bucket = event.tags.find((t) => t[0] === 't')?.[1];
               if (bucket && handoffBuckets.has(bucket)) {
                 const decrypt = signer.nip44Decrypt.bind(signer);
                 const encrypt = signer.nip44Encrypt.bind(signer);
@@ -293,13 +320,24 @@ export function useBucketReader(
                 })();
               }
             }
-
+          },
+          // Loading ends when the relays have sent what they hold, never on the
+          // first event: most wraps here are decoys or other threads' messages,
+          // and ending on one showed 'No threads yet' while threads were still
+          // arriving. A relay that never finishes is cut off after a bound.
+          onEose: () => {
+            clearTimeout(eoseFallback);
             setIsFetching(false);
           },
-          onEose: () => setIsFetching(false),
         }, { closeOnEose: false });
+        const eoseFallback = setTimeout(() => setIsFetching(false), EOSE_FALLBACK_MS);
 
-        subRef.current = { unsubscribe: () => subscription.stop() };
+        subRef.current = {
+          unsubscribe: () => {
+            clearTimeout(eoseFallback);
+            subscription.stop();
+          },
+        };
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Bucket subscription failed');
         setIsFetching(false);
