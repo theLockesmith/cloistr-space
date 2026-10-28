@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { config } from '@/config/environment';
 import { useContactsStore } from '@/stores/contactsStore';
 import { clearAll as clearCache } from '@/services/cache';
+import { clearTriedWraps } from '@/services/threads/triedWraps';
 
 interface AuthContextValue {
   pubkey: string | null;
@@ -442,6 +443,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearSharedSession();
       // Clear IndexedDB cache so the next user does not inherit this one's feed.
       void clearCache();
+      clearTriedWraps();
       // And the in-memory contact list, CRDT and pending changes with it, so
       // the next key to sign in in this tab starts from nothing.
       useContactsStore.getState().resetFor(null);
