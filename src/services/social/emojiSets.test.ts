@@ -9,12 +9,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseEmojiTags,
+  parseDirectEmoji,
   parseSetCoordinates,
   mergeEmoji,
   isRenderable,
+  isManagedEmojiTag,
   reactionPayload,
   FALLBACK_EMOJI,
   EMOJI_SET_KIND,
+  EMOJI_NATIVE_TAG,
   type EmojiEntry,
 } from './emojiSets';
 
@@ -44,6 +47,53 @@ describe('parseEmojiTags', () => {
     // Note what this does NOT mean: a kind:10030 whose emoji live in `a`-tagged
     // sets returns [] here and is not empty. See parseSetCoordinates.
     expect(parseEmojiTags([['a', `${EMOJI_SET_KIND}:${PK}:mine`]])).toEqual([]);
+  });
+});
+
+describe('parseDirectEmoji', () => {
+  it('reads unicode favourites from emoji_native tags', () => {
+    expect(parseDirectEmoji([[EMOJI_NATIVE_TAG, 'fire', '🔥']])).toEqual([
+      { shortcode: 'fire', native: '🔥' },
+    ]);
+  });
+
+  it('reads both emoji_native and emoji tags, in the order they appear on the event', () => {
+    // This is the property the editor's reorder feature depends on: grouping
+    // by tag type instead of walking the array in order would make a reorder
+    // invisible to the picker.
+    const found = parseDirectEmoji([
+      ['emoji', 'party', 'https://x.test/p.png'],
+      [EMOJI_NATIVE_TAG, 'fire', '🔥'],
+      ['emoji', 'wave', 'https://x.test/w.png'],
+    ]);
+    expect(found.map((e) => e.shortcode)).toEqual(['party', 'fire', 'wave']);
+    expect(found[1]).toEqual({ shortcode: 'fire', native: '🔥' });
+  });
+
+  it('ignores a-pointers and unrecognised tags', () => {
+    expect(
+      parseDirectEmoji([
+        ['a', `${EMOJI_SET_KIND}:${PK}:mine`],
+        ['future_thing', 'whatever'],
+      ]),
+    ).toEqual([]);
+  });
+
+  it('skips an emoji_native tag missing its character, same as a malformed emoji tag', () => {
+    expect(parseDirectEmoji([[EMOJI_NATIVE_TAG, 'lonely']])).toEqual([]);
+  });
+});
+
+describe('isManagedEmojiTag', () => {
+  it('accepts well-formed emoji and emoji_native tags', () => {
+    expect(isManagedEmojiTag(['emoji', 'party', 'https://x.test/p.png'])).toBe(true);
+    expect(isManagedEmojiTag([EMOJI_NATIVE_TAG, 'fire', '🔥'])).toBe(true);
+  });
+
+  it('rejects a-pointers, unknown tags, and malformed emoji tags', () => {
+    expect(isManagedEmojiTag(['a', `${EMOJI_SET_KIND}:${PK}:mine`])).toBe(false);
+    expect(isManagedEmojiTag(['future_thing', 'x'])).toBe(false);
+    expect(isManagedEmojiTag(['emoji', 'lonely'])).toBe(false);
   });
 });
 

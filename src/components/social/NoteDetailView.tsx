@@ -28,6 +28,7 @@ import { useMirrorSign } from '@/services/cloistr/useMirrorSign';
 import { useContextMenuTrigger } from '@cloistr/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { ReactionPicker } from './ReactionPicker';
+import { EmojiListEditor } from './EmojiListEditor';
 import { RepostMenu } from './RepostMenu';
 import { QuoteComposer } from './QuoteComposer';
 import { ShareMenu, ownRelayHints } from './ShareMenu';
@@ -273,11 +274,12 @@ function NoteActions({ note }: { note: Note }) {
   const { react, repost, undo, canAct } = useNoteActions();
   const { relayStatuses } = useNdk();
   const quoteHints = useMemo(() => ownRelayHints(relayStatuses), [relayStatuses]);
-  const { emoji, isLoading: emojiLoading } = useEmojiSets();
+  const { emoji, isLoading: emojiLoading, refresh: refreshEmoji } = useEmojiSets();
   const { mirrorMap, isSigning } = useMirrorSign();
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [quoting, setQuoting] = useState(false);
+  const [emojiEditorOpen, setEmojiEditorOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const {
@@ -457,6 +459,7 @@ function NoteActions({ note }: { note: Note }) {
                 void handleReact(entry);
               }}
               onClose={() => setPickerOpen(false)}
+              onManage={() => setEmojiEditorOpen(true)}
             />
           )}
         </div>
@@ -483,6 +486,14 @@ function NoteActions({ note }: { note: Note }) {
       {quoting && (
         <QuoteComposer note={note} relays={quoteHints} onDone={() => setQuoting(false)} />
       )}
+
+      <EmojiListEditor
+        isOpen={emojiEditorOpen}
+        onClose={() => {
+          setEmojiEditorOpen(false);
+          refreshEmoji();
+        }}
+      />
     </div>
   );
 }

@@ -65,3 +65,29 @@ describe('project admin capabilities are reachable', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Same check, for the kind:10030 emoji list editor (added alongside this
+ * test). The capability and the UI to reach it were built in the same
+ * change, but that is exactly the situation that produced the ORIGINAL
+ * instance of this bug (updateMetadata) -- "I just wrote the caller" is not
+ * evidence that the caller ships, only that this test catches it if it doesn't.
+ */
+describe('emoji list capabilities are reachable', () => {
+  for (const capability of ['addUnicodeEmoji', 'addCustomEmoji', 'removeEmojiEntry', 'moveEmojiEntry']) {
+    it(`${capability} has a caller outside emojiListService`, () => {
+      const callers = callersOf(capability, 'emojiListService.ts');
+
+      expect(
+        callers.length,
+        `${capability} is exported and nothing calls it — an operator cannot reach it`
+      ).toBeGreaterThan(0);
+    });
+  }
+
+  it('the emoji list editor is rendered, not merely defined', () => {
+    const callers = callersOf('EmojiListEditor', 'EmojiListEditor.tsx');
+
+    expect(callers.length).toBeGreaterThan(0);
+  });
+});
