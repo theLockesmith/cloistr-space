@@ -114,3 +114,16 @@ describe('a refused signature', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('a file the Drive API lists without a type', () => {
+  it('comes back as a generic file, not an undefined type', async () => {
+    // Live 2026-10-28: the Files page crashed ("reading 'startsWith'") for the
+    // test account because one listed file carried no mime_type.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ files: [{ sha256: 'ab'.repeat(32), name: 'untyped', size: 1, created_at: 1 }] }),
+    });
+    const files = await drive.listFiles(ME);    expect(files[0].mimeType).toBe('application/octet-stream');
+  });
+});
