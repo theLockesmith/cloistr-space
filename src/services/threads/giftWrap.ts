@@ -225,7 +225,7 @@ function latestSendTime(wrapCreatedAt: number, nowSec: number): number {
 
 export function tryUnwrapMessage(
   wrapEvent: { id: string; pubkey: string; content: string; tags: string[][]; created_at?: number },
-  keyStore: ThreadKeyStore,
+  keyStore: Pick<ThreadKeyStore, 'entries'>,
   nowSec: number = Math.floor(Date.now() / 1000),
 ): UnwrappedMessage | null {
   for (const [threadPubkey, threadSk] of keyStore.entries()) {
