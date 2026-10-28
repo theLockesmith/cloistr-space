@@ -28,6 +28,8 @@ export interface AuthorProfile {
   nip05?: string;
   lud16?: string;
   about?: string;
+  /** created_at of the kind:0 this came from; absent in entries cached before it was kept. */
+  createdAt?: number;
 }
 
 /** Profiles keyed by pubkey. Missing keys simply have not resolved. */
@@ -111,9 +113,14 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
     // arrives on this same subscription and the avatar updates in place.
     const sub = subscribeStream(subscribe, [filter], {
       onEvent: (event: NDKEvent) => {
-        const fields = parseProfileContent(event.content ?? '');
-
         const existing = cacheRef.current.get(event.pubkey);
+        // kind:0 is replaceable: the newest wins, not the last to arrive. A
+        // relay that never purged an old profile otherwise overwrites the
+        // current one depending on which relay answers last.
+        const createdAt = event.created_at ?? 0;
+        if (existing?.createdAt !== undefined && createdAt <= existing.createdAt) return;
+
+        const fields = parseProfileContent(event.content ?? '');
         const next: AuthorProfile = {
           name: fields.name,
           // NIP-01 spells it display_name; the UI reads displayName.
@@ -122,6 +129,7 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           nip05: fields.nip05,
           lud16: fields.lud16,
           about: fields.about,
+          createdAt,
         };
 
         // Skip the state update when nothing actually changed -- relays
@@ -135,6 +143,9 @@ export function useAuthorProfiles(pubkeys: string[]): AuthorProfiles {
           existing.nip05 === next.nip05 &&
           existing.lud16 === next.lud16
         ) {
+          // Same content from a newer event: remember the newer timestamp so
+          // an older copy arriving later still loses.
+          existing.createdAt = createdAt;
           return;
         }
 
