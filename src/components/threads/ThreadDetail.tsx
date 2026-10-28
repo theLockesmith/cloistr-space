@@ -7,7 +7,9 @@
  *
  * Private: the sealed messages whose key the user holds. Nothing signs their
  * author, so every sender is an unverified key (threads.md 8, P0 stopgap),
- * and the envelope's `from` is never promoted to a name.
+ * and the envelope's `from` is never promoted to a name. v2 messages nest by
+ * the parent pointer sealed inside them (sealedNesting.ts); v1 ones cannot
+ * point anywhere and sit at the top level.
  */
 
 import { useState, useCallback, type ReactNode } from 'react';
@@ -21,6 +23,7 @@ import {
   type PublicThreadItem,
   type StandaloneThread,
 } from '@/services/threads';
+import { nestMessages, type MessageNode } from '@/services/threads/sealedNesting';
 import { UnverifiedSender, shortNpub } from './sealedParts';
 
 type Node = PublicThreadItem['thread']['replies'][number];
@@ -203,14 +206,9 @@ export function PrivateThreadDetail({ thread, onBack }: { thread: StandaloneThre
       </DetailHeader>
 
       <ol className="space-y-2">
-        {thread.messages.map((m) => (
-          <li key={m.id}>
-            <Message
-              author={<UnverifiedSender pubkeyHex={m.pubkey} />}
-              createdAt={m.createdAt}
-              approx={m.approxTime === true}
-              text={m.text}
-            />
+        {nestMessages(thread.messages).map((node) => (
+          <li key={node.id}>
+            <SealedReplyTree node={node} />
           </li>
         ))}
       </ol>
@@ -255,6 +253,23 @@ function ReplyTree({ node, onSelect }: { node: Node; onSelect?: (n: Node) => voi
       />
       {node.replies.map((child) => (
         <ReplyTree key={child.id} node={child} onSelect={onSelect} />
+      ))}
+    </div>
+  );
+}
+
+function SealedReplyTree({ node }: { node: MessageNode }) {
+  return (
+    // Same indent as the public tree: capped so a deep thread stays readable on mobile.
+    <div style={{ marginLeft: `${Math.min(node.depth, 4) * 16}px` }} className="space-y-2">
+      <Message
+        author={<UnverifiedSender pubkeyHex={node.pubkey} />}
+        createdAt={node.createdAt}
+        approx={node.approxTime === true}
+        text={node.text}
+      />
+      {node.replies.map((child) => (
+        <SealedReplyTree key={child.id} node={child} />
       ))}
     </div>
   );
