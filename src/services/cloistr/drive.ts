@@ -18,7 +18,10 @@ function mapFile(f: Record<string, unknown>): DriveFile {
     sha256: f.sha256 as string,
     name: f.name as string,
     size: f.size as number,
-    mimeType: (f.mime_type ?? f.mimeType) as string,
+    // The API can omit the type; an undefined here crashed the Files page.
+    mimeType: typeof (f.mime_type ?? f.mimeType) === 'string' && (f.mime_type ?? f.mimeType)
+      ? (f.mime_type ?? f.mimeType) as string
+      : 'application/octet-stream',
     folderId: (f.folder_id ?? f.folderId ?? '') as string,
     createdAt: (f.created_at ?? f.createdAt) as number,
   };
