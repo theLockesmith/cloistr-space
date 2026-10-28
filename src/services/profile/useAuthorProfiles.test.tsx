@@ -147,4 +147,23 @@ describe('useAuthorProfiles', () => {
 
     expect(subscribe).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps the NEWEST kind:0, whichever order the relays answer in', () => {
+    // Live 2026-10-28: an author's own relay still served their 2023 profile
+    // next to the 2026 one, and Space showed whichever arrived last.
+    const { result } = renderHook(({ keys }) => useAuthorProfiles(keys), {
+      initialProps: { keys: ['a'] },
+    });
+    const { onEvent } = subscribe.mock.calls[0][2] as { onEvent: (e: unknown) => void };
+    const kind0 = (name: string, created_at: number) => ({
+      pubkey: 'a', kind: 0, created_at, content: JSON.stringify({ name }),
+    });
+
+    act(() => onEvent(kind0('node', 1791912595)));
+    act(() => onEvent(kind0('noderunner', 1684194667)));
+    expect(result.current.get('a')?.name).toBe('node');
+
+    act(() => onEvent(kind0('newer', 1791999999)));
+    expect(result.current.get('a')?.name).toBe('newer');
+  });
 });
