@@ -26,6 +26,7 @@ class FakeNdkEvent {
 
 const publish = vi.fn();
 const fetchFromOwnRelays = vi.fn();
+const readFromOwnRelays = vi.fn();
 let lastCreated: FakeNdkEvent | null = null;
 
 vi.mock('./NdkProvider', () => ({
@@ -36,6 +37,7 @@ vi.mock('./NdkProvider', () => ({
     },
     publish,
     fetchFromOwnRelays,
+    readFromOwnRelays,
   }),
 }));
 
@@ -49,6 +51,7 @@ describe('useHeadlessAdapters', () => {
   beforeEach(() => {
     publish.mockReset();
     fetchFromOwnRelays.mockReset();
+    readFromOwnRelays.mockReset();
     lastCreated = null;
   });
 
@@ -100,5 +103,17 @@ describe('useHeadlessAdapters', () => {
     const events = await result.current.relay!.fetch({ kinds: [39002] });
 
     expect(events).toEqual([e.rawEvent()]);
+  });
+
+  it('relay.read passes on how many relays answered, so a silent read is not mistaken for an empty one', async () => {
+    const { result } = renderHook(() => useHeadlessAdapters());
+    const e = new FakeNdkEvent();
+    e.kind = 10030;
+
+    readFromOwnRelays.mockResolvedValueOnce({ events: [e], answeredBy: 2 });
+    expect(await result.current.relay!.read!({ kinds: [10030] })).toEqual({ events: [e.rawEvent()], answeredBy: 2 });
+
+    readFromOwnRelays.mockResolvedValueOnce({ events: [], answeredBy: 0 });
+    expect(await result.current.relay!.read!({ kinds: [10030] })).toEqual({ events: [], answeredBy: 0 });
   });
 });

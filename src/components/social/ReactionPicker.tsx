@@ -14,6 +14,12 @@
  * Three distinguishable failure states are shown when a mirror result is not
  * available. Collapsing them into one would hide information useful for
  * debugging.
+ *
+ * `onManage`, when provided, renders a "Customize" row that opens
+ * EmojiListEditor -- the operator's only way in today to edit their own
+ * kind:10030 (no app-wide Settings page exists yet; see that component's
+ * docblock). Optional because a caller that cannot offer editing (not signed
+ * in, no adapters) can omit it rather than wire a no-op.
  */
 
 import { useEffect, useRef } from 'react';
@@ -27,6 +33,7 @@ interface Props {
   isMirroring: boolean;
   onPick: (entry: EmojiEntry) => void;
   onClose: () => void;
+  onManage?: () => void;
 }
 
 export function ReactionPicker({
@@ -36,6 +43,7 @@ export function ReactionPicker({
   isMirroring,
   onPick,
   onClose,
+  onManage,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -223,6 +231,22 @@ export function ReactionPicker({
 
       {isLoading && unicode.length === 0 && (
         <p className="px-1 py-2 text-xs text-cloistr-light/40">Loading your emoji…</p>
+      )}
+
+      {onManage && (
+        <div className="mt-2 border-t border-cloistr-light/10 pt-2">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onClose();
+              onManage();
+            }}
+            className="w-full rounded px-1 py-1 text-left text-xs text-cloistr-light/50 hover:bg-cloistr-light/10 hover:text-cloistr-light/80"
+          >
+            Customize your emoji…
+          </button>
+        </div>
       )}
     </div>
   );
