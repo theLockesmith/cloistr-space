@@ -379,7 +379,7 @@ describe('requestZapInvoice', () => {
         return { ok: true, status: 200, json: async () => payInfo } as unknown as Response;
       }
       capturedUrl = url;
-      return { ok: true, status: 200, json: async () => ({ pr: 'lnbc1pjq8s3zpp5...' }) } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({ pr: 'lnbc210n1pjq8s3zpp5...' }) } as unknown as Response;
     }) as unknown as typeof fetch;
 
     await requestZapInvoice(mockSigner(), fetchFn, {
@@ -400,3 +400,45 @@ describe('requestZapInvoice', () => {
     expect(signedEvent.sig).toBe('cc'.repeat(64));
   });
 });
+
+describe('review fixes (cloistr-pr, !256)', () => {
+  const payUrl = 'https://cloistr.xyz/.well-known/lnurlp/bob';
+  const payInfo = {
+    callback: 'https://cloistr.xyz/lnurlp/callback',
+    minSendable: 1000,
+    maxSendable: 1_000_000_000,
+    metadata: '[]',
+    allowsNostr: true,
+    nostrPubkey: 'a'.repeat(64),
+  };
+
+  it('refuses an invoice with no amount: nothing confirms what the user would pay', async () => {
+    const fetchFn = mockFetch([
+      { match: (u) => u === payUrl, json: payInfo },
+      { match: (u) => u.startsWith(payInfo.callback), json: { pr: 'lnbc1pjq8s3zpp5qqqsyqcyq5rqwzqf' } },
+    ]) as unknown as typeof fetch;
+    await expect(
+      requestZapInvoice(mockSigner(), fetchFn, {
+        payUrl, eventId: NOTE, eventPubkey: THEM, amountMsats: 21000, relays: ['wss://relay.example'],
+      })
+    ).rejects.toThrow(/amount/i);
+  });
+
+  it('refuses a plain-http lud06, which a man in the middle could rewrite', () => {
+    const lud06 = bech32Encode('lnurl', new TextEncoder().encode('http://legacy.example/lnurlp'));
+    expect(lnurlPayUrlFromLud06(lud06)).toBeNull();
+  });
+
+  it('allows plain http only for a .onion lud06', () => {
+    const lud06 = bech32Encode('lnurl', new TextEncoder().encode('http://abcdefghijklmnop.onion/lnurlp'));
+    expect(lnurlPayUrlFromLud06(lud06)).toBe('http://abcdefghijklmnop.onion/lnurlp');
+  });
+
+  it('refuses a plain-http payment callback', async () => {
+    const fetchFn = mockFetch([
+      { match: (u) => u === payUrl, json: { ...payInfo, callback: 'http://cloistr.xyz/lnurlp/callback' } },
+    ]) as unknown as typeof fetch;
+    await expect(fetchLnurlPayInfo(fetchFn, payUrl)).rejects.toThrow(/https/);
+  });
+});
+

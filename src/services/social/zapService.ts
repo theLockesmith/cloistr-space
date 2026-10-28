@@ -163,13 +163,28 @@ export function lnurlPayUrlFromLud16(lud16: string): string | null {
   return `https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`;
 }
 
+/**
+ * Only https, or plain http to a .onion (Tor already authenticates the host).
+ * Over plain http a man in the middle can swap the payee for an invoice of the
+ * same amount, and the amount check below would not notice.
+ */
+export function isSafeLnurlUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:') return true;
+    return u.protocol === 'http:' && u.hostname.endsWith('.onion');
+  } catch {
+    return false;
+  }
+}
+
 /** LUD-06: a bech32 string (`lnurl1...`) whose data bytes are the UTF-8 pay URL. */
 export function lnurlPayUrlFromLud06(lud06: string): string | null {
   const decoded = bech32Decode(lud06.trim());
   if (!decoded || decoded.hrp !== 'lnurl') return null;
   try {
     const url = new TextDecoder().decode(decoded.bytes);
-    return /^https?:\/\//i.test(url) ? url : null;
+    return isSafeLnurlUrl(url) ? url : null;
   } catch {
     return null;
   }
@@ -260,6 +275,9 @@ export async function fetchLnurlPayInfo(fetchFn: FetchFn, payUrl: string): Promi
 
   if (typeof obj.callback !== 'string' || !obj.callback) {
     throw new Error('Lightning address has no payment callback.');
+  }
+  if (!isSafeLnurlUrl(obj.callback)) {
+    throw new Error('Lightning address gave a payment callback that is not https. Refusing to use it.');
   }
   if (typeof obj.minSendable !== 'number' || typeof obj.maxSendable !== 'number') {
     throw new Error('Lightning address did not specify an amount range.');
@@ -452,8 +470,13 @@ export async function requestZapInvoice(
   // The one check that matters most: refuse to hand back an invoice for the
   // wrong amount. Paying it blind turns a misbehaving (or malicious) LNURL
   // server's bug into the user's money, not a bug report.
+  // An invoice with no amount (or one we cannot parse) confirms nothing: the
+  // wallet would ask the user for an amount, or pay whatever it decides.
   const invoiceMsats = decodeBolt11AmountMsats(obj.pr);
-  if (invoiceMsats !== null && invoiceMsats !== requested) {
+  if (invoiceMsats === null) {
+    throw new Error('The invoice does not state an amount, so it cannot be checked. Refusing to pay it.');
+  }
+  if (invoiceMsats !== requested) {
     throw new Error(
       `The invoice is for ${invoiceMsats} msats, not the ${requested} msats requested. Refusing to pay it.`
     );
