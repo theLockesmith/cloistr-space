@@ -386,6 +386,25 @@ describe('ThreadsView private thread', () => {
     expect(approx[0].textContent).toBe(`~${new Date(1_700_000_000 * 1000).toLocaleDateString()}`);
   });
 
+  it('nests a reply under the message it answers', () => {
+    const base = priv({ title: 'Fleet', at: 200 });
+    const parent = { ...base.messages[0], id: 'w-parent', rumorId: 'a'.repeat(64), text: 'question', createdAt: 200 };
+    const other = { ...base.messages[0], id: 'w-other', rumorId: 'c'.repeat(64), text: 'unrelated', createdAt: 250 };
+    const child = { ...base.messages[0], id: 'w-child', rumorId: 'b'.repeat(64), parentId: 'a'.repeat(64), text: 'answer', createdAt: 300 };
+    privateFixtures = [{ ...base, messages: [parent, other, child] }];
+    render(<ThreadsView />);
+    fireEvent.click(screen.getByText('Fleet'));
+
+    const indent = (text: string) => (screen.getByText(text).closest('[style]') as HTMLElement | null)?.style.marginLeft;
+    expect(indent('question')).toBe('0px');
+    expect(indent('answer')).toBe('16px');
+    expect(indent('unrelated')).toBe('0px');
+    // The answer is drawn right under its question, ahead of a later top-level message.
+    const order = ['question', 'answer', 'unrelated'].map((t) => screen.getByText(t));
+    expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("replies sealed to that thread's own key", async () => {
     privateFixtures = [priv({ title: 'Fleet', at: 200 })];
     sendMessage.mockResolvedValue(undefined);

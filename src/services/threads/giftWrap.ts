@@ -11,7 +11,7 @@
  *   tags: [['t', bucket_hex], ['expiration', String((window+2)*86400)]]
  */
 
-import { generateSecretKey, getPublicKey, nip44, finalizeEvent, type Event } from 'nostr-tools';
+import { generateSecretKey, getEventHash, getPublicKey, nip44, finalizeEvent, type Event } from 'nostr-tools';
 import { verifyFresh } from '../nostr/verifyFresh';
 import { hexToBytes } from 'nostr-tools/utils';
 import {
@@ -47,6 +47,17 @@ export interface UnwrappedMessage {
    * names the same key. A v1 message's author is whatever its sender typed.
    */
   verified: boolean;
+  /**
+   * v2 only: the rumor's NIP-01 id, which is what a reply's `e` tag points at
+   * (architecture/threads.md section 3). Computed here, never read from the
+   * rumor, so a sender cannot claim another message's id. Absent when the
+   * rumor's fields do not hash, and on every v1 message.
+   */
+  rumorId?: string;
+  /** v2 only: the immediate parent, the rumor's first lowercase `e` tag. */
+  parentId?: string;
+  /** v2 only: the thread root, the rumor's first uppercase `E` tag. */
+  rootId?: string;
 }
 
 export const SEAL_KIND = 13;
@@ -57,7 +68,36 @@ type SealVerdict =
   | { kind: 'notSeal' }
   | { kind: 'foreign' }
   | { kind: 'refused' }
-  | { kind: 'ok'; plaintext: string; authorHex: string; sentAt: unknown };
+  | { kind: 'ok'; plaintext: string; authorHex: string; sentAt: unknown; links: RumorLinks };
+
+interface RumorLinks {
+  rumorId?: string;
+  parentId?: string;
+  rootId?: string;
+}
+
+/** The rumor's id and NIP-22 pointers, or none of them when its fields cannot be hashed. */
+function rumorLinks(r: { pubkey: string; content: string; created_at?: unknown; kind?: unknown; tags?: unknown }): RumorLinks {
+  const tags = r.tags;
+  if (
+    typeof r.created_at !== 'number' ||
+    typeof r.kind !== 'number' ||
+    !Array.isArray(tags) ||
+    !tags.every((t) => Array.isArray(t) && t.every((v) => typeof v === 'string'))
+  ) {
+    return {};
+  }
+  const pointer = (name: string) => {
+    const v = (tags as string[][]).find((t) => t[0] === name)?.[1];
+    return v && /^[0-9a-f]{64}$/.test(v) ? v : undefined;
+  };
+  try {
+    const rumorId = getEventHash({ pubkey: r.pubkey, created_at: r.created_at, kind: r.kind, tags: tags as string[][], content: r.content });
+    return { rumorId, parentId: pointer('e'), rootId: pointer('E') };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Open a v2 seal with a thread key, as the kit's _verify_seal_json does.
@@ -82,12 +122,18 @@ function openSeal(inner: unknown, threadSk: Uint8Array): SealVerdict {
   } catch {
     return { kind: 'refused' };
   }
-  const r = rumor as { pubkey?: unknown; content?: unknown; created_at?: unknown };
+  const r = rumor as { pubkey?: unknown; content?: unknown; created_at?: unknown; kind?: unknown; tags?: unknown };
   // NIP-59's anti-impersonation rule: the rumor's claimed author must be the
   // key that signed the seal around it.
   if (typeof r.pubkey !== 'string' || r.pubkey.toLowerCase() !== seal.pubkey.toLowerCase()) return { kind: 'refused' };
   if (typeof r.content !== 'string') return { kind: 'refused' };
-  return { kind: 'ok', plaintext: r.content, authorHex: seal.pubkey.toLowerCase(), sentAt: r.created_at };
+  return {
+    kind: 'ok',
+    plaintext: r.content,
+    authorHex: seal.pubkey.toLowerCase(),
+    sentAt: r.created_at,
+    links: rumorLinks({ ...r, pubkey: r.pubkey, content: r.content }),
+  };
 }
 
 /**
@@ -207,6 +253,7 @@ export function tryUnwrapMessage(
           wrapId: wrapEvent.id,
           ...time(seal.sentAt),
           verified: true,
+          ...seal.links,
         };
       }
       if (seal.kind === 'notSeal' && typeof inner.p === 'string' && typeof inner.a === 'string') {
