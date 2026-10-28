@@ -155,7 +155,13 @@ export function useBucketReader(
   const messagesRef = useRef(new Map<string, UnwrappedMessage>());
   const handoffsRef = useRef(new Map<string, UnwrappedHandoff>());
   const pendingRef = useRef(
-    new Map<string, { handoff: PendingHandoff; ownerPk: string; encryptFn: (pk: string, pt: string) => Promise<string> }>(),
+    new Map<string, {
+      handoff: PendingHandoff;
+      ownerPk: string;
+      encryptFn: (pk: string, pt: string) => Promise<string>;
+      /** Wrap ids of re-sent hand-offs for the same thread. */
+      copies: string[];
+    }>(),
   );
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
   // Who the pending offers were addressed to. A restart for the window timer
@@ -216,7 +222,16 @@ export function useBucketReader(
         return;
       }
       if (loadDismissed().has(handoff.wrapId) || pendingRef.current.has(handoff.wrapId)) return;
-      pendingRef.current.set(handoff.wrapId, { handoff: { ...handoff, threadPubkey }, ownerPk, encryptFn });
+      // The kit re-sends a thread's hand-off. One offer per thread: further
+      // copies ride along on the first, so accepting or dismissing it settles
+      // them all instead of the next identical card taking its place.
+      for (const p of pendingRef.current.values()) {
+        if (p.handoff.threadPubkey === threadPubkey) {
+          p.copies.push(handoff.wrapId);
+          return;
+        }
+      }
+      pendingRef.current.set(handoff.wrapId, { handoff: { ...handoff, threadPubkey }, ownerPk, encryptFn, copies: [] });
       setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     };
 
@@ -384,9 +399,11 @@ export function useBucketReader(
   }, [keyStore]);
 
   const dismissPending = useCallback((wrapId: string) => {
+    const entry = pendingRef.current.get(wrapId);
     pendingRef.current.delete(wrapId);
     setPendingHandoffs(Array.from(pendingRef.current.values(), (p) => p.handoff));
     saveDismissed(wrapId);
+    for (const copy of entry?.copies ?? []) saveDismissed(copy);
   }, []);
 
   return {

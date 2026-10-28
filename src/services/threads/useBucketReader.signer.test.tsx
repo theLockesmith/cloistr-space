@@ -205,3 +205,37 @@ describe('useBucketReader through the real shared sign-in wrapper', () => {
     expect(result.current.handoffLookupUnavailable).toBe(false);
   });
 });
+
+describe('accepting a key offered more than once', () => {
+  const userSk = generateSecretKey();
+  const granterSk = generateSecretKey();
+  const threadSk = generateSecretKey();
+  const author = getPublicKey(generateSecretKey());
+
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    try { localStorage.clear(); } catch { /* none */ }
+    const now = Math.floor(Date.now() / 1000);
+    // The kit re-sends a thread's hand-off, so one thread arrives as several
+    // offers with different wrap ids.
+    relay.events = [
+      wrapThreadMessage('hello from the kit', author, bytesToHex(threadSk), now) as unknown as Wrap,
+      wrapKeyHandoff('cloistr-coord-wrap', bytesToHex(threadSk), granterSk, getPublicKey(userSk), now - 60) as unknown as Wrap,
+      wrapKeyHandoff('cloistr-coord-wrap', bytesToHex(threadSk), granterSk, getPublicKey(userSk), now - 30) as unknown as Wrap,
+      wrapKeyHandoff('cloistr-coord-wrap', bytesToHex(threadSk), granterSk, getPublicKey(userSk), now) as unknown as Wrap,
+    ];
+  });
+
+  it('shows one offer per thread, and accepting it clears the offer and opens the thread', async () => {
+    auth.signer = remoteSigner(userSk);
+    const { result } = renderHook(() => useBucketReader(null, [getPublicKey(granterSk)]));
+    await waitFor(() => expect(result.current.pendingHandoffs.length).toBeGreaterThan(0), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(result.current.pendingHandoffs).toHaveLength(1);
+    act(() => result.current.acceptHandoff(result.current.pendingHandoffs[0].wrapId));
+    await waitFor(() => expect(result.current.messages.map((m) => m.plaintext)).toContain('hello from the kit'), { timeout: 3000 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(result.current.pendingHandoffs).toHaveLength(0);
+  });
+});
+
