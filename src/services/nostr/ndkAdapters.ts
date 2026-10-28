@@ -20,6 +20,8 @@ export interface NdkSource {
   createEvent: () => NDKEvent | null;
   publish: ((event: NDKEvent) => Promise<Set<NDKRelay>>) | null;
   fetchFromOwnRelays: ((filter: NDKFilter) => Promise<Set<NDKEvent>>) | null;
+  /** Optional: without it the relay client has no `read`, and list edits refuse. */
+  readFromOwnRelays?: ((filter: NDKFilter) => Promise<{ events: NDKEvent[]; answeredBy: number }>) | null;
 }
 
 export function makeNdkSigner(source: NdkSource, getPubkey: () => Promise<string>): SignerInterface {
@@ -68,5 +70,13 @@ export function makeNdkRelay(source: NdkSource): RelayClient {
       const events = await source.fetchFromOwnRelays(filter as NDKFilter);
       return Array.from(events, (e) => e.rawEvent() as Event);
     },
+    ...(source.readFromOwnRelays
+      ? {
+          read: async (filter: Record<string, unknown>) => {
+            const { events, answeredBy } = await source.readFromOwnRelays!(filter as NDKFilter);
+            return { events: events.map((e) => e.rawEvent() as Event), answeredBy };
+          },
+        }
+      : {}),
   };
 }

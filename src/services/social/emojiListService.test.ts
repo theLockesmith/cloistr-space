@@ -50,6 +50,7 @@ function createMockRelay(events: Event[] = []): RelayClient & { published: Event
       return 1;
     },
     fetch: async () => events,
+    read: async () => ({ events, answeredBy: 1 }),
   };
 }
 
@@ -86,6 +87,38 @@ describe('readEmojiList', () => {
     // A failed read must not be reported as an empty-but-valid list -- the
     // caller needs to refuse to publish, not publish an empty list.
     expect(failedRead).not.toEqual(noList);
+  });
+
+  it('treats "no relay answered" as a failed read, not as "no list exists"', async () => {
+    // fetchFromOwnRelays resolves EMPTY when nobody answered; only the
+    // answered-by count tells that apart from a real empty result.
+    const silent: RelayClient = {
+      publish: vi.fn(async () => 1),
+      fetch: async () => [],
+      read: async () => ({ events: [], answeredBy: 0 }),
+    };
+    expect((await readEmojiList(silent, PK)).ok).toBe(false);
+
+    await expect(addUnicodeEmoji(createMockSigner(), silent, '🔥', 'fire')).rejects.toThrow(
+      /Could not read your current emoji list/,
+    );
+    expect(silent.publish).not.toHaveBeenCalled();
+  });
+
+  it('treats a read that timed out as failed', async () => {
+    const timedOut: RelayClient = {
+      publish: async () => 1,
+      fetch: async () => [],
+      read: async () => {
+        throw new Error('None of your relays answered.');
+      },
+    };
+    expect((await readEmojiList(timedOut, PK)).ok).toBe(false);
+  });
+
+  it('refuses to trust a relay client that cannot say whether anyone answered', async () => {
+    const blind: RelayClient = { publish: async () => 1, fetch: async () => [] };
+    expect((await readEmojiList(blind, PK)).ok).toBe(false);
   });
 
   it('picks the newest event by created_at, not the first or last returned', async () => {
@@ -270,6 +303,7 @@ describe('zero relays accepting the publish', () => {
     const signer = createMockSigner();
     const relay: RelayClient = {
       fetch: async () => [],
+      read: async () => ({ events: [], answeredBy: 1 }),
       publish: async () => 0,
     };
 
@@ -287,6 +321,7 @@ describe('end-to-end: add, then add again, preserves the first and any a-pointer
 
     const relay: RelayClient = {
       fetch: async () => [...store.values()],
+      read: async () => ({ events: [...store.values()], answeredBy: 1 }),
       publish: async (event: Event) => {
         store.set(event.pubkey, event);
         return 1;

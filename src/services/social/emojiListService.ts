@@ -114,8 +114,13 @@ function hasShortcode(entries: string[][], shortcode: string): boolean {
  * -- see the kind:0 fix this repo already shipped for the same reasoning.
  */
 export async function readEmojiList(relay: RelayClient, pubkey: string): Promise<ListRead> {
+  // relay.fetch resolves empty when no relay answered, which would read as
+  // "no list exists" and let the next edit publish a one-entry list over the
+  // operator's real one. Only a read that counts who answered can say empty.
+  if (!relay.read) return { ok: false, exists: false, tags: [] };
   try {
-    const events = await relay.fetch({ kinds: [EMOJI_LIST_KIND], authors: [pubkey] });
+    const { events, answeredBy } = await relay.read({ kinds: [EMOJI_LIST_KIND], authors: [pubkey] });
+    if (answeredBy === 0) return { ok: false, exists: false, tags: [] };
     if (events.length === 0) return { ok: true, exists: false, tags: [] };
 
     let newest = events[0];
