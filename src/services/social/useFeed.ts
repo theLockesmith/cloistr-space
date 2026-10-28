@@ -92,6 +92,27 @@ interface UseFeedReturn {
   getOwnRepostId: (noteId: string) => string | undefined;
 }
 
+/**
+ * NIP-10: a kind:1 is a reply when it carries any `e` tag not marked
+ * "mention" -- marked "root" or "reply", or the deprecated positional form
+ * (no marker at all).
+ *
+ * Deliberately NOT derived from parseNoteEvent's replyTo/rootEvent fields:
+ * those only capture a "reply" marker or a legacy unmarked tag, so a direct
+ * reply to a thread's root -- which buildReplyTags writes with ONLY a "root"
+ * marker, no "reply" marker, because a reply marker pointing at the same id
+ * as root is noise -- left replyTo undefined. That is the common case, not an
+ * edge case, and checking replyTo alone would have let most replies straight
+ * through.
+ *
+ * An `e` tag marked "mention" (QuoteComposer's quotes) is excluded on
+ * purpose: quoting a note is not answering it, and it belongs in the feed as
+ * its own post.
+ */
+export function isReplyEvent(tags: string[][]): boolean {
+  return tags.some((t) => t[0] === 'e' && t[3] !== 'mention');
+}
+
 /** Parse a kind:1 event into a Note */
 function parseNoteEvent(event: NDKEvent): Note {
   // Extract reply info from e tags
@@ -584,12 +605,22 @@ export function useFeed(options: UseFeedOptions = {}): UseFeedReturn {
         seenIdsRef.current.add(id);
 
         const note = parseNoteEvent(event);
-        loadTiming.mark('first-note');
 
-        // Track oldest timestamp for pagination
+        // Track oldest timestamp for pagination. Every kind:1 counts toward
+        // the `until` cursor, reply or not -- otherwise a page thick with
+        // replies would stall pagination instead of advancing past them.
         if (oldestTimestampRef.current === null || note.createdAt < oldestTimestampRef.current) {
           oldestTimestampRef.current = note.createdAt;
         }
+
+        // Replies belong in the conversation view (NoteDetailView, via
+        // useNoteThread), not the top-level feed. Without this check a reply
+        // renders exactly like a new post -- same card, same "X posted"
+        // framing -- and opening it is the only way to discover it already
+        // had a parent. Applies to every mode: none of them is a replies tab.
+        if (isReplyEvent(event.tags)) return;
+
+        loadTiming.mark('first-note');
 
         // upsertNote rather than a bare append: the seen-set above and the note
         // list are two structures that must agree, and when they drifted the
