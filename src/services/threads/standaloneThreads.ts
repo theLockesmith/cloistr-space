@@ -43,6 +43,10 @@ export interface StandaloneMessage {
   sealed: boolean;
   /** The project the message is tagged with; null when there is none. */
   projectId: string | null;
+  /** Wrap mode, v2 only: the sealed rumor's id, which replies point at. See UnwrappedMessage. */
+  rumorId?: string;
+  /** Wrap mode, v2 only: the rumor id of the message this one answers. */
+  parentId?: string;
 }
 
 export interface StandaloneThread {
@@ -147,6 +151,8 @@ export function acceptWrapped(
     from: envelope?.from ?? null,
     sealed: true,
     projectId: null,
+    rumorId: msg.rumorId,
+    parentId: msg.parentId,
   };
 }
 
