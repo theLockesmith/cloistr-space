@@ -400,9 +400,10 @@ export function useProfile(): UseProfileReturn {
       // the user's relay list in every Nostr app, and the page's draft starts
       // empty. Saved before the read settled, or after it failed, the list
       // published is only what was typed here, and every other relay is gone.
-      // Same residual risk as saveProfile too: an empty answer from Space's
-      // pool reads as `absent` even if the list lives only on a relay that is
-      // down.
+      // `absent` needs Space's pool AND a public indexer to have answered with
+      // nothing, so a list kept only on relays Space cannot reach is found
+      // there. What remains: a list on no indexer and only on relays that are
+      // down reads as absent.
       if (relayListRead !== 'found' && relayListRead !== 'absent') {
         throw new Error(
           'Could not read your current relay list, so saving was cancelled to avoid ' +
