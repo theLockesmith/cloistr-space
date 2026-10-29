@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import {
   isNotAddressedToUs,
@@ -104,6 +104,45 @@ describe('the tried list', () => {
     expect(localStorage.getItem('cloistr:tried-wraps:' + bob)).toBe('b');
     clearTriedWraps();
     expect(localStorage.getItem('cloistr:tried-wraps:' + bob)).toBeNull();
+  });
+});
+
+describe('the tried list after sign-out', () => {
+  const stored = () => localStorage.getItem('cloistr:tried-wraps:' + alice);
+
+  it('a record made just before sign-out is not written back once its save delay passes', async () => {
+    vi.useFakeTimers();
+    try {
+      const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+      list.record('w1', 5000);
+      clearTriedWraps();
+      await vi.runAllTimersAsync();
+      expect(stored()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a save already waiting on the signer when sign-out lands is not written', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const real = selfCrypt(aliceSk);
+    const slow: SelfCrypt = { ...real, encrypt: async (pk, pt) => (await gate, real.encrypt(pk, pt)) };
+    const list = await openTriedWraps(alice, slow, () => 1000);
+    list.record('w1', 5000);
+    const saving = list.flush();
+    clearTriedWraps();
+    release();
+    await saving;
+    expect(stored()).toBeNull();
+  });
+
+  it('a list opened after sign-out still saves', async () => {
+    clearTriedWraps();
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+    list.record('w1', 5000);
+    await list.flush();
+    expect(stored()).not.toBeNull();
   });
 });
 

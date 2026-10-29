@@ -22,7 +22,7 @@
  * wrap without it.
  *
  * Kept per user pubkey, pruned when the wraps expire off the relays, and
- * cleared on sign-out.
+ * cleared on sign-out, including a save still pending when it happens.
  */
 import type { Event } from 'nostr-tools';
 import { verifyFresh } from '@/services/nostr/verifyFresh';
@@ -82,10 +82,18 @@ export interface TriedWraps {
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /**
+ * Bumped by sign-out. A list opened before the bump never writes again: its
+ * save is up to PERSIST_DELAY_MS behind, plus a signer round trip, and
+ * landing after the clear would put the signed-out user's list back.
+ */
+let signOuts = 0;
+
+/**
  * Read the user's list (one signer decrypt when one is stored). A list that
  * cannot be read starts empty: the wraps are simply asked about again.
  */
 export async function openTriedWraps(userPk: string, crypt: SelfCrypt, now = nowSeconds): Promise<TriedWraps> {
+  const openedAt = signOuts;
   const tried = new Map<string, number>();
   try {
     const blob = localStorage.getItem(PREFIX + userPk);
@@ -104,12 +112,14 @@ export async function openTriedWraps(userPk: string, crypt: SelfCrypt, now = now
 
   const persist = () => {
     timer = null;
+    if (signOuts !== openedAt) return;
     const t = now();
     for (const [id, exp] of tried) if (exp <= t) tried.delete(id);
     const snapshot = JSON.stringify(Object.fromEntries(tried));
     writing = writing.then(async () => {
       try {
-        localStorage.setItem(PREFIX + userPk, await crypt.encrypt(userPk, snapshot));
+        const blob = await crypt.encrypt(userPk, snapshot);
+        if (signOuts === openedAt) localStorage.setItem(PREFIX + userPk, blob);
       } catch {
         // Signer or storage unavailable: asked again next load.
       }
@@ -154,7 +164,8 @@ export function forgetOtherUsers(userPk: string): void {
   removeWhere((pk) => pk !== userPk);
 }
 
-/** On sign-out. */
+/** On sign-out. Lists already open stop writing. */
 export function clearTriedWraps(): void {
+  signOuts += 1;
   removeWhere(() => true);
 }
