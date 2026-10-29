@@ -92,6 +92,24 @@ function signatureHolds(e: NDKEvent): boolean {
 }
 
 /**
+ * The events from Space's own pool that verify, and whether any did not.
+ *
+ * The pool reaches the same public indexers (outbox model), and NDK checks
+ * only a sample of signatures once a relay is trusted, so a forged list or
+ * profile can arrive here as easily as through readOneRelay. A save re-signs
+ * what was read, so only verified events count (review of !263).
+ */
+function verifiedOnly(events: Iterable<NDKEvent>): { events: NDKEvent[]; forged: boolean } {
+  const out: NDKEvent[] = [];
+  let forged = false;
+  for (const e of events) {
+    if (signatureHolds(e)) out.push(e);
+    else forged = true;
+  }
+  return { events: out, forged };
+}
+
+/**
  * Ask one write relay for the user's kind:0, on its own subscription.
  *
  * One subscription per relay because NDK's onEose is per subscription and
@@ -252,13 +270,15 @@ export function useProfile(): UseProfileReturn {
           fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
         ])
       )
-      .then(async ([metadataEvents, relayEvents]) => {
+      .then(async ([metadataFetched, relayFetched]) => {
         if (!current()) return;
+        const metadataEvents = verifiedOnly(metadataFetched);
+        const relayEvents = verifiedOnly(relayFetched);
 
         // Space's pool having no list is not the user having none: it may
         // live only on relays we cannot reach. Ask the public indexers before
         // calling it absent, and if none of them answers, it is unreadable.
-        let newestRelayList = newestOf(relayEvents);
+        let newestRelayList = newestOf(relayEvents.events);
         let relayListState: RelayListRead = 'found';
         if (!newestRelayList) {
           const indexed =
@@ -267,7 +287,13 @@ export function useProfile(): UseProfileReturn {
               : { events: [] as NDKEvent[], answered: false };
           if (!current()) return;
           newestRelayList = newestOf(indexed.events);
-          relayListState = newestRelayList ? 'found' : indexed.answered ? 'absent' : 'unreadable';
+          // A forgery in the pool is not an empty answer: something claims a
+          // list exists, and what it says cannot be trusted.
+          relayListState = newestRelayList
+            ? 'found'
+            : indexed.answered && !relayEvents.forged
+              ? 'absent'
+              : 'unreadable';
         }
 
         const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
@@ -276,7 +302,9 @@ export function useProfile(): UseProfileReturn {
         relayListSettled = true;
         if (relayListState === 'unreadable') {
           setError(
-            'Could not read your relay list: no relay or relay-list indexer answered. Saving it is disabled so it cannot replace a list kept elsewhere.',
+            relayEvents.forged
+              ? 'Could not read your relay list: a relay sent a copy whose signature does not match. Saving it is disabled so it cannot replace your real one.'
+              : 'Could not read your relay list: no relay or relay-list indexer answered. Saving it is disabled so it cannot replace a list kept elsewhere.',
           );
         }
 
@@ -295,11 +323,20 @@ export function useProfile(): UseProfileReturn {
               { events: [] as NDKEvent[], silent: [] as string[] };
         if (!current()) return;
 
-        const newest = newestOf([...Array.from(metadataEvents), ...own.events]);
+        const newest = newestOf([...metadataEvents.events, ...own.events]);
         if (newest) {
           const content = newest.content ?? '';
           setExisting({ status: 'found', content });
           setProfile(parseProfileContent(content));
+          return;
+        }
+
+        if (metadataEvents.forged) {
+          setExisting({ status: 'unreadable' });
+          setProfile({});
+          setError(
+            'Could not read your profile: a relay sent a copy whose signature does not match. Saving is disabled so it cannot replace your real one.',
+          );
           return;
         }
 

@@ -37,13 +37,11 @@ const env = vi.hoisted(() => ({
   asked: [] as string[][],
 }));
 
-const relayListEvent = () => ({
-  kind: 10002,
-  pubkey: ME,
-  created_at: 10,
-  content: '',
-  tags: [['r', W, 'write'], ...Object.keys(env.extra).map((u) => ['r', u, 'write'])],
-});
+const relayListEvent = () =>
+  finalizeEvent(
+    { kind: 10002, created_at: 10, content: '', tags: [['r', W, 'write'], ...Object.keys(env.extra).map((u) => ['r', u, 'write'])] },
+    meSk,
+  );
 const profileAt = (created_at: number, fields: Record<string, string>) =>
   finalizeEvent({ kind: 0, created_at, content: JSON.stringify(fields), tags: [] }, meSk);
 const ownProfile = profileAt(20, { name: 'me', website: 'https://me.example' });

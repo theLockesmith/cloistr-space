@@ -88,6 +88,7 @@ vi.mock('@/services/nostr', () => ({
 
 const meSk = generateSecretKey();
 const ME = getPublicKey(meSk);
+const oldList = finalizeEvent({ kind: 10002, created_at: 1, content: '', tags: [['r', 'wss://old.example.com']] }, meSk);
 const authState = { pubkey: ME, isAuthenticated: true };
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: (selector?: (s: typeof authState) => unknown) =>
@@ -224,7 +225,7 @@ describe('useProfile.saveRelays refuses to publish over a list it never read', (
       if (!filter.kinds.includes(10002)) return new Set();
       call += 1;
       if (call > 1) return new Promise<Set<unknown>>(() => {});
-      return new Set([{ created_at: 1, tags: [['r', 'wss://old.example.com']] }]);
+      return new Set([oldList]);
     });
     const { result } = await renderSettled();
     expect(result.current.relayListRead).toBe('found');
@@ -247,7 +248,7 @@ describe('useProfile.saveRelays refuses to publish over a list it never read', (
     mockFetchEvents = vi.fn(async (...args: unknown[]) => {
       const filter = args[0] as { kinds: number[] };
       if (!filter.kinds.includes(10002)) return new Set();
-      return new Set([{ created_at: 1, tags: [['r', 'wss://old.example.com']] }]);
+      return new Set([oldList]);
     });
     mockSubscribe.mockImplementationOnce(() => {
       throw new Error('relay closed');
@@ -320,6 +321,49 @@ describe('useProfile relay list when Space\'s own relays have none', () => {
     expect(result.current.relayListRead).toBe('unreadable');
   });
 
+  // Space's pool asks the same indexers (outbox model), and NDK checks only a
+  // sample of signatures once a relay is trusted (review of !263).
+  it("a forged list from Space's own pool is not used, and the save is refused", async () => {
+    const forged = { ...kept, tags: [['r', 'wss://attacker.example.com']] };
+    mockFetchEvents = vi.fn(async (...args: unknown[]) => {
+      const filter = args[0] as { kinds: number[] };
+      return new Set(filter.kinds.includes(10002) ? [forged] : []);
+    });
+    const { result } = await renderSettled();
+
+    expect(result.current.relays).toEqual([]);
+    expect(result.current.relayListRead).toBe('unreadable');
+    await act(async () => {
+      await expect(result.current.saveRelays(ADDED)).rejects.toThrow(/relay list/i);
+    });
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it("a forged list in the pool does not hide a genuine older one beside it", async () => {
+    const forged = { ...finalizeEvent({ kind: 10002, created_at: 9, content: '', tags: [['r', 'wss://attacker.example.com']] }, meSk), tags: [['r', 'wss://attacker.example.com'], ['r', 'wss://x.example.com']] };
+    mockFetchEvents = vi.fn(async (...args: unknown[]) => {
+      const filter = args[0] as { kinds: number[] };
+      return new Set(filter.kinds.includes(10002) ? [forged, kept] : []);
+    });
+    const { result } = await renderSettled();
+
+    expect(result.current.relayListRead).toBe('found');
+    expect(result.current.relays.map((r) => r.url)).toEqual(['wss://elsewhere.example.com']);
+  });
+
+  it("a forged profile from Space's own pool is not shown, and the profile save is refused", async () => {
+    const real = finalizeEvent({ kind: 0, created_at: 3, content: JSON.stringify({ name: 'me' }), tags: [] }, meSk);
+    const forged = { ...real, content: JSON.stringify({ name: 'forged', lud16: 'thief@example.com' }) };
+    mockFetchEvents = vi.fn(async (...args: unknown[]) => {
+      const filter = args[0] as { kinds: number[] };
+      return new Set(filter.kinds.includes(10002) ? [] : [forged]);
+    });
+    const { result } = await renderSettled();
+
+    expect(result.current.profile.name).toBeUndefined();
+    expect(result.current.existing?.status).toBe('unreadable');
+  });
+
   it('is unreadable when no indexer answers, and the save is refused', async () => {
     vi.useFakeTimers();
     try {
@@ -348,14 +392,14 @@ describe('useProfile relay list when Space\'s own relays have none', () => {
 // ---------------------------------------------------------------------------
 
 describe('useProfile after an account switch', () => {
-  const B = 'b'.repeat(64);
-  const listOf = (who: string) => ({ created_at: 1, pubkey: who, tags: [['r', `wss://${who.slice(0, 1)}.example.com`]] });
-  const profileOf = (who: string) => ({
-    created_at: 1,
-    pubkey: who,
-    content: JSON.stringify({ name: `user-${who.slice(0, 1)}` }),
-    tags: [],
-  });
+  const bSk = generateSecretKey();
+  const B = getPublicKey(bSk);
+  const keyOf = (who: string) => (who === B ? bSk : meSk);
+  const letterOf = (who: string) => (who === B ? 'b' : 'a');
+  const listOf = (who: string) =>
+    finalizeEvent({ kind: 10002, created_at: 1, content: '', tags: [['r', `wss://${letterOf(who)}.example.com`]] }, keyOf(who));
+  const profileOf = (who: string) =>
+    finalizeEvent({ kind: 0, created_at: 1, content: JSON.stringify({ name: `user-${letterOf(who)}` }), tags: [] }, keyOf(who));
 
   /** Every fetch waits until its author's answer is released. */
   function heldFetches() {
