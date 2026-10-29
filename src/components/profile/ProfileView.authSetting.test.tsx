@@ -25,7 +25,7 @@ vi.mock('@/components/auth/AuthProvider', () => ({
 }));
 
 // Stable references: ProfileView re-seeds its drafts whenever these change identity.
-const profileState = vi.hoisted(() => ({ profile: {}, relays: [], existing: { status: 'found' } }));
+const profileState = vi.hoisted(() => ({ profile: {}, relays: [], relayListRead: 'found', existing: { status: 'found' } }));
 vi.mock('@/services/profile', () => ({
   useProfile: () => ({
     ...profileState,

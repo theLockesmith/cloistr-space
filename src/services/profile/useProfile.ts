@@ -6,9 +6,11 @@
  * philosophy doc.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NDKEvent, NDKFilter, NDKRelaySet } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
+import { PUBLIC_OUTBOX_INDEXERS } from '@/services/nostr/ndk';
+import { verifyFresh } from '@/services/nostr/verifyFresh';
 import { useAuthStore } from '@/stores/authStore';
 import {
   METADATA_KIND,
@@ -25,6 +27,11 @@ import {
 export interface UseProfileReturn {
   profile: ProfileFields;
   relays: RelayListEntry[];
+  /**
+   * How the relay-list read went. Gates saveRelays the way `existing` gates
+   * saveProfile; null means it has not settled yet.
+   */
+  relayListRead: RelayListRead | null;
   /** How the existing profile read went. Gates whether saving is safe. */
   existing: ExistingProfile | null;
   isLoading: boolean;
@@ -35,6 +42,9 @@ export interface UseProfileReturn {
   saveProfile: (updates: ProfileFields) => Promise<void>;
   saveRelays: (entries: RelayListEntry[]) => Promise<void>;
 }
+
+/** `found` and `absent` are safe to save over; `unreadable` is not. */
+export type RelayListRead = 'found' | 'absent' | 'unreadable';
 
 /**
  * Newest wins when relays disagree.
@@ -64,6 +74,41 @@ type SubscribeLike = (
 
 const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 
+function signatureHolds(e: NDKEvent): boolean {
+  if (!e.sig) return false;
+  try {
+    return verifyFresh({
+      id: e.id,
+      pubkey: e.pubkey,
+      created_at: e.created_at ?? 0,
+      kind: e.kind ?? 0,
+      tags: e.tags,
+      content: e.content,
+      sig: e.sig,
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The events from Space's own pool that verify, and whether any did not.
+ *
+ * The pool reaches the same public indexers (outbox model), and NDK checks
+ * only a sample of signatures once a relay is trusted, so a forged list or
+ * profile can arrive here as easily as through readOneRelay. A save re-signs
+ * what was read, so only verified events count (review of !263).
+ */
+function verifiedOnly(events: Iterable<NDKEvent>): { events: NDKEvent[]; forged: boolean } {
+  const out: NDKEvent[] = [];
+  let forged = false;
+  for (const e of events) {
+    if (signatureHolds(e)) out.push(e);
+    else forged = true;
+  }
+  return { events: out, forged };
+}
+
 /**
  * Ask one write relay for the user's kind:0, on its own subscription.
  *
@@ -71,12 +116,19 @@ const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(
  * fires without waiting for every relay (its own timers), and closeOnEose then
  * stops it, losing a slow relay's answer. A relay counts as answered only when
  * it is in eosesSeen.
+ *
+ * And only when every event it sent verifies. These relays are outside
+ * Space's pool (directory relays, the user's own write relays), and whatever
+ * is read here a save re-signs as the user: an unchecked answer would let the
+ * relay's operator choose the user's relays or profile. A forgery is no
+ * answer, not an empty one, so it can never make a list read as absent.
  */
 function readOneRelay(
   subscribe: SubscribeLike,
   service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
   url: string,
   pubkey: string,
+  kind: number = METADATA_KIND,
 ): Promise<{ url: string; answered: boolean; events: NDKEvent[] }> {
   return new Promise((resolve) => {
     const relaySet = service.getRelaySetFor([url]);
@@ -85,6 +137,7 @@ function readOneRelay(
       return;
     }
     const events: NDKEvent[] = [];
+    let forged = false;
     let done = false;
     let sub: ReturnType<SubscribeLike> | undefined;
     const finish = (answered: boolean) => {
@@ -92,15 +145,17 @@ function readOneRelay(
       done = true;
       clearTimeout(timer);
       sub?.stop();
-      resolve({ url, answered, events });
+      resolve({ url, answered: answered && !forged, events: forged ? [] : events });
     };
     const timer = setTimeout(() => finish(false), OWN_RELAY_PROFILE_TIMEOUT_MS);
     sub = subscribe(
-      [{ kinds: [METADATA_KIND], authors: [pubkey], limit: 5 }],
+      [{ kinds: [kind], authors: [pubkey], limit: 5 }],
       { closeOnEose: true, groupable: false, relaySet },
       {
         onEvent: (e) => {
-          if (e.pubkey === pubkey) events.push(e);
+          if (e.pubkey !== pubkey) return;
+          if (signatureHolds(e)) events.push(e);
+          else forged = true;
         },
         onEose: () =>
           queueMicrotask(() =>
@@ -133,16 +188,39 @@ async function readOwnRelayProfiles(
   };
 }
 
+/**
+ * Ask the public relay-list indexers for the user's kind:10002 (review of
+ * !263). Space's pool answering with nothing does not mean the user has no
+ * list: it may live only on relays Space cannot reach. `answered` is false
+ * when no indexer answered at all, which is not "absent" either.
+ */
+async function readIndexedRelayList(
+  subscribe: SubscribeLike,
+  service: { getRelaySetFor(urls: string[]): NDKRelaySet | undefined },
+  pubkey: string,
+): Promise<{ events: NDKEvent[]; answered: boolean }> {
+  const answers = await Promise.all(
+    PUBLIC_OUTBOX_INDEXERS.map((u) => readOneRelay(subscribe, service, u, pubkey, RELAY_LIST_KIND)),
+  );
+  return { events: answers.flatMap((a) => a.events), answered: answers.some((a) => a.answered) };
+}
+
 export function useProfile(): UseProfileReturn {
   const { fetchEvents, createEvent, publish, isConnected, service, subscribe } = useNdk();
   const pubkey = useAuthStore((s) => s.pubkey);
 
   const [profile, setProfile] = useState<ProfileFields>({});
   const [relays, setRelays] = useState<RelayListEntry[]>([]);
+  const [relayListRead, setRelayListRead] = useState<RelayListRead | null>(null);
   const [existing, setExisting] = useState<ExistingProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by every load. A load whose generation is no longer current
+  // writes nothing: after an account switch, the previous account's late
+  // answer must not become this account's profile or relay list, which the
+  // next save would then publish signed by this account (review of !263).
+  const generationRef = useRef(0);
 
   // Promise-chained rather than async/await: every setState call needs to run
   // from inside a .then()/.catch()/.finally() callback, not synchronously in
@@ -153,19 +231,38 @@ export function useProfile(): UseProfileReturn {
   const load = useCallback((): Promise<void> => {
     if (!fetchEvents || !pubkey) return Promise.resolve();
 
+    const generation = ++generationRef.current;
+    // Every state write below goes through this. A superseded load (another
+    // load started, most often because the account changed) writes nothing.
+    const current = () => generation === generationRef.current;
+
     // Not connected means we cannot know what exists. Recording `unreadable`
     // here is what stops a later save from publishing over a profile we never
     // managed to read.
     if (!isConnected) {
       return Promise.resolve().then(() => {
+        if (!current()) return;
         setExisting({ status: 'unreadable' });
+        setRelayListRead('unreadable');
       });
     }
 
+    // Set once the relay list itself has been read, so a later failure reading
+    // the profile from those relays does not condemn a list we did get.
+    let relayListSettled = false;
+
     return Promise.resolve()
       .then(() => {
+        if (!current()) return;
         setIsLoading(true);
         setError(null);
+        // A new read, possibly for a different account: the last answers no
+        // longer say what a save would replace.
+        setExisting(null);
+        setRelayListRead(null);
+        // And nothing shown that belongs to the last read: after a switch,
+        // the new account would briefly see the old one's relays.
+        setRelays([]);
       })
       .then(() =>
         Promise.all([
@@ -173,10 +270,43 @@ export function useProfile(): UseProfileReturn {
           fetchEvents({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 10 }),
         ])
       )
-      .then(async ([metadataEvents, relayEvents]) => {
-        const newestRelayList = newestOf(relayEvents);
+      .then(async ([metadataFetched, relayFetched]) => {
+        if (!current()) return;
+        const metadataEvents = verifiedOnly(metadataFetched);
+        const relayEvents = verifiedOnly(relayFetched);
+
+        // Space's pool having no list is not the user having none: it may
+        // live only on relays we cannot reach. Ask the public indexers before
+        // calling it absent, and if none of them answers, it is unreadable.
+        let newestRelayList = newestOf(relayEvents.events);
+        let relayListState: RelayListRead = 'found';
+        if (!newestRelayList) {
+          const indexed =
+            service && subscribe
+              ? await readIndexedRelayList(subscribe as unknown as SubscribeLike, service, pubkey)
+              : { events: [] as NDKEvent[], answered: false };
+          if (!current()) return;
+          newestRelayList = newestOf(indexed.events);
+          // A forgery in the pool is not an empty answer: something claims a
+          // list exists, and what it says cannot be trusted.
+          relayListState = newestRelayList
+            ? 'found'
+            : indexed.answered && !relayEvents.forged
+              ? 'absent'
+              : 'unreadable';
+        }
+
         const relayList = newestRelayList ? parseRelayListTags(newestRelayList.tags ?? []) : [];
         setRelays(relayList);
+        setRelayListRead(relayListState);
+        relayListSettled = true;
+        if (relayListState === 'unreadable') {
+          setError(
+            relayEvents.forged
+              ? 'Could not read your relay list: a relay sent a copy whose signature does not match. Saving it is disabled so it cannot replace your real one.'
+              : 'Could not read your relay list: no relay or relay-list indexer answered. Saving it is disabled so it cannot replace a list kept elsewhere.',
+          );
+        }
 
         // kind:0 is replaceable, so a save publishes the whole profile, built
         // on the newest one seen. With a relay list, every write relay is
@@ -191,12 +321,22 @@ export function useProfile(): UseProfileReturn {
               // as unreadable would mean a user with no kind:0 could never make
               // one, the bug cloistr-stash had to fix in this same code path.
               { events: [] as NDKEvent[], silent: [] as string[] };
+        if (!current()) return;
 
-        const newest = newestOf([...Array.from(metadataEvents), ...own.events]);
+        const newest = newestOf([...metadataEvents.events, ...own.events]);
         if (newest) {
           const content = newest.content ?? '';
           setExisting({ status: 'found', content });
           setProfile(parseProfileContent(content));
+          return;
+        }
+
+        if (metadataEvents.forged) {
+          setExisting({ status: 'unreadable' });
+          setProfile({});
+          setError(
+            'Could not read your profile: a relay sent a copy whose signature does not match. Saving is disabled so it cannot replace your real one.',
+          );
           return;
         }
 
@@ -215,11 +355,15 @@ export function useProfile(): UseProfileReturn {
         setProfile({});
       })
       .catch((err) => {
+        if (!current()) return;
         // We reached for it and failed. Explicitly NOT `absent`.
         setExisting({ status: 'unreadable' });
+        if (!relayListSettled) setRelayListRead('unreadable');
         setError(err instanceof Error ? err.message : 'Could not read your profile');
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (current()) setIsLoading(false);
+      });
   }, [fetchEvents, pubkey, isConnected, service, subscribe]);
 
   useEffect(() => {
@@ -289,6 +433,21 @@ export function useProfile(): UseProfileReturn {
         throw new Error('Not signed in');
       }
 
+      // Same guard as saveProfile, for the same reason: kind:10002 replaces
+      // the user's relay list in every Nostr app, and the page's draft starts
+      // empty. Saved before the read settled, or after it failed, the list
+      // published is only what was typed here, and every other relay is gone.
+      // `absent` needs Space's pool AND a public indexer to have answered with
+      // nothing, so a list kept only on relays Space cannot reach is found
+      // there. What remains: a list on no indexer and only on relays that are
+      // down reads as absent.
+      if (relayListRead !== 'found' && relayListRead !== 'absent') {
+        throw new Error(
+          'Could not read your current relay list, so saving was cancelled to avoid ' +
+            'replacing it. Check your relay connection and try again.'
+        );
+      }
+
       setIsSaving(true);
       setError(null);
 
@@ -322,6 +481,7 @@ export function useProfile(): UseProfileReturn {
         await publish(event);
 
         setRelays(entries);
+        setRelayListRead('found');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not save your relay list');
         throw err;
@@ -329,12 +489,13 @@ export function useProfile(): UseProfileReturn {
         setIsSaving(false);
       }
     },
-    [createEvent, publish, pubkey, service]
+    [createEvent, publish, pubkey, service, relayListRead]
   );
 
   return {
     profile,
     relays,
+    relayListRead,
     existing,
     isLoading,
     isSaving,

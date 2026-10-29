@@ -26,8 +26,18 @@ const FIELD_LABELS: { key: keyof ProfileFields; label: string; hint?: string; mu
   ];
 
 export function ProfileView() {
-  const { profile, relays, existing, isLoading, isSaving, error, reload, saveProfile, saveRelays } =
-    useProfile();
+  const {
+    profile,
+    relays,
+    relayListRead,
+    existing,
+    isLoading,
+    isSaving,
+    error,
+    reload,
+    saveProfile,
+    saveRelays,
+  } = useProfile();
 
   const [draft, setDraft] = useState<ProfileFields>({});
   const [relayDraft, setRelayDraft] = useState<RelayListEntry[]>([]);
@@ -64,6 +74,9 @@ export function ProfileView() {
   }
 
   const blocked = !existing || existing.status === 'unreadable';
+  // The relay-list twin of `blocked`: the draft starts empty, so saving before
+  // the current list is known would replace it with whatever was typed here.
+  const relaysKnown = relayListRead === 'found' || relayListRead === 'absent';
 
   const handleSaveProfile = useCallback(async () => {
     try {
@@ -215,7 +228,16 @@ export function ProfileView() {
         </p>
 
         <div className="space-y-2">
-          {relayDraft.length === 0 && (
+          {relayListRead === null && (
+            <p className="text-sm text-cloistr-light/50">Reading your relay list…</p>
+          )}
+          {relayListRead === 'unreadable' && (
+            <p className="text-sm text-cloistr-warning">
+              Could not read your current relay list, so saving is paused. Saving now would
+              replace the list every Nostr app uses with only what is shown here.
+            </p>
+          )}
+          {relaysKnown && relayDraft.length === 0 && (
             <p className="text-sm text-cloistr-light/50">No relays listed yet.</p>
           )}
 
@@ -269,7 +291,7 @@ export function ProfileView() {
 
         <button
           onClick={() => void handleSaveRelays()}
-          disabled={isSaving}
+          disabled={!relaysKnown || isSaving}
           className="mt-4 rounded bg-cloistr-primary px-4 py-2 text-sm text-cloistr-dark disabled:opacity-50"
         >
           {isSaving ? 'Saving…' : 'Save relay list'}

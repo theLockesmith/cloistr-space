@@ -36,7 +36,7 @@ import { withPublishTimeout } from '../headless';
  * being resolved from there; dropping these would trade one broken half for
  * the other.
  */
-const PUBLIC_OUTBOX_INDEXERS = ['wss://purplepag.es/', 'wss://nos.lol/'] as const;
+export const PUBLIC_OUTBOX_INDEXERS = ['wss://purplepag.es/', 'wss://nos.lol/'] as const;
 
 /**
  * Relay connection status for UI
