@@ -429,7 +429,8 @@ describe('hand-offs the signer already said are not ours', () => {
   it('switching account before the list saves writes nothing to this browser', async () => {
     const first = signerWithRealErrors();
     await load(first, getPublicKey(generateSecretKey()));
-    expect(triedFor(first, foreign)).toBe(1);
+    // Asked at least once: the switch restarts the reader, which may ask again.
+    expect(triedFor(first, foreign)).toBeGreaterThanOrEqual(1);
     expect(localStorage.getItem('cloistr:tried-wraps:' + userPk)).toBeNull();
   });
 
@@ -440,5 +441,67 @@ describe('hand-offs the signer already said are not ours', () => {
     const other = { ...signerWithRealErrors(), getPublicKey: async () => getPublicKey(otherSk) };
     await load(other);
     expect(localStorage.getItem('cloistr:tried-wraps:' + userPk)).toBeNull();
+  });
+});
+
+/**
+ * cloistr-audit on !267: a NIP-07 extension keeps the same signer object when
+ * the user switches account in it, so nothing about the signer tells the
+ * reader. Hand-off buckets are one byte, so the old account's bucket often
+ * carries the new account's hand-offs, and a wrap the old account ruled out
+ * must not stay ruled out for the new one.
+ */
+describe('a NIP-07 account switch without a reload', () => {
+  const granterSk = generateSecretKey();
+  const granterPk = getPublicKey(granterSk);
+  const aSk = generateSecretKey();
+  const aPk = getPublicKey(aSk);
+
+  /** One signer object whose key changes underneath it, as an extension's does. */
+  function extensionSigner(initial: Uint8Array) {
+    let sk = initial;
+    const ck = (pk: string) => nip44.v2.utils.getConversationKey(sk, pk);
+    return {
+      switchTo: (next: Uint8Array) => { sk = next; },
+      getPublicKey: async () => getPublicKey(sk),
+      nip44Decrypt: vi.fn(async (pk: string, ct: string) => nip44.v2.decrypt(ct, ck(pk))),
+      nip44Encrypt: async (pk: string, pt: string) => nip44.v2.encrypt(pt, ck(pk)),
+      sendRequest: async (method: string, params: string[]) => {
+        if (method !== 'cloistr_ecdh_tag') throw new Error('unexpected ' + method);
+        return computeHandoffBucket(ecdhHex(sk, params[0]), Number(params[1]));
+      },
+    };
+  }
+
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    try { localStorage.clear(); } catch { /* none */ }
+  });
+
+  it("opens the new account's hand-off that the old account had ruled out", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const w = getWindowId(now);
+    const aBucket = computeHandoffBucket(ecdhHex(aSk, granterPk), w);
+    // A second account whose hand-off bucket is A's: one byte, so one in 256.
+    let bSk = generateSecretKey();
+    while (computeHandoffBucket(ecdhHex(bSk, granterPk), w) !== aBucket) bSk = generateSecretKey();
+    const bPk = getPublicKey(bSk);
+    const forB = wrapKeyHandoff('for-b', bytesToHex(generateSecretKey()), granterSk, bPk, now) as unknown as Wrap;
+    relay.events = [forB];
+
+    const signer = extensionSigner(aSk);
+    auth.signer = signer;
+    useAuthStore.setState({ pubkey: aPk });
+    const { result } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(signer.nip44Decrypt).toHaveBeenCalled(), { timeout: 3000 });
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 3000 });
+    expect(result.current.pendingHandoffs).toHaveLength(0);
+
+    act(() => {
+      signer.switchTo(bSk);
+      useAuthStore.setState({ pubkey: bPk });
+    });
+
+    await waitFor(() => expect(result.current.pendingHandoffs.map((h) => h.wrapId)).toEqual([forB.id]), { timeout: 3000 });
   });
 });

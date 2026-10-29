@@ -145,6 +145,9 @@ export function useBucketReader(
 ): BucketReaderReturn {
   const { subscribe, isConnected } = useNdk();
   const { signer } = useAuth();
+  // A NIP-07 extension keeps one signer object across an account switch, so
+  // the signed-in pubkey is what says the reader is someone else now.
+  const signedInPubkey = useAuthStore((s) => s.pubkey);
   const keyStore = useThreadKeyStore();
 
   const [messages, setMessages] = useState<UnwrappedMessage[]>([]);
@@ -179,7 +182,7 @@ export function useBucketReader(
   const subRef = useRef<{ unsubscribe: () => void } | null>(null);
   // Who the pending offers were addressed to. A restart for the window timer
   // or a new key keeps them on screen; only a different reader drops them.
-  const pendingForRef = useRef<{ recipientSecret: Uint8Array | null; signer: unknown } | null>(null);
+  const pendingForRef = useRef<{ recipientSecret: Uint8Array | null; signer: unknown; pubkey: string | null } | null>(null);
 
   const canSubscribe = Boolean(subscribe && isConnected);
   const granterKey = granterPubkeys.slice().sort().join(',');
@@ -191,11 +194,16 @@ export function useBucketReader(
     messagesRef.current.clear();
     handoffsRef.current.clear();
     const prevReader = pendingForRef.current;
-    if (!prevReader || prevReader.recipientSecret !== recipientSecret || prevReader.signer !== signer) {
+    if (
+      !prevReader ||
+      prevReader.recipientSecret !== recipientSecret ||
+      prevReader.signer !== signer ||
+      prevReader.pubkey !== signedInPubkey
+    ) {
       pendingRef.current.clear();
       setPendingHandoffs([]);
     }
-    pendingForRef.current = { recipientSecret, signer };
+    pendingForRef.current = { recipientSecret, signer, pubkey: signedInPubkey };
     // An offer made before the saved key finished restoring (a reload restores
     // keys through a signer round trip) is for a key now held: withdraw it.
     let withdrew = false;
@@ -221,8 +229,9 @@ export function useBucketReader(
     // wraps in these buckets, never for every message-bucket wrap.
     const handoffBuckets = new Set<string>();
     // Opened on the first hand-off a signer user has to ask about: one signer
-    // decrypt per load, instead of one per wrap already ruled out.
-    let triedList: Promise<TriedWraps> | null = null;
+    // decrypt per load, instead of one per wrap already ruled out. Per owner:
+    // what one account ruled out says nothing about another's hand-offs.
+    const triedLists = new Map<string, Promise<TriedWraps>>();
     if (recipientSecret) {
       for (const w of [currWindow, prevWindow]) {
         for (const g of granterPubkeys) handoffBuckets.add(computeHandoffBucket(ecdhHex(recipientSecret, g), w));
@@ -325,12 +334,16 @@ export function useBucketReader(
                     const ownerPk = await signer.getPublicKey();
                     // The bucket is shared, so most wraps here are other
                     // people's; one the signer already ruled out costs nothing.
-                    triedList ??= openTriedWraps(
-                      ownerPk,
-                      { encrypt, decrypt },
-                      nowSeconds,
-                      () => useAuthStore.getState().pubkey === ownerPk,
-                    );
+                    let triedList = triedLists.get(ownerPk);
+                    if (!triedList) {
+                      triedList = openTriedWraps(
+                        ownerPk,
+                        { encrypt, decrypt },
+                        nowSeconds,
+                        () => useAuthStore.getState().pubkey === ownerPk,
+                      );
+                      triedLists.set(ownerPk, triedList);
+                    }
                     const tried = await triedList;
                     if (tried.has(event.id)) return;
                     let plaintext: string;
@@ -437,7 +450,7 @@ export function useBucketReader(
 
     doSubscribe(localReal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSubscribe, subscribe, recipientSecret, signer, granterKey, keyStore]);
+  }, [canSubscribe, subscribe, recipientSecret, signer, signedInPubkey, granterKey, keyStore]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => startSubscription(), 0);
