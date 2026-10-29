@@ -15,8 +15,10 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools';
 
-const ME = 'a'.repeat(64);
+const meSk = generateSecretKey();
+const ME = getPublicKey(meSk);
 const W = 'wss://mine.example/';
 
 const W2 = 'wss://second.example/';
@@ -42,13 +44,8 @@ const relayListEvent = () => ({
   content: '',
   tags: [['r', W, 'write'], ...Object.keys(env.extra).map((u) => ['r', u, 'write'])],
 });
-const profileAt = (created_at: number, fields: Record<string, string>) => ({
-  kind: 0,
-  pubkey: ME,
-  created_at,
-  content: JSON.stringify(fields),
-  tags: [],
-});
+const profileAt = (created_at: number, fields: Record<string, string>) =>
+  finalizeEvent({ kind: 0, created_at, content: JSON.stringify(fields), tags: [] }, meSk);
 const ownProfile = profileAt(20, { name: 'me', website: 'https://me.example' });
 
 vi.mock('@/services/nostr', () => {
@@ -197,6 +194,21 @@ describe('several write relays (review of !228, and the ruling on found)', () =>
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A save re-signs the fields it read, so a forged profile from a write
+  // relay would be published as the user's own. A forgery is no answer.
+  it('a write relay serving a forged profile counts as not answering, and the save is refused', async () => {
+    env.mode = 'empty';
+    env.extra = { [W2]: { behaviour: 'holds', profile: { ...profileAt(50, { name: 'me' }), content: JSON.stringify({ name: 'forged', lud16: 'thief@example.com' }) } } };
+    const { result } = await loaded();
+    expect(result.current.existing?.status).toBe('unreadable');
+    expect(result.current.profile.name).toBeUndefined();
+
+    await act(async () => {
+      await result.current.saveProfile({ about: 'hello' }).catch(() => undefined);
+    });
+    expect(env.published).toEqual([]);
   });
 
   it('a slower relay holding a newer profile wins over the first to answer', async () => {

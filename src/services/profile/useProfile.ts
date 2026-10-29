@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NDKEvent, NDKFilter, NDKRelaySet } from '@nostr-dev-kit/ndk';
 import { useNdk } from '@/services/nostr';
 import { PUBLIC_OUTBOX_INDEXERS } from '@/services/nostr/ndk';
+import { verifyFresh } from '@/services/nostr/verifyFresh';
 import { useAuthStore } from '@/stores/authStore';
 import {
   METADATA_KIND,
@@ -73,6 +74,23 @@ type SubscribeLike = (
 
 const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(/\/+$/, '');
 
+function signatureHolds(e: NDKEvent): boolean {
+  if (!e.sig) return false;
+  try {
+    return verifyFresh({
+      id: e.id,
+      pubkey: e.pubkey,
+      created_at: e.created_at ?? 0,
+      kind: e.kind ?? 0,
+      tags: e.tags,
+      content: e.content,
+      sig: e.sig,
+    });
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ask one write relay for the user's kind:0, on its own subscription.
  *
@@ -80,6 +98,12 @@ const sameRelay = (a: string, b: string) => a.replace(/\/+$/, '') === b.replace(
  * fires without waiting for every relay (its own timers), and closeOnEose then
  * stops it, losing a slow relay's answer. A relay counts as answered only when
  * it is in eosesSeen.
+ *
+ * And only when every event it sent verifies. These relays are outside
+ * Space's pool (directory relays, the user's own write relays), and whatever
+ * is read here a save re-signs as the user: an unchecked answer would let the
+ * relay's operator choose the user's relays or profile. A forgery is no
+ * answer, not an empty one, so it can never make a list read as absent.
  */
 function readOneRelay(
   subscribe: SubscribeLike,
@@ -95,6 +119,7 @@ function readOneRelay(
       return;
     }
     const events: NDKEvent[] = [];
+    let forged = false;
     let done = false;
     let sub: ReturnType<SubscribeLike> | undefined;
     const finish = (answered: boolean) => {
@@ -102,7 +127,7 @@ function readOneRelay(
       done = true;
       clearTimeout(timer);
       sub?.stop();
-      resolve({ url, answered, events });
+      resolve({ url, answered: answered && !forged, events: forged ? [] : events });
     };
     const timer = setTimeout(() => finish(false), OWN_RELAY_PROFILE_TIMEOUT_MS);
     sub = subscribe(
@@ -110,7 +135,9 @@ function readOneRelay(
       { closeOnEose: true, groupable: false, relaySet },
       {
         onEvent: (e) => {
-          if (e.pubkey === pubkey) events.push(e);
+          if (e.pubkey !== pubkey) return;
+          if (signatureHolds(e)) events.push(e);
+          else forged = true;
         },
         onEose: () =>
           queueMicrotask(() =>
@@ -215,6 +242,9 @@ export function useProfile(): UseProfileReturn {
         // longer say what a save would replace.
         setExisting(null);
         setRelayListRead(null);
+        // And nothing shown that belongs to the last read: after a switch,
+        // the new account would briefly see the old one's relays.
+        setRelays([]);
       })
       .then(() =>
         Promise.all([

@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools';
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -85,7 +86,8 @@ vi.mock('@/services/nostr', () => ({
   }),
 }));
 
-const ME = 'a'.repeat(64);
+const meSk = generateSecretKey();
+const ME = getPublicKey(meSk);
 const authState = { pubkey: ME, isAuthenticated: true };
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: (selector?: (s: typeof authState) => unknown) =>
@@ -272,7 +274,7 @@ describe('useProfile.saveRelays refuses to publish over a list it never read', (
 // ---------------------------------------------------------------------------
 
 describe('useProfile relay list when Space\'s own relays have none', () => {
-  const kept = { created_at: 5, pubkey: ME, tags: [['r', 'wss://elsewhere.example.com']] };
+  const kept = finalizeEvent({ kind: 10002, created_at: 5, content: '', tags: [['r', 'wss://elsewhere.example.com']] }, meSk);
 
   it('uses the list an indexer holds, so a save keeps it', async () => {
     indexer = 'holds';
@@ -291,6 +293,31 @@ describe('useProfile relay list when Space\'s own relays have none', () => {
       await result.current.saveRelays(ADDED);
     });
     expect(mockPublish).toHaveBeenCalledTimes(1);
+  });
+
+  // A directory relay's answer is re-signed as the user by the next save, so
+  // an unchecked one would let its operator choose which relays the user
+  // endorses. A forgery is no answer at all: not found, and not absent either.
+  it('a forged list from an indexer is no answer: nothing shown, and the save is refused', async () => {
+    indexer = 'holds';
+    indexerList = { ...kept, tags: [['r', 'wss://attacker.example.com']] };
+    const { result } = await renderSettled();
+
+    expect(result.current.relays).toEqual([]);
+    expect(result.current.relayListRead).toBe('unreadable');
+    await act(async () => {
+      await expect(result.current.saveRelays(ADDED)).rejects.toThrow(/relay list/i);
+    });
+    expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  it('a list signed by some other key under the user\'s name is no answer either', async () => {
+    indexer = 'holds';
+    indexerList = { ...finalizeEvent({ kind: 10002, created_at: 5, content: '', tags: [['r', 'wss://attacker.example.com']] }, generateSecretKey()), pubkey: ME };
+    const { result } = await renderSettled();
+
+    expect(result.current.relays).toEqual([]);
+    expect(result.current.relayListRead).toBe('unreadable');
   });
 
   it('is unreadable when no indexer answers, and the save is refused', async () => {
@@ -398,6 +425,24 @@ describe('useProfile after an account switch', () => {
     expect(hook.result.current.relays.map((r) => r.url)).toEqual(['wss://b.example.com']);
     expect(hook.result.current.profile.name).toBe('user-b');
     expect(hook.result.current.existing?.status).toBe('found');
+  });
+
+  it("B's relays are not shown while A's read is in flight", async () => {
+    mockFetchEvents = vi.fn(async (...args: unknown[]) => {
+      const filter = args[0] as { kinds: number[]; authors: string[] };
+      const who = filter.authors[0];
+      if (who === ME) return new Promise<Set<unknown>>(() => {});
+      return new Set([filter.kinds.includes(10002) ? listOf(who) : profileOf(who)]);
+    });
+    authState.pubkey = B;
+    const hook = await renderSettled();
+    expect(hook.result.current.relays.map((r) => r.url)).toEqual(['wss://b.example.com']);
+
+    authState.pubkey = ME;
+    hook.rerender();
+    await flush();
+
+    expect(hook.result.current.relays).toEqual([]);
   });
 
   it('a found answer for A does not carry over as found for B', async () => {
