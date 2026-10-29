@@ -39,6 +39,7 @@ import {
 } from './standaloneThreads';
 import { useBucketReader, type BucketReaderReturn } from './useBucketReader';
 import { admitPublicEvent, foldPublicThreads, type PublicThreadItem } from './publicThreadList';
+import { verifyFresh } from '../nostr/verifyFresh';
 
 export interface UseAllThreadsReturn {
   /** Public threads, status applied, newest activity first. */
@@ -71,6 +72,24 @@ function toPublicEvent(event: NDKEvent): PublicEvent {
     created_at: event.created_at,
     tags: event.tags,
   };
+}
+
+/**
+ * Whether the signature really is by the pubkey the event names. NDK checks
+ * only a sample of signatures from relays it trusts, so without this a relay
+ * can list a thread, reply or archive label under anyone's name.
+ */
+function signatureHolds(event: NDKEvent): boolean {
+  if (!event.sig) return false;
+  return verifyFresh({
+    id: event.id,
+    pubkey: event.pubkey,
+    created_at: event.created_at ?? 0,
+    kind: event.kind ?? 0,
+    tags: event.tags,
+    content: event.content,
+    sig: event.sig,
+  });
 }
 
 const sortedKey = (values: Iterable<string>) => [...new Set(values)].sort().join(',');
@@ -163,6 +182,9 @@ export function useAllThreads(): UseAllThreadsReturn {
           });
           return;
         }
+        // Sealed messages name their author inside the encryption; a public
+        // post's author is only as good as its signature.
+        if (!signatureHolds(event)) return;
         const comment = admitPublicEvent(raw, { memberGroups: membershipRef.current, me });
         if (!comment) return;
         setPublicState((prev) => {
@@ -212,6 +234,7 @@ export function useAllThreads(): UseAllThreadsReturn {
 
     const sub = subscribeStream(subscribe, filters, {
       onEvent: (event: NDKEvent) => {
+        if (!signatureHolds(event)) return;
         const raw = toPublicEvent(event);
         if (raw.kind === STATUS_LABEL_KIND) {
           setPublicState((prev) =>
