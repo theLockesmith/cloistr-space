@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools';
 import { hexToBytes } from 'nostr-tools/utils';
 import { ThreadKeyStore, encryptThreadContent } from './threadKeyStore';
 import { tryUnwrapMessage, tryUnwrapHandoff, type UnwrappedMessage, type UnwrappedHandoff } from './giftWrap';
@@ -20,7 +20,8 @@ const unheldSk = generateSecretKey();
 const unheldPk = getPublicKey(unheldSk);
 const fleetSk = generateSecretKey();
 const FLEET = getPublicKey(fleetSk);
-const ME = getPublicKey(generateSecretKey());
+const meSk = generateSecretKey();
+const ME = getPublicKey(meSk);
 const OTHER_ME = getPublicKey(generateSecretKey());
 let currentMe = ME;
 
@@ -123,7 +124,7 @@ describe('useAllThreads standalone threads', () => {
     subs.length = 0;
     const { result } = renderHook(() => useAllThreads());
     relay(fleetMessage('deploy is broken', threadSk, threadPk, 'a'));
-    relay({ id: 'b'.padEnd(64, '0'), kind: 1111, pubkey: ME, created_at: 1_790_000_200, content: 'my own thread', tags: [['subject', 'Mine']] });
+    relay(finalizeEvent({ kind: 1111, created_at: 1_790_000_200, content: 'my own thread', tags: [['subject', 'Mine']] }, meSk));
 
     await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
     await waitFor(() => expect(result.current.publicThreads).toHaveLength(1));
@@ -147,7 +148,7 @@ describe('useAllThreads standalone threads', () => {
     subs.length = 0;
     currentMe = ME;
     const { result, rerender } = renderHook(() => useAllThreads());
-    relay({ id: 'e'.padEnd(64, '0'), kind: 11, pubkey: ME, created_at: 1_790_000_300, content: 'A’s own thread', tags: [['title', 'A']] });
+    relay(finalizeEvent({ kind: 11, created_at: 1_790_000_300, content: 'A’s own thread', tags: [['title', 'A']] }, meSk));
     relay(fleetMessage('for A', threadSk, threadPk, 'f'));
     await waitFor(() => expect(result.current.publicThreads).toHaveLength(1));
     await waitFor(() => expect(result.current.privateThreads).toHaveLength(1));
