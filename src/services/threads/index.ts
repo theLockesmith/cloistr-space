@@ -14,7 +14,6 @@ export {
   type ReplyTarget,
 } from './threadEvents';
 
-export { useThreads } from './useThreads';
 
 export { useAllThreads, type UseAllThreadsReturn } from './useAllThreads';
 export { admitPublicEvent, foldPublicThreads, matchesSearch, type PublicThreadItem } from './publicThreadList';

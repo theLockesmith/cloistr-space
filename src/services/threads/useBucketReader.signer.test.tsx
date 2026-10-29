@@ -43,6 +43,7 @@ vi.mock('@/components/auth/AuthProvider', () => ({ useAuth: () => ({ signer: aut
 vi.mock('./useThreadKeyStore', () => ({ useThreadKeyStore: () => store.current }));
 
 import { useBucketReader } from './useBucketReader';
+import { useAuthStore } from '@/stores/authStore';
 
 /** A NIP-46-style signer: it holds the user's key; callers never see it. */
 function remoteSigner(userSk: Uint8Array) {
@@ -362,10 +363,14 @@ describe('hand-offs the signer already said are not ours', () => {
   const triedFor = (signer: { nip44Decrypt: { mock: { calls: unknown[][] } } }, w: Wrap) =>
     signer.nip44Decrypt.mock.calls.filter((c) => c[1] === w.content).length;
 
-  async function load(signer: unknown) {
+  /** `switchTo`: another account signs in once the read settles, before the list's save. */
+  async function load(signer: unknown, switchTo?: string) {
     auth.signer = signer;
+    // The tried list saves only while its user is the one signed in.
+    useAuthStore.setState({ pubkey: await (signer as { getPublicKey(): Promise<string> }).getPublicKey() });
     const { result, unmount } = renderHook(() => useBucketReader(null, [granterPk]));
     await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 3000 });
+    if (switchTo) useAuthStore.setState({ pubkey: switchTo });
     // Past the tried list's write delay, so the next load reads what this one learned.
     await new Promise((r) => setTimeout(r, 400));
     unmount();
@@ -417,6 +422,15 @@ describe('hand-offs the signer already said are not ours', () => {
     relay.events = [real];
     const second = await load(signerWithRealErrors());
     expect(second.current.pendingHandoffs).toHaveLength(1);
+  });
+
+  // cloistr-audit on !266: switching account clears nothing, so a save the
+  // previous account started must notice the switch itself.
+  it('switching account before the list saves writes nothing to this browser', async () => {
+    const first = signerWithRealErrors();
+    await load(first, getPublicKey(generateSecretKey()));
+    expect(triedFor(first, foreign)).toBe(1);
+    expect(localStorage.getItem('cloistr:tried-wraps:' + userPk)).toBeNull();
   });
 
   it('another user signing in on this browser asks about the wrap themselves', async () => {
