@@ -7,11 +7,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
+import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 import { bytesToHex } from 'nostr-tools/utils';
 import { ThreadKeyStore } from './threadKeyStore';
 import { computeHandoffBucket, computeThreadBucket, ecdhHex, getWindowId } from './bucketCrypto';
-import { wrapKeyHandoff, wrapThreadMessage } from './giftWrap';
+import { wrapKeyHandoff, wrapKeyHandoffWithKey, wrapThreadMessage } from './giftWrap';
 import { wrapSignerWithReauth } from '@cloistr/ui';
 import type { SignerInterface } from '@/services/headless';
 
@@ -309,5 +309,122 @@ describe('which keys a wrap is tried against', () => {
     const { result } = renderHook(() => useBucketReader(null, []));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.messages.map((m) => m.plaintext)).toEqual(['filed under B']);
+  });
+});
+
+/**
+ * Hand-off buckets are one byte, so the user's bucket also carries other
+ * people's hand-offs, and a signer user can only learn that one is not theirs
+ * by a signer round trip. Live 2026-10-28: 18 of the Threads page's 20 signer
+ * requests were these, asked again on every load.
+ */
+describe('hand-offs the signer already said are not ours', () => {
+  const userSk = generateSecretKey();
+  const userPk = getPublicKey(userSk);
+  const granterSk = generateSecretKey();
+  const granterPk = getPublicKey(granterSk);
+  const threadSk = generateSecretKey();
+
+  /** Another member's hand-off, filed in OUR hand-off bucket as a collision would be. */
+  function foreignWrapInOurBucket(now: number): Wrap {
+    const { event, oneTimeSk } = wrapKeyHandoffWithKey('someone-elses', bytesToHex(generateSecretKey()), granterSk, getPublicKey(generateSecretKey()), now);
+    const ours = computeHandoffBucket(ecdhHex(userSk, granterPk), getWindowId(now));
+    // Re-signed with the new tag, as the wrap's sender would have published it.
+    const tags = event.tags.map((t) => (t[0] === 't' ? ['t', ours] : t));
+    return finalizeEvent({ kind: event.kind, content: event.content, tags, created_at: event.created_at }, oneTimeSk) as unknown as Wrap;
+  }
+
+  /** The real signer's wording: cloistr-signer wraps go-nostr's error, @cloistr/auth wraps that. */
+  function signerWithRealErrors(fail?: () => Error) {
+    const base = remoteSigner(userSk);
+    return {
+      ...base,
+      nip44Decrypt: vi.fn(async (pk: string, ct: string) => {
+        if (fail) throw fail();
+        try {
+          return await base.nip44Decrypt(pk, ct);
+        } catch {
+          throw new Error('Failed to nip44-decrypt message: decryption failed: invalid hmac');
+        }
+      }),
+    };
+  }
+
+  let foreign: Wrap;
+  beforeEach(() => {
+    store.current = new ThreadKeyStore();
+    try { localStorage.clear(); } catch { /* none */ }
+    const now = Math.floor(Date.now() / 1000);
+    foreign = foreignWrapInOurBucket(now);
+    relay.events = [foreign];
+  });
+
+  const triedFor = (signer: { nip44Decrypt: { mock: { calls: unknown[][] } } }, w: Wrap) =>
+    signer.nip44Decrypt.mock.calls.filter((c) => c[1] === w.content).length;
+
+  async function load(signer: unknown) {
+    auth.signer = signer;
+    const { result, unmount } = renderHook(() => useBucketReader(null, [granterPk]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 3000 });
+    // Past the tried list's write delay, so the next load reads what this one learned.
+    await new Promise((r) => setTimeout(r, 400));
+    unmount();
+    return result;
+  }
+
+  it('a second load does not ask the signer about a wrap it already said is not ours', async () => {
+    const first = signerWithRealErrors();
+    await load(first);
+    expect(triedFor(first, foreign)).toBe(1);
+
+    const second = signerWithRealErrors();
+    await load(second);
+    expect(triedFor(second, foreign)).toBe(0);
+  });
+
+  it('a signer timeout is not remembered: the next load asks again', async () => {
+    const timedOut = signerWithRealErrors(() => new Error('Failed to nip44-decrypt message: Request timed out after 30000ms'));
+    await load(timedOut);
+    expect(triedFor(timedOut, foreign)).toBe(1);
+
+    const next = signerWithRealErrors();
+    await load(next);
+    expect(triedFor(next, foreign)).toBe(1);
+  });
+
+  it('our own hand-off is never remembered as tried: it is offered again on the next load', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    relay.events = [foreign, wrapKeyHandoff('ours', bytesToHex(threadSk), granterSk, userPk, now) as unknown as Wrap];
+    const first = await load(signerWithRealErrors());
+    expect(first.current.pendingHandoffs).toHaveLength(1);
+    const second = await load(signerWithRealErrors());
+    expect(second.current.pendingHandoffs).toHaveLength(1);
+  });
+
+  it('a damaged copy of our own hand-off, under its id, does not hide the real one', async () => {
+    // cloistr-audit on !262: a relay can send our hand-off with its content
+    // altered and the id and signature kept. It fails the MAC like a stranger's
+    // wrap, and if remembered the real one is skipped until it expires.
+    const now = Math.floor(Date.now() / 1000);
+    const real = wrapKeyHandoff('ours', bytesToHex(threadSk), granterSk, userPk, now) as unknown as Wrap;
+    const c = real.content;
+    const damaged = { ...real, content: c.slice(0, 10) + (c[10] === 'A' ? 'B' : 'A') + c.slice(11) };
+
+    relay.events = [damaged];
+    const first = await load(signerWithRealErrors());
+    expect(first.current.pendingHandoffs).toHaveLength(0);
+
+    relay.events = [real];
+    const second = await load(signerWithRealErrors());
+    expect(second.current.pendingHandoffs).toHaveLength(1);
+  });
+
+  it('another user signing in on this browser asks about the wrap themselves', async () => {
+    await load(signerWithRealErrors());
+    expect(localStorage.getItem('cloistr:tried-wraps:' + userPk)).not.toBeNull();
+    const otherSk = generateSecretKey();
+    const other = { ...signerWithRealErrors(), getPublicKey: async () => getPublicKey(otherSk) };
+    await load(other);
+    expect(localStorage.getItem('cloistr:tried-wraps:' + userPk)).toBeNull();
   });
 });
