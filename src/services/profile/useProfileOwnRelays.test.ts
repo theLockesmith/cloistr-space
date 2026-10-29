@@ -64,7 +64,7 @@ vi.mock('@/services/nostr', () => {
       ),
     // One relay per subscription, as the hook asks each write relay separately.
     subscribe: (
-      _filters: unknown,
+      filters: { kinds: number[] }[],
       opts: { relaySet?: { urls: string[] } },
       handlers: { onEvent?: (e: unknown) => void; onEose?: () => void }
     ) => {
@@ -72,7 +72,13 @@ vi.mock('@/services/nostr', () => {
       env.asked.push(urls);
       const sub = { eosesSeen: new Set<unknown>(), stop: vi.fn() };
       const url = urls[0];
-      const cfg = url === W ? { behaviour: env.mode as Behaviour, profile: ownProfile, delayMs: 0 } : env.extra[url];
+      const cfg =
+        url === W
+          ? { behaviour: env.mode as Behaviour, profile: ownProfile, delayMs: 0 }
+          : env.extra[url] ??
+            // The public relay-list indexers, asked when the pool has no
+            // kind:10002: they answer with nothing.
+            (filters[0]?.kinds.includes(10002) ? { behaviour: 'empty' as Behaviour } : undefined);
       if (cfg && cfg.behaviour === 'eoseWithoutRelay') {
         // NDK's own timer ends the subscription; the relay itself never sent EOSE.
         setTimeout(() => handlers.onEose?.(), cfg.delayMs ?? 0);
@@ -99,6 +105,7 @@ vi.mock('@/stores/authStore', () => ({
 }));
 
 const { useProfile, OWN_RELAY_PROFILE_TIMEOUT_MS } = await import('./useProfile');
+const { PUBLIC_OUTBOX_INDEXERS } = await import('@/services/nostr/ndk');
 
 beforeEach(() => {
   env.mode = 'holds';
@@ -143,7 +150,8 @@ describe('a profile only on the user\'s own relays', () => {
     env.relayList = false;
     const { result } = await loaded();
     expect(result.current.existing?.status).toBe('absent');
-    expect(env.asked).toEqual([]);
+    // Only the relay-list indexers were asked; there are no write relays to ask.
+    expect(env.asked).toEqual(PUBLIC_OUTBOX_INDEXERS.map((u) => [u]));
   });
   it('is unreadable when none of the user\'s write relays answer, and the save is refused', async () => {
     vi.useFakeTimers();
