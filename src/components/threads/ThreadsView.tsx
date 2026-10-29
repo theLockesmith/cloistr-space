@@ -21,7 +21,7 @@ import {
   type PublicThreadItem,
   type StandaloneThread,
 } from '@/services/threads';
-import { KeyOffers } from './sealedParts';
+import { KeyOffers, shortNpub } from './sealedParts';
 import { PublicThreadDetail, PrivateThreadDetail, SentAt } from './ThreadDetail';
 
 const NO_PROJECT = '__none__';
@@ -285,6 +285,10 @@ function ThreadRow({ row, projectLabel, onOpen }: { row: Row; projectLabel: stri
         <div className="mt-1 text-xs text-cloistr-light/50">
           {row.kind === 'public' ? (
             <>
+              {/* The root's signer. Private rows name nobody: a v1 sealed
+                  sender is a claim, and the list is no place to present one
+                  as the thread's author (threads.md 6). */}
+              <span className="font-mono">{shortNpub(row.item.thread.root.pubkey)}</span> ·{' '}
               {row.item.thread.replyCount} {row.item.thread.replyCount === 1 ? 'reply' : 'replies'} ·{' '}
               <SentAt at={row.lastActivity} approx={false} />
             </>

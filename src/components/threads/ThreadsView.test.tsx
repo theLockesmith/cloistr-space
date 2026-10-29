@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import type { PublicThreadItem, StandaloneThread } from '@/services/threads';
+import { shortNpub } from './sealedParts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -188,6 +189,19 @@ describe('ThreadsView list', () => {
     expect(screen.getAllByLabelText('Private thread')).toHaveLength(1);
     expect(rows[1]).toContain('🔒');
     expect(rows[0]).not.toContain('🔒');
+  });
+
+  it('names who started a public thread, and claims no author for a private one', () => {
+    publicFixtures = [pub({ id: 'p1', title: 'Seeds', at: 300, author: ME })];
+    privateFixtures = [priv({ title: 'Fleet', at: 200 })];
+    render(<ThreadsView />);
+
+    const rows = rowTitles();
+    // The signer of the kind 11 root, in the short npub form ThreadDetail uses.
+    expect(rows[0]).toContain(shortNpub(ME));
+    // v1 sealed messages carry no seal, so any sender is a claim (threads.md 6):
+    // the row must not present one as the thread's author.
+    expect(rows[1]).not.toContain('npub1');
   });
 
   it('keeps archived threads out of the active list, under Archived, and in search', () => {
