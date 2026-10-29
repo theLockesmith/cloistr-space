@@ -16,12 +16,14 @@ import { bytesToHex } from 'nostr-tools/utils';
 import { nip44 } from 'nostr-tools';
 import { useNdk, subscribeStream, type NDKEvent } from '@/services/nostr';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useAuthStore } from '@/stores/authStore';
 import { type ThreadKeyStore } from './threadKeyStore';
 import { useThreadKeyStore } from './useThreadKeyStore';
 import { saveThreadKey, type StorageAdapter } from './threadKeyPersistence';
 import { signerHandoffBuckets } from './signerEcdh';
 import {
   openTriedWraps,
+  nowSeconds,
   isNotAddressedToUs,
   wrapVerifies,
   wrapExpiry,
@@ -323,7 +325,12 @@ export function useBucketReader(
                     const ownerPk = await signer.getPublicKey();
                     // The bucket is shared, so most wraps here are other
                     // people's; one the signer already ruled out costs nothing.
-                    triedList ??= openTriedWraps(ownerPk, { encrypt, decrypt });
+                    triedList ??= openTriedWraps(
+                      ownerPk,
+                      { encrypt, decrypt },
+                      nowSeconds,
+                      () => useAuthStore.getState().pubkey === ownerPk,
+                    );
                     const tried = await triedList;
                     if (tried.has(event.id)) return;
                     let plaintext: string;

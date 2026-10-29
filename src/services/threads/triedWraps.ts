@@ -22,7 +22,8 @@
  * wrap without it.
  *
  * Kept per user pubkey, pruned when the wraps expire off the relays, and
- * cleared on sign-out, including a save still pending when it happens.
+ * cleared on sign-out. A save still pending at sign-out or an account switch
+ * is dropped.
  */
 import type { Event } from 'nostr-tools';
 import { verifyFresh } from '@/services/nostr/verifyFresh';
@@ -79,7 +80,7 @@ export interface TriedWraps {
   flush(): Promise<void>;
 }
 
-const nowSeconds = () => Math.floor(Date.now() / 1000);
+export const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /**
  * Bumped by sign-out. A list opened before the bump never writes again: its
@@ -92,7 +93,17 @@ let signOuts = 0;
  * Read the user's list (one signer decrypt when one is stored). A list that
  * cannot be read starts empty: the wraps are simply asked about again.
  */
-export async function openTriedWraps(userPk: string, crypt: SelfCrypt, now = nowSeconds): Promise<TriedWraps> {
+export async function openTriedWraps(
+  userPk: string,
+  crypt: SelfCrypt,
+  now: () => number,
+  /**
+   * Whether `userPk` is still the one signed in. Checked before writing: an
+   * account switch clears nothing, so a save started for the previous account
+   * would otherwise land after the switch.
+   */
+  isCurrentUser: () => boolean,
+): Promise<TriedWraps> {
   const openedAt = signOuts;
   const tried = new Map<string, number>();
   try {
@@ -112,14 +123,14 @@ export async function openTriedWraps(userPk: string, crypt: SelfCrypt, now = now
 
   const persist = () => {
     timer = null;
-    if (signOuts !== openedAt) return;
+    if (signOuts !== openedAt || !isCurrentUser()) return;
     const t = now();
     for (const [id, exp] of tried) if (exp <= t) tried.delete(id);
     const snapshot = JSON.stringify(Object.fromEntries(tried));
     writing = writing.then(async () => {
       try {
         const blob = await crypt.encrypt(userPk, snapshot);
-        if (signOuts === openedAt) localStorage.setItem(PREFIX + userPk, blob);
+        if (signOuts === openedAt && isCurrentUser()) localStorage.setItem(PREFIX + userPk, blob);
       } catch {
         // Signer or storage unavailable: asked again next load.
       }

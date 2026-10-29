@@ -55,33 +55,33 @@ describe('wrapVerifies', () => {
 describe('the tried list', () => {
   it('remembers a wrap for its user until it expires, across a reload', async () => {
     let t = 1000;
-    const first = await openTriedWraps(alice, selfCrypt(aliceSk), () => t);
+    const first = await openTriedWraps(alice, selfCrypt(aliceSk), () => t, () => true);
     first.record('w1', 2000);
     await first.flush();
-    const second = await openTriedWraps(alice, selfCrypt(aliceSk), () => t);
+    const second = await openTriedWraps(alice, selfCrypt(aliceSk), () => t, () => true);
     expect(second.has('w1')).toBe(true);
     t = 2000;
     expect(second.has('w1')).toBe(false);
   });
 
   it('does not store wrap ids readably', async () => {
-    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
     list.record('wrap-id-that-must-not-show', 2000);
     await list.flush();
     expect(localStorage.getItem('cloistr:tried-wraps:' + alice)).not.toContain('wrap-id-that-must-not-show');
   });
 
   it('is kept per user', async () => {
-    const a = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+    const a = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
     a.record('w1', 2000);
     await a.flush();
-    const b = await openTriedWraps(bob, selfCrypt(generateSecretKey()), () => 1000);
+    const b = await openTriedWraps(bob, selfCrypt(generateSecretKey()), () => 1000, () => true);
     expect(b.has('w1')).toBe(false);
   });
 
   it('drops expired wraps when it next writes', async () => {
     let t = 1000;
-    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => t);
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => t, () => true);
     list.record('old', 1100);
     t = 2000;
     list.record('new', 3000);
@@ -92,7 +92,7 @@ describe('the tried list', () => {
 
   it('starts empty when the stored list cannot be read', async () => {
     localStorage.setItem('cloistr:tried-wraps:' + alice, 'garbage');
-    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
     expect(list.has('w1')).toBe(false);
   });
 
@@ -113,7 +113,7 @@ describe('the tried list after sign-out', () => {
   it('a record made just before sign-out is not written back once its save delay passes', async () => {
     vi.useFakeTimers();
     try {
-      const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+      const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
       list.record('w1', 5000);
       clearTriedWraps();
       await vi.runAllTimersAsync();
@@ -128,7 +128,7 @@ describe('the tried list after sign-out', () => {
     const gate = new Promise<void>((r) => (release = r));
     const real = selfCrypt(aliceSk);
     const slow: SelfCrypt = { ...real, encrypt: async (pk, pt) => (await gate, real.encrypt(pk, pt)) };
-    const list = await openTriedWraps(alice, slow, () => 1000);
+    const list = await openTriedWraps(alice, slow, () => 1000, () => true);
     list.record('w1', 5000);
     const saving = list.flush();
     clearTriedWraps();
@@ -139,10 +139,51 @@ describe('the tried list after sign-out', () => {
 
   it('a list opened after sign-out still saves', async () => {
     clearTriedWraps();
-    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000);
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
     list.record('w1', 5000);
     await list.flush();
     expect(stored()).not.toBeNull();
+  });
+});
+
+describe('the tried list after an account switch', () => {
+  // Switching account is not signing out: nothing clears storage, so only the
+  // list itself can notice that its user is no longer the one signed in.
+  it('a save waiting on the signer when the account changes lands nothing', async () => {
+    let signedIn = alice;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const real = selfCrypt(aliceSk);
+    const slow: SelfCrypt = { ...real, encrypt: async (pk, pt) => (await gate, real.encrypt(pk, pt)) };
+    const list = await openTriedWraps(alice, slow, () => 1000, () => signedIn === alice);
+    list.record('w1', 5000);
+    const saving = list.flush();
+
+    signedIn = bob;
+    release();
+    await saving;
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('a delayed save after the account changed lands nothing', async () => {
+    vi.useFakeTimers();
+    try {
+      let signedIn = alice;
+      const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => signedIn === alice);
+      list.record('w1', 5000);
+      signedIn = bob;
+      await vi.runAllTimersAsync();
+      expect(localStorage.length).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still saves while its user is the one signed in', async () => {
+    const list = await openTriedWraps(alice, selfCrypt(aliceSk), () => 1000, () => true);
+    list.record('w1', 5000);
+    await list.flush();
+    expect(localStorage.getItem('cloistr:tried-wraps:' + alice)).not.toBeNull();
   });
 });
 
