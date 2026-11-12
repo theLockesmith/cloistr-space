@@ -50,6 +50,12 @@ vi.mock('@/stores/authStore', () => ({
   })),
 }));
 
+// The share panel reaches the signer and the thread key store; its own
+// behaviour is in SharePrivateThread.test.tsx. Here only WHO sees it matters.
+vi.mock('./SharePrivateThread', () => ({
+  SharePrivateThread: () => <div>share-private-thread-panel</div>,
+}));
+
 // useGroupOwner is stubbed: no ownership loaded, so no Owner badge appears in
 // these tests. Ownership rendering is covered in the ownership.test.ts unit tests.
 vi.mock('@/services/groups/useGroupOwner', () => ({
@@ -722,6 +728,33 @@ describe('GroupMembers', () => {
       render(<GroupMembers groupId="test-group" />);
 
       expect(screen.queryByText('Permissions')).not.toBeInTheDocument();
+    });
+
+    it('offers an admin the private-thread share panel', () => {
+      mockUseGroupOwner.mockReturnValue(ownerReturn);
+      mockUseAuthStore.mockReturnValue({ pubkey: ADMIN_PUBKEY, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [ownerMember, adminMemberWithPermGrant],
+      });
+
+      render(<GroupMembers groupId="test-group" />);
+
+      expect(screen.getByText('share-private-thread-panel')).toBeInTheDocument();
+    });
+
+    it('does not offer it to a plain member: their hand-off would never be looked for', () => {
+      const plainPubkey = 'plain' + '0'.repeat(59);
+      mockUseGroupOwner.mockReturnValue(ownerReturn);
+      mockUseAuthStore.mockReturnValue({ pubkey: plainPubkey, isAuthenticated: true } as ReturnType<typeof useAuthStore>);
+      mockUseGroupMembers.mockReturnValue({
+        ...defaultHookReturn,
+        members: [ownerMember, { ...adminMemberWithPermGrant, pubkey: plainPubkey, isAdmin: false, permissions: [] }],
+      });
+
+      render(<GroupMembers groupId="test-group" />);
+
+      expect(screen.queryByText('share-private-thread-panel')).not.toBeInTheDocument();
     });
 
     it('shows Permissions button to a delegated admin on a legacy group', () => {

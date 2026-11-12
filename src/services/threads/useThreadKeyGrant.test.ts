@@ -1,218 +1,124 @@
 /**
- * @fileoverview Tests for useThreadKeyGrant.
+ * @fileoverview useThreadKeyGrant: a signer-backed admin hands over a thread key.
  *
- * The grant hook publishes a key-wrap event (kind 24242) containing a thread's
- * secret key NIP-44 encrypted to a recipient. These tests verify the happy
- * path, missing-key rejection, and missing-signer rejection.
+ * Until card #522 this hook published a kind 24242 key-wrap. That kind is
+ * ephemeral, so the relay never stored one and an offline member could never
+ * receive it. It now sends a bucketed hand-off through publishKeyHandoffViaSigner
+ * (tested with real crypto in threadPublish.test.ts) and records the grant
+ * for re-sending.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { generateSecretKey, getPublicKey } from 'nostr-tools';
-import { ThreadKeyStore, KEY_WRAP_KIND } from './threadKeyStore';
+import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
+import { ThreadKeyStore } from './threadKeyStore';
+import { openHandoffGrants } from './handoffGrants';
 
-// ---- Test keys ----
-
+const granterSk = generateSecretKey();
+const granterPk = getPublicKey(granterSk);
 const threadSk = generateSecretKey();
 const threadPk = getPublicKey(threadSk);
-const recipientPk = getPublicKey(generateSecretKey());
+const memberPk = getPublicKey(generateSecretKey());
 
-// ---- Mocks ----
+const selfCk = nip44.v2.utils.getConversationKey(granterSk, granterPk);
+const nip44Encrypt = async (_pk: string, pt: string) => nip44.v2.encrypt(pt, selfCk);
+const nip44Decrypt = async (_pk: string, ct: string) => nip44.v2.decrypt(ct, selfCk);
 
-const mockPublish = vi.fn().mockResolvedValue(undefined);
-const mockCreateEvent = vi.fn(() => ({
-  kind: 0,
-  content: '',
-  tags: [] as string[][],
-}));
-const mockNip44Encrypt = vi.fn().mockResolvedValue('encrypted-content');
-
-vi.mock('@/services/nostr', () => ({
-  useNdk: () => ({
-    publish: mockPublish,
-    createEvent: mockCreateEvent,
-    isConnected: true,
-    subscribe: vi.fn(),
-    service: null,
-    isConnecting: false,
-    relayStatuses: new Map(),
-    reconnect: vi.fn(),
-    fetchEvents: vi.fn(),
-    fetchFromOwnRelays: null,
-  }),
+const published = vi.hoisted(() => ({ calls: [] as unknown[][], fail: null as Error | null }));
+vi.mock('./threadPublish', () => ({
+  publishKeyHandoffViaSigner: async (...args: unknown[]) => {
+    if (published.fail) throw published.fail;
+    published.calls.push(args);
+  },
 }));
 
 const testKeyStore = new ThreadKeyStore();
-testKeyStore.set(threadPk, threadSk);
+vi.mock('./useThreadKeyStore', () => ({ useThreadKeyStore: () => testKeyStore }));
 
-vi.mock('./useThreadKeyStore', () => ({
-  useThreadKeyStore: () => testKeyStore,
-}));
+const auth = vi.hoisted(() => ({ signer: null as unknown }));
+vi.mock('@/components/auth/AuthProvider', () => ({ useAuth: () => ({ signer: auth.signer }) }));
+vi.mock('@/stores/authStore', () => {
+  const state = { pubkey: '' };
+  const useAuthStore = (sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state);
+  useAuthStore.getState = () => state;
+  useAuthStore.state = state;
+  return { useAuthStore };
+});
 
-vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({
-    signer: {
-      nip44Encrypt: mockNip44Encrypt,
-      nip44Decrypt: vi.fn(),
-      getPublicKey: vi.fn(),
-      signEvent: vi.fn(),
-      encrypt: vi.fn(),
-      decrypt: vi.fn(),
-    },
-    pubkey: '1'.repeat(64),
-    isAuthenticated: true,
-    isLoading: false,
-    error: null,
-    nip07Available: false,
-    loginNip07: vi.fn(),
-    loginNip46: vi.fn(),
-    logout: vi.fn(),
-    signEvent: vi.fn(),
-  }),
-}));
+const nip46Signer = {
+  getPublicKey: async () => granterPk,
+  signEvent: vi.fn(),
+  encrypt: vi.fn(),
+  decrypt: vi.fn(),
+  nip44Encrypt,
+  nip44Decrypt,
+  sendRequest: vi.fn(),
+};
+const extensionSigner: Partial<typeof nip46Signer> = { ...nip46Signer };
+delete extensionSigner.sendRequest;
 
-// ---- Tests ----
+beforeEach(async () => {
+  const { useAuthStore } = await import('@/stores/authStore');
+  (useAuthStore as unknown as { state: { pubkey: string } }).state.pubkey = granterPk;
+  auth.signer = nip46Signer;
+  published.calls = [];
+  published.fail = null;
+  testKeyStore.clear();
+  testKeyStore.set(threadPk, threadSk);
+  testKeyStore.setName(threadPk, 'team-thread');
+  localStorage.clear();
+});
 
 describe('useThreadKeyGrant', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockPublish.mockResolvedValue(undefined);
-    mockNip44Encrypt.mockResolvedValue('encrypted-content');
-  });
-
-  it('publishes a key-wrap event with the right kind, tags and encrypted content', async () => {
+  it('sends the hand-off through the signer, with the thread id it was received under', async () => {
     const { useThreadKeyGrant } = await import('./useThreadKeyGrant');
     const { result } = renderHook(() => useThreadKeyGrant());
-
     expect(result.current.canGrant).toBe(true);
 
-    await act(async () => {
-      await result.current.grantKey(threadPk, recipientPk);
-    });
+    await act(() => result.current.grantKey(threadPk, memberPk));
 
-    // The signer was asked to encrypt the thread key to the recipient
-    expect(mockNip44Encrypt).toHaveBeenCalledOnce();
-    expect(mockNip44Encrypt).toHaveBeenCalledWith(
-      recipientPk,
-      expect.stringMatching(/^[0-9a-f]{64}$/),
-    );
-
-    // An event was created and published
-    expect(mockCreateEvent).toHaveBeenCalledOnce();
-    expect(mockPublish).toHaveBeenCalledOnce();
-
-    const publishedEvent = mockPublish.mock.calls[0][0];
-    expect(publishedEvent.kind).toBe(KEY_WRAP_KIND);
-    expect(publishedEvent.content).toBe('encrypted-content');
-    expect(publishedEvent.tags).toContainEqual(['d', threadPk]);
-    expect(publishedEvent.tags).toContainEqual(['p', recipientPk]);
+    expect(published.calls).toHaveLength(1);
+    const [tid, secret, signer, member] = published.calls[0];
+    expect(tid).toBe('team-thread');
+    expect(secret).toBe(testKeyStore.exportHex(threadPk));
+    expect(signer).toBe(nip46Signer);
+    expect(member).toBe(memberPk);
   });
 
-  it('throws when the thread key is not held', async () => {
-    vi.resetModules();
-    const emptyStore = new ThreadKeyStore();
-    vi.doMock('./useThreadKeyStore', () => ({
-      useThreadKeyStore: () => emptyStore,
-    }));
-    vi.doMock('@/services/nostr', () => ({
-      useNdk: () => ({
-        publish: mockPublish,
-        createEvent: mockCreateEvent,
-        isConnected: true,
-        subscribe: vi.fn(),
-        service: null,
-        isConnecting: false,
-        relayStatuses: new Map(),
-        reconnect: vi.fn(),
-        fetchEvents: vi.fn(),
-        fetchFromOwnRelays: null,
-      }),
-    }));
-    vi.doMock('@/components/auth/AuthProvider', () => ({
-      useAuth: () => ({
-        signer: {
-          nip44Encrypt: mockNip44Encrypt,
-          nip44Decrypt: vi.fn(),
-          getPublicKey: vi.fn(),
-          signEvent: vi.fn(),
-          encrypt: vi.fn(),
-          decrypt: vi.fn(),
-        },
-        pubkey: '1'.repeat(64),
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-        nip07Available: false,
-        loginNip07: vi.fn(),
-        loginNip46: vi.fn(),
-        logout: vi.fn(),
-        signEvent: vi.fn(),
-      }),
-    }));
+  it('records the grant so it is sent again on the following days', async () => {
+    const { useThreadKeyGrant } = await import('./useThreadKeyGrant');
+    const { result } = renderHook(() => useThreadKeyGrant());
+    await act(() => result.current.grantKey(threadPk, memberPk));
 
+    const grants = await openHandoffGrants(granterPk, { encrypt: nip44Encrypt, decrypt: nip44Decrypt }, () => true);
+    const tomorrow = Math.floor(Date.now() / 1000 / 86400) + 1;
+    expect(grants.due(tomorrow)).toMatchObject([{ thread: threadPk, member: memberPk, tid: 'team-thread' }]);
+  });
+
+  it('records nothing when the send failed', async () => {
+    published.fail = new Error('no relay took it');
     const { useThreadKeyGrant } = await import('./useThreadKeyGrant');
     const { result } = renderHook(() => useThreadKeyGrant());
 
-    const unknownThreadPk = getPublicKey(generateSecretKey());
-    await expect(
-      act(async () => {
-        await result.current.grantKey(unknownThreadPk, recipientPk);
-      })
-    ).rejects.toThrow(/thread key not held/);
-
-    expect(mockPublish).not.toHaveBeenCalled();
+    await expect(result.current.grantKey(threadPk, memberPk)).rejects.toThrow(/no relay took it/);
+    expect(localStorage.getItem('cloistr:handoff-grants:' + granterPk)).toBeNull();
   });
 
-  it('throws when the signer has no NIP-44 encrypt', async () => {
-    vi.resetModules();
-    vi.doMock('./useThreadKeyStore', () => ({
-      useThreadKeyStore: () => testKeyStore,
-    }));
-    vi.doMock('@/services/nostr', () => ({
-      useNdk: () => ({
-        publish: mockPublish,
-        createEvent: mockCreateEvent,
-        isConnected: true,
-        subscribe: vi.fn(),
-        service: null,
-        isConnecting: false,
-        relayStatuses: new Map(),
-        reconnect: vi.fn(),
-        fetchEvents: vi.fn(),
-        fetchFromOwnRelays: null,
-      }),
-    }));
-    vi.doMock('@/components/auth/AuthProvider', () => ({
-      useAuth: () => ({
-        signer: {
-          // No nip44Encrypt
-          nip44Decrypt: vi.fn(),
-          getPublicKey: vi.fn(),
-          signEvent: vi.fn(),
-          encrypt: vi.fn(),
-          decrypt: vi.fn(),
-        },
-        pubkey: '1'.repeat(64),
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-        nip07Available: false,
-        loginNip07: vi.fn(),
-        loginNip46: vi.fn(),
-        logout: vi.fn(),
-        signEvent: vi.fn(),
-      }),
-    }));
-
+  it('cannot grant with a browser-extension signer, and says why', async () => {
+    auth.signer = extensionSigner;
     const { useThreadKeyGrant } = await import('./useThreadKeyGrant');
     const { result } = renderHook(() => useThreadKeyGrant());
 
-    await expect(
-      act(async () => {
-        await result.current.grantKey(threadPk, recipientPk);
-      })
-    ).rejects.toThrow(/NIP-44 encryption/);
+    expect(result.current.canGrant).toBe(false);
+    await expect(result.current.grantKey(threadPk, memberPk)).rejects.toThrow(/cannot hand over thread keys/);
+    expect(published.calls).toHaveLength(0);
+  });
 
-    expect(mockPublish).not.toHaveBeenCalled();
+  it('refuses a thread whose key is not held', async () => {
+    const { useThreadKeyGrant } = await import('./useThreadKeyGrant');
+    const { result } = renderHook(() => useThreadKeyGrant());
+
+    await expect(result.current.grantKey(getPublicKey(generateSecretKey()), memberPk)).rejects.toThrow(/do not hold/);
+    expect(published.calls).toHaveLength(0);
   });
 });

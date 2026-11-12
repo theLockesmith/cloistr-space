@@ -35,7 +35,7 @@ export {
   useThreadKeyLoader,
 } from './useThreadKeyStore';
 
-export { useThreadKeyGrant } from './useThreadKeyGrant';
+export { useThreadKeyGrant, useHandoffResender } from './useThreadKeyGrant';
 
 // Bucketed blind mailbox — sealed thread read/write via kind 1059 gift wraps
 export {

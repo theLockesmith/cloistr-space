@@ -18,6 +18,7 @@ import {
   clearThreadKeys,
   type StorageAdapter,
 } from './threadKeyPersistence';
+import { clearHandoffGrants } from './handoffGrants';
 
 /**
  * Singleton — one store per app lifetime, cleared on logout.
@@ -117,6 +118,7 @@ export function useThreadKeyLoader(): { loaded: boolean; keyCount: number } {
       if (!pubkey) {
         const storage = getStorageAdapter();
         if (storage) clearThreadKeys(prev, storage);
+        clearHandoffGrants(prev);
       }
     }
     prevPubkeyRef.current = pubkey;
