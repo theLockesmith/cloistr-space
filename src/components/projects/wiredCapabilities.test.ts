@@ -91,3 +91,22 @@ describe('emoji list capabilities are reachable', () => {
     expect(callers.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Saved private-thread keys are restored only by useThreadKeyLoader. The P3
+ * screens (2026-10-26) removed its one caller, and for two weeks every key a
+ * user had accepted was saved on each hand-off and never read back: a private
+ * thread lasted as long as its hand-off stayed on the relays.
+ */
+describe('saved thread keys are restored', () => {
+  it('useThreadKeyLoader has a caller outside the threads service', () => {
+    const callers = files.filter(
+      (f) => !f.path.includes(join('services', 'threads')) && f.text.includes('useThreadKeyLoader()')
+    );
+
+    expect(
+      callers.length,
+      'useThreadKeyLoader is exported and nothing mounts it: saved keys are never restored'
+    ).toBeGreaterThan(0);
+  });
+});
