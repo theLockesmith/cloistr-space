@@ -7,6 +7,7 @@ import { NotificationBadge } from './NotificationBadge';
 import { ToastContainer } from '@/components/common/Toast';
 import { useContactsSync } from '@/services/crdt';
 import { useRelayPrefsSync } from '@/services/nostr';
+import { useThreadKeyLoader } from '@/services/threads/useThreadKeyStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 
 /**
@@ -33,6 +34,10 @@ export function MainLayout() {
   // hardcoded default and the relay list a user curates on the Profile page is
   // never read back.
   useRelayPrefsSync();
+
+  // Restore the user's saved private-thread keys on every page, so a private
+  // thread outlives its hand-off on the relays and an admin can hand its key on.
+  useThreadKeyLoader();
 
   // Initialize contacts sync — auto-syncs on auth + connection.
   useContactsSync({
