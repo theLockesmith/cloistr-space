@@ -12,7 +12,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { generateSecretKey, getPublicKey, verifyEvent, type Event, type EventTemplate, type VerifiedEvent } from 'nostr-tools';
-import { GIFT_WRAP_KIND } from './giftWrap';
+import { bytesToHex } from 'nostr-tools/utils';
+import { GIFT_WRAP_KIND, tryUnwrapHandoff } from './giftWrap';
+import { computeHandoffBucket, ecdhHex, getWindowId, WINDOW_SECONDS } from './bucketCrypto';
+import { signerHandoffBuckets } from './signerEcdh';
 import type { WrapConnection } from './wrapRelay';
 
 interface FakeRelay {
@@ -151,5 +154,101 @@ describe('publishKeyHandoff: a hand-off goes out as its own one-time key', () =>
     expect(r.stored[0].kind).toBe(GIFT_WRAP_KIND);
     expect(r.auths[0].pubkey).toBe(r.stored[0].pubkey);
     expect(r.auths[0].pubkey).not.toBe(getPublicKey(granterSk));
+  });
+});
+
+/**
+ * A granter whose key lives in a signer (card #522). Like the cloistr signer,
+ * this fake never hands out its secret key; it answers `cloistr_ecdh_tag` by
+ * computing the tag itself, and has no raw key for the code under test to use.
+ */
+function remoteSigner(sk: Uint8Array, opts: { noTag?: boolean } = {}) {
+  const asked: string[][] = [];
+  return {
+    asked,
+    getPublicKey: async () => getPublicKey(sk),
+    signEvent: async () => {
+      throw new Error('a hand-off must not be signed by the granter');
+    },
+    encrypt: async () => '',
+    decrypt: async () => '',
+    sendRequest: async (method: string, params: string[]) => {
+      asked.push([method, ...params]);
+      if (method !== 'cloistr_ecdh_tag' || opts.noTag) throw new Error(`unsupported method: ${method}`);
+      return computeHandoffBucket(ecdhHex(sk, params[0]), Number(params[1]));
+    },
+  };
+}
+
+describe('publishKeyHandoffViaSigner: a signer-backed admin hands a key to an offline member', () => {
+  const granterSk = generateSecretKey();
+  const granterPk = getPublicKey(granterSk);
+  const memberSk = generateSecretKey();
+  const memberPk = getPublicKey(memberSk);
+  const threadSecretHex = bytesToHex(generateSecretKey());
+
+  it('files it where the member looks, and the member opens it later from the relay', async () => {
+    const { publishKeyHandoffViaSigner } = await import('./threadPublish');
+    const { relays, open } = fakeRelays([URL_A]);
+    const now = Math.floor(Date.now() / 1000);
+
+    await publishKeyHandoffViaSigner('team-thread', threadSecretHex, remoteSigner(granterSk), memberPk, { relayUrls: [URL_A], open, nowSec: now });
+
+    // The member was not connected; the hand-off waits on the relay.
+    const stored = relays.get(URL_A)!.stored;
+    expect(stored).toHaveLength(1);
+    const wrap = stored[0];
+    expect(wrap.kind).toBe(GIFT_WRAP_KIND);
+    expect(wrap.pubkey).not.toBe(granterPk);
+
+    // A member holding their own key computes the mailbox from the granter's pubkey.
+    const memberBucket = computeHandoffBucket(ecdhHex(memberSk, granterPk), getWindowId(now));
+    expect(wrap.tags).toContainEqual(['t', memberBucket]);
+    expect(tryUnwrapHandoff(wrap, memberSk, [granterPk])).toMatchObject({
+      threadId: 'team-thread',
+      threadSecretHex,
+      granterPubkey: granterPk,
+    });
+
+    // A member whose key is ALSO in a signer finds the same mailbox through it.
+    const found = await signerHandoffBuckets(remoteSigner(memberSk), [granterPk], getWindowId(now));
+    expect(found).toContain(memberBucket);
+  });
+
+  it('uses one window for the tag, the expiry and the timestamp, even one second before midnight', async () => {
+    const { publishKeyHandoffViaSigner } = await import('./threadPublish');
+    const { relays, open } = fakeRelays([URL_A]);
+    const window = getWindowId(Math.floor(Date.now() / 1000));
+    const lastSecond = (window + 1) * WINDOW_SECONDS - 1;
+    const signer = remoteSigner(granterSk);
+
+    await publishKeyHandoffViaSigner('team-thread', threadSecretHex, signer, memberPk, { relayUrls: [URL_A], open, nowSec: lastSecond });
+
+    const wrap = relays.get(URL_A)!.stored[0];
+    expect(signer.asked).toEqual([['cloistr_ecdh_tag', memberPk, String(window)]]);
+    expect(wrap.tags).toContainEqual(['expiration', String((window + 2) * WINDOW_SECONDS)]);
+    expect(getWindowId(wrap.created_at)).toBe(window);
+  });
+
+  it('publishes nothing when the signer cannot give the mailbox tag', async () => {
+    const { publishKeyHandoffViaSigner } = await import('./threadPublish');
+    const { relays, open } = fakeRelays([URL_A]);
+
+    await expect(
+      publishKeyHandoffViaSigner('team-thread', threadSecretHex, remoteSigner(granterSk, { noTag: true }), memberPk, { relayUrls: [URL_A], open }),
+    ).rejects.toThrow(/could not work out the hand-off mailbox/);
+    expect(relays.get(URL_A)!.connections).toBe(0);
+  });
+
+  it('publishes nothing for a browser-extension signer, which has no tag method', async () => {
+    const { publishKeyHandoffViaSigner } = await import('./threadPublish');
+    const { relays, open } = fakeRelays([URL_A]);
+    const extension: Partial<ReturnType<typeof remoteSigner>> = remoteSigner(granterSk);
+    delete extension.sendRequest;
+
+    await expect(
+      publishKeyHandoffViaSigner('team-thread', threadSecretHex, extension as Parameters<typeof publishKeyHandoffViaSigner>[2], memberPk, { relayUrls: [URL_A], open }),
+    ).rejects.toThrow(/could not work out the hand-off mailbox/);
+    expect(relays.get(URL_A)!.connections).toBe(0);
   });
 });

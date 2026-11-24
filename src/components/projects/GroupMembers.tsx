@@ -12,6 +12,7 @@ import { useAuthorProfiles } from '@/services/profile/useAuthorProfiles';
 import { profilePath } from '@/services/nostr';
 import { can } from '@/services/groups/permissions';
 import { MemberPermissions } from './MemberPermissions';
+import { SharePrivateThread } from './SharePrivateThread';
 import { useAuthStore } from '@/stores/authStore';
 import type { AuthorProfile } from '@/types/social';
 import type { AdminPermission } from '@/types/groups';
@@ -172,6 +173,17 @@ export function GroupMembers({ groupId }: GroupMembersProps) {
             </p>
           )}
         </div>
+      )}
+
+      {pubkey && members.some((m) => m.pubkey === pubkey && m.isAdmin) && (
+        <SharePrivateThread
+          members={members}
+          myPubkey={pubkey}
+          nameOf={(pk) => {
+            const p = profiles.get(pk);
+            return p?.displayName || p?.name || formatPubkey(pk);
+          }}
+        />
       )}
 
       {/* Members list */}

@@ -8,6 +8,7 @@ import { ToastContainer } from '@/components/common/Toast';
 import { useContactsSync } from '@/services/crdt';
 import { useRelayPrefsSync } from '@/services/nostr';
 import { useThreadKeyLoader } from '@/services/threads/useThreadKeyStore';
+import { useHandoffResender } from '@/services/threads/useThreadKeyGrant';
 import { useAuth } from '@/components/auth/AuthProvider';
 
 /**
@@ -38,6 +39,8 @@ export function MainLayout() {
   // Restore the user's saved private-thread keys on every page, so a private
   // thread outlives its hand-off on the relays and an admin can hand its key on.
   useThreadKeyLoader();
+  // Send recent private-thread hand-offs again, for members who were away.
+  useHandoffResender();
 
   // Initialize contacts sync — auto-syncs on auth + connection.
   useContactsSync({

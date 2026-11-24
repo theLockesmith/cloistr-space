@@ -300,12 +300,28 @@ export function wrapKeyHandoffWithKey(
   nowSec?: number,
 ): SignedWrap {
   const now = nowSec ?? Math.floor(Date.now() / 1000);
-  const wid = getWindowId(now);
-  const granterPubkey = getPublicKey(granterSk);
+  const bucket = computeHandoffBucket(ecdhHex(granterSk, memberPubkey), getWindowId(now));
+  return wrapKeyHandoffInBucket(threadId, threadSecretHex, getPublicKey(granterSk), memberPubkey, bucket, now);
+}
 
-  const ecdh = ecdhHex(granterSk, memberPubkey);
-  const bucket = computeHandoffBucket(ecdh, wid);
-  const expiry = expiryTimestamp(wid);
+/**
+ * Build a hand-off whose mailbox tag is already known. The tag is the only
+ * part that needs the granter's secret key, so a granter whose key stays in
+ * a signer gets it from `cloistr_ecdh_tag` and builds the rest here.
+ *
+ * `bucket` must be the hand-off bucket for the window of `nowSec`: the tag,
+ * the expiry and the jittered created_at all describe one window, and a tag
+ * from another window files the hand-off where the member never looks.
+ */
+export function wrapKeyHandoffInBucket(
+  threadId: string,
+  threadSecretHex: string,
+  granterPubkey: string,
+  memberPubkey: string,
+  bucket: string,
+  nowSec: number,
+): SignedWrap {
+  const expiry = expiryTimestamp(getWindowId(nowSec));
 
   const oneTimeSk = generateSecretKey();
   const conversationKey = nip44.v2.utils.getConversationKey(oneTimeSk, memberPubkey);
@@ -317,7 +333,7 @@ export function wrapKeyHandoffWithKey(
       kind: GIFT_WRAP_KIND,
       content: encrypted,
       tags: [['t', bucket], ['expiration', String(expiry)]],
-      created_at: jitteredTimestamp(now),
+      created_at: jitteredTimestamp(nowSec),
     },
     oneTimeSk,
   );

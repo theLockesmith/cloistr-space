@@ -110,3 +110,23 @@ describe('saved thread keys are restored', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Card #522: the grant hook existed, published a kind nothing stores, and had
+ * no caller, so no admin could hand anyone a private thread's key.
+ */
+describe('private-thread hand-off is reachable', () => {
+  for (const hook of ['useThreadKeyGrant()', 'useHandoffResender()']) {
+    it(`${hook} has a caller outside the threads service`, () => {
+      const callers = files.filter(
+        (f) => !f.path.includes(join('services', 'threads')) && f.text.includes(hook)
+      );
+
+      expect(callers.length, `${hook} is exported and nothing calls it`).toBeGreaterThan(0);
+    });
+  }
+
+  it('the share panel is rendered, not merely defined', () => {
+    expect(callersOf('<SharePrivateThread', 'SharePrivateThread.tsx').length).toBeGreaterThan(0);
+  });
+});
